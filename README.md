@@ -26,6 +26,7 @@ npm run build -w @scufris/cpu-widget
 npm run watch -w @scufris/cpu-widget
 npm run watch -w @scufris/memory-widget
 DASHBOARDD_WIDGETS_DIR=.build/widgets cargo run -p dashboardd
+DASHBOARDD_STATE_FILE=/tmp/scufris-dashboard.json cargo run -p dashboardd
 RUST_LOG=dashboardd=debug,tower_http=debug cargo run -p dashboardd
 npm test
 ```
@@ -39,3 +40,8 @@ telemetry, widget discovery, and HTTP request logs. The browser console also
 reports connection, reconciliation, event, and widget mount activity.
 
 Open the Swagger API documentation at the logged `/docs` URL.
+
+Dashboard composition persists in `$XDG_STATE_HOME/scufris/dashboard.json`, or
+`$HOME/.local/state/scufris/dashboard.json` when `XDG_STATE_HOME` is unset.
+`DASHBOARDD_STATE_FILE` overrides both paths. An invalid saved composition stops
+startup instead of discarding state.

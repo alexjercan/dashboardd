@@ -23,7 +23,8 @@ use utoipa::ToSchema;
 
 use crate::{
     event::{DashboardError, DashboardEvent},
-    widget::WidgetConfig,
+    state::{DashboardStateFile, PersistedInstance, Position, StateStore},
+    widget::{WidgetConfig, WidgetsManager},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -74,6 +75,7 @@ struct Inner {
     instances: Mutex<HashMap<InstanceId, ManagedInstance>>,
     events: broadcast::Sender<DashboardEvent>,
     next_id: AtomicU64,
+    store: Option<Arc<StateStore>>,
 }
 
 struct ManagedInstance {
@@ -101,6 +103,10 @@ pub enum InstanceError {
     InvalidLayout,
     #[error("layout overlaps another widget instance")]
     LayoutOccupied,
+    #[error("could not save dashboard composition")]
+    PersistenceFailed,
+    #[error("{0}")]
+    InvalidState(String),
 }
 
 impl InstanceManager {
@@ -112,8 +118,85 @@ impl InstanceManager {
                 instances: Mutex::new(HashMap::new()),
                 events,
                 next_id: AtomicU64::new(1),
+                store: None,
             }),
         }
+    }
+
+    pub async fn restore(
+        layout: DashboardLayout,
+        widgets: WidgetsManager,
+        store: Arc<StateStore>,
+    ) -> Result<Self, InstanceError> {
+        let saved = store.load().map_err(|error| {
+            InstanceError::InvalidState(format!("could not read state: {error}"))
+        })?;
+        let (events, _) = broadcast::channel(256);
+        let mut restored = Vec::new();
+        let mut next_id = 1;
+        if let Some(saved) = saved {
+            let mut layouts = Vec::new();
+            let mut ids = std::collections::HashSet::new();
+            for persisted in saved.instances {
+                if !ids.insert(persisted.id.clone()) {
+                    return Err(InstanceError::InvalidState(format!(
+                        "duplicate instance id {:?}",
+                        persisted.id
+                    )));
+                }
+                let config = widgets.get(&persisted.widget_id).ok_or_else(|| {
+                    InstanceError::InvalidState(format!(
+                        "instance {:?} references unknown widget {:?}",
+                        persisted.id, persisted.widget_id
+                    ))
+                })?;
+                let variant = config.variant(&persisted.variant_id).ok_or_else(|| {
+                    InstanceError::InvalidState(format!(
+                        "instance {:?} references unknown variant {:?}",
+                        persisted.id, persisted.variant_id
+                    ))
+                })?;
+                let instance_layout = InstanceLayout {
+                    column: persisted.position.column,
+                    row: persisted.position.row,
+                    width: variant.width,
+                    height: variant.height,
+                };
+                validate_layout(layout, &instance_layout, layouts.iter()).map_err(|error| {
+                    InstanceError::InvalidState(format!(
+                        "instance {:?} has invalid position: {error}",
+                        persisted.id
+                    ))
+                })?;
+                layouts.push(instance_layout.clone());
+                next_id = next_id.max(sequence_after(&persisted.id));
+                restored.push((
+                    Instance {
+                        id: persisted.id,
+                        widget_id: persisted.widget_id,
+                        variant_id: persisted.variant_id,
+                        layout: instance_layout,
+                    },
+                    config,
+                ));
+            }
+        }
+        let instances = restored
+            .into_iter()
+            .map(|(resource, config)| {
+                let backend = WidgetBackend::start(config, resource.id.clone(), events.clone());
+                (resource.id.clone(), ManagedInstance { resource, backend })
+            })
+            .collect();
+        Ok(Self {
+            inner: Arc::new(Inner {
+                layout,
+                instances: Mutex::new(instances),
+                events,
+                next_id: AtomicU64::new(next_id),
+                store: Some(store),
+            }),
+        })
     }
 
     pub fn layout(&self) -> DashboardLayout {
@@ -184,6 +267,12 @@ impl InstanceManager {
             variant_id,
             layout,
         };
+        self.persist(
+            instances
+                .values()
+                .map(|instance| &instance.resource)
+                .chain(std::iter::once(&resource)),
+        )?;
         tracing::info!(
             instance_id = %resource.id,
             widget_id = %resource.widget_id,
@@ -230,10 +319,19 @@ impl InstanceManager {
                 .filter(|(id, _)| id.as_str() != instance_id)
                 .map(|(_, instance)| &instance.resource.layout),
         )?;
+        let mut resource = instances[instance_id].resource.clone();
+        resource.layout = layout;
+        self.persist(
+            instances
+                .iter()
+                .filter(|(id, _)| id.as_str() != instance_id)
+                .map(|(_, instance)| &instance.resource)
+                .chain(std::iter::once(&resource)),
+        )?;
         let instance = instances
             .get_mut(instance_id)
             .expect("instance existence is checked");
-        instance.resource.layout = layout;
+        instance.resource = resource;
         let resource = instance.resource.clone();
         drop(instances);
 
@@ -286,6 +384,19 @@ impl InstanceManager {
             return Err(InstanceError::LayoutOccupied);
         }
 
+        let mut proposed = instances
+            .values()
+            .map(|instance| instance.resource.clone())
+            .collect::<Vec<_>>();
+        for instance in &mut proposed {
+            if instance.id == source_id {
+                instance.layout = source_next.clone();
+            } else if instance.id == target_id {
+                instance.layout = target_next.clone();
+            }
+        }
+        self.persist(proposed.iter())?;
+
         instances
             .get_mut(source_id)
             .expect("source existence is checked")
@@ -311,13 +422,20 @@ impl InstanceManager {
     }
 
     pub async fn destroy(&self, instance_id: &str) -> Result<(), InstanceError> {
-        let instance = self
-            .inner
-            .instances
-            .lock()
-            .await
+        let mut instances = self.inner.instances.lock().await;
+        if !instances.contains_key(instance_id) {
+            return Err(InstanceError::UnknownInstance);
+        }
+        self.persist(
+            instances
+                .iter()
+                .filter(|(id, _)| id.as_str() != instance_id)
+                .map(|(_, instance)| &instance.resource),
+        )?;
+        let instance = instances
             .remove(instance_id)
-            .ok_or(InstanceError::UnknownInstance)?;
+            .expect("instance existence is checked");
+        drop(instances);
 
         tracing::info!(instance_id, "destroying widget instance");
         let _ = self.inner.events.send(DashboardEvent::InstanceDestroyed {
@@ -325,6 +443,21 @@ impl InstanceManager {
         });
         instance.backend.shutdown().await;
         Ok(())
+    }
+
+    fn persist<'a>(
+        &self,
+        resources: impl Iterator<Item = &'a Instance>,
+    ) -> Result<(), InstanceError> {
+        let Some(store) = &self.inner.store else {
+            return Ok(());
+        };
+        let mut instances = resources.map(PersistedInstance::from).collect::<Vec<_>>();
+        instances.sort_by(|left, right| left.id.cmp(&right.id));
+        store.save(&DashboardStateFile::new(instances)).map_err(|error| {
+            tracing::error!(%error, path = %store.path().display(), "failed to persist dashboard composition");
+            InstanceError::PersistenceFailed
+        })
     }
 
     pub async fn send(&self, instance_id: &str, payload: Value) -> Result<(), InstanceError> {
@@ -356,6 +489,28 @@ impl InstanceManager {
             instance.backend.shutdown().await;
         }
     }
+}
+
+impl From<&Instance> for PersistedInstance {
+    fn from(instance: &Instance) -> Self {
+        Self {
+            id: instance.id.clone(),
+            widget_id: instance.widget_id.clone(),
+            variant_id: instance.variant_id.clone(),
+            position: Position {
+                column: instance.layout.column,
+                row: instance.layout.row,
+            },
+        }
+    }
+}
+
+fn sequence_after(instance_id: &str) -> u64 {
+    instance_id
+        .rsplit_once('-')
+        .and_then(|(_, suffix)| suffix.parse::<u64>().ok())
+        .and_then(|sequence| sequence.checked_add(1))
+        .unwrap_or(1)
 }
 
 fn validate_layout<'a>(

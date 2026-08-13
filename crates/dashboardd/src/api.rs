@@ -476,6 +476,10 @@ impl From<InstanceError> for ApiError {
             }
             InstanceError::InvalidLayout => (StatusCode::BAD_REQUEST, "invalid_layout"),
             InstanceError::LayoutOccupied => (StatusCode::CONFLICT, "layout_occupied"),
+            InstanceError::PersistenceFailed => {
+                (StatusCode::INTERNAL_SERVER_ERROR, "persistence_failed")
+            }
+            InstanceError::InvalidState(_) => (StatusCode::INTERNAL_SERVER_ERROR, "invalid_state"),
         };
 
         Self {

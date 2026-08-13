@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
-import { closeSync, existsSync, mkdirSync, openSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  unlinkSync,
+} from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
@@ -15,19 +21,12 @@ run("cargo", ["xtask", "widget", "prepare", "--all"]);
 
 const dashboardPort = await reservePort();
 const browserPort = await reservePort();
+const stateFile = path.join(artifacts, `dashboard-${process.pid}.json`);
 const dashboardUrl = `http://127.0.0.1:${dashboardPort}`;
 const baseUrl = `http://127.0.0.1:${browserPort}`;
 const logPath = path.join(artifacts, "dashboardd.log");
 const log = openSync(logPath, "w");
-const dashboardd = spawn(path.join(root, "target/debug/dashboardd"), [], {
-  cwd: root,
-  env: {
-    ...process.env,
-    DASHBOARDD_PORT: String(dashboardPort),
-    DASHBOARDD_WIDGETS_DIR: path.join(root, ".build/widgets"),
-  },
-  stdio: ["ignore", log, log],
-});
+let dashboardd = startDashboardd();
 let browser;
 const pages = [];
 const proxy = networkProxy(browserPort, dashboardPort);
@@ -276,6 +275,17 @@ try {
   }
 
   await requestGracefulStop(dashboardd);
+  assert.equal(existsSync(stateFile), true, "composition is persisted");
+  dashboardd = startDashboardd();
+  await waitForHealth(dashboardUrl);
+  await page.locator(`[data-instance-id="${cpuOne}"]`).waitFor();
+  assert.equal(
+    await instanceCount(page, baseUrl),
+    3,
+    "restart restores persisted composition with stable IDs",
+  );
+  await waitForTelemetry(page.locator(`[data-instance-id="${cpuOne}"]`));
+  await requestGracefulStop(dashboardd);
   console.log("browser integration scenarios passed");
 } catch (error) {
   for (const [index, page] of pages.entries()) {
@@ -293,6 +303,20 @@ try {
   await proxy.stop();
   await stopRecordedProcess(dashboardd);
   closeSync(log);
+  if (existsSync(stateFile)) unlinkSync(stateFile);
+}
+
+function startDashboardd() {
+  return spawn(path.join(root, "target/debug/dashboardd"), [], {
+    cwd: root,
+    env: {
+      ...process.env,
+      DASHBOARDD_PORT: String(dashboardPort),
+      DASHBOARDD_WIDGETS_DIR: path.join(root, ".build/widgets"),
+      DASHBOARDD_STATE_FILE: stateFile,
+    },
+    stdio: ["ignore", log, log],
+  });
 }
 
 async function dragToWidget(page, sourceId, targetId) {

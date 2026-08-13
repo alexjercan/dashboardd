@@ -3,6 +3,7 @@
 mod api;
 mod event;
 mod instance;
+mod state;
 mod widget;
 
 use std::{
@@ -11,6 +12,7 @@ use std::{
     io,
     net::{IpAddr, SocketAddr, TcpListener},
     path::PathBuf,
+    sync::Arc,
 };
 
 use rand::seq::SliceRandom;
@@ -20,6 +22,7 @@ use tracing_subscriber::EnvFilter;
 
 use crate::{
     instance::{DashboardLayout, InstanceManager},
+    state::StateStore,
     widget::WidgetsManager,
 };
 
@@ -39,6 +42,7 @@ struct Config {
     host: IpAddr,
     port: Option<u16>,
     widgets_dir: PathBuf,
+    state_file: PathBuf,
 }
 
 impl Config {
@@ -56,11 +60,13 @@ impl Config {
         let widgets_dir = env::var_os("DASHBOARDD_WIDGETS_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from(DEFAULT_WIDGETS_DIR));
+        let state_file = resolve_state_file()?;
 
         Ok(Self {
             host,
             port,
             widgets_dir,
+            state_file,
         })
     }
 }
@@ -72,9 +78,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let config = Config::from_environment()?;
     let (shutdown, _) = broadcast::channel(1);
+    let widgets = WidgetsManager::discover(&config.widgets_dir)?;
+    let store = Arc::new(StateStore::new(config.state_file.clone()));
+    let instances =
+        InstanceManager::restore(DashboardLayout::default(), widgets.clone(), store.clone())
+            .await
+            .map_err(|error| {
+                format!(
+                    "failed to load dashboard state {}: {error}",
+                    store.path().display()
+                )
+            })?;
     let state = AppState {
-        widgets: WidgetsManager::discover(&config.widgets_dir)?,
-        instances: InstanceManager::new(DashboardLayout::default()),
+        widgets,
+        instances,
         shutdown,
     };
     info!(
@@ -95,6 +112,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     info!("dashboardd stopped");
     Ok(())
+}
+
+fn resolve_state_file() -> Result<PathBuf, Box<dyn Error>> {
+    if let Some(path) = env::var_os("DASHBOARDD_STATE_FILE") {
+        return Ok(PathBuf::from(path));
+    }
+    if let Some(path) = env::var_os("XDG_STATE_HOME") {
+        return Ok(PathBuf::from(path).join("scufris/dashboard.json"));
+    }
+    let home = env::var_os("HOME")
+        .ok_or("HOME must be set when DASHBOARDD_STATE_FILE and XDG_STATE_HOME are unset")?;
+    Ok(PathBuf::from(home).join(".local/state/scufris/dashboard.json"))
 }
 
 fn bind_listener(config: &Config) -> io::Result<TcpListener> {
