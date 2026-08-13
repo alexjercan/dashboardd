@@ -13,6 +13,10 @@ app.innerHTML = `
                 Server status:
                 <span id="connection-status" class="text-dashboard-accent">Connecting...</span>
             </p>
+            <article class="mt-8 max-w-sm rounded border border-dashboard-border bg-dashboard-raised p-5">
+                <p class="text-sm uppercase tracking-widest text-dashboard-muted">CPU</p>
+                <p id="cpu-usage" class="mt-2 text-4xl font-semibold text-dashboard-bright">--.-%</p>
+            </article>
         </div>
     </section>
 `;
@@ -37,4 +41,9 @@ function renderStatus(status: ConnectionStatus): void {
         : "text-dashboard-accent";
 }
 
-connectDashboard(renderStatus);
+function renderCpuUsage(usage: number): void {
+  const usageElement = document.querySelector<HTMLElement>("#cpu-usage")!;
+  usageElement.textContent = `${usage.toFixed(1)}%`;
+}
+
+connectDashboard(renderStatus, renderCpuUsage);

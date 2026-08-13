@@ -1,6 +1,6 @@
 # Connect dashboard UI to WebSocket handshake
 
-- STATUS: IN_PROGRESS
+- STATUS: CLOSED
 - PRIORITY: 100
 - TAGS: dashboardd, websocket, frontend
 

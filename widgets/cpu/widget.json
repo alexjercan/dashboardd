@@ -1,0 +1,5 @@
+{
+  "id": "cpu",
+  "name": "CPU",
+  "backend": "../../target/debug/cpu"
+}

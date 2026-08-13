@@ -6,6 +6,8 @@ Local-first dashboard for monitoring and controlling a computer.
 
 ```bash
 nix develop
-cargo run -p dashboardd
 cd web && npm install && npm run build
+cd ..
+cargo build -p cpu
+cargo run -p dashboardd
 ```

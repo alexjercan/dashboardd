@@ -1,6 +1,8 @@
 //! The dashboard daemon entry point.
 //!
-//! This binary serves the built dashboard and exposes its health endpoint.
+//! This binary serves the dashboard and bridges browser sessions to widget backends.
+
+mod widget;
 
 use std::{
     env,
@@ -8,25 +10,40 @@ use std::{
     io,
     net::{IpAddr, SocketAddr, TcpListener},
     path::Path,
+    sync::Arc,
 };
 
 use axum::{
     Router,
-    extract::ws::{Message as WebSocketMessage, WebSocket, WebSocketUpgrade},
+    extract::{
+        State,
+        ws::{Message as WebSocketMessage, WebSocket, WebSocketUpgrade},
+    },
     http::StatusCode,
     response::IntoResponse,
     routing::get,
 };
-use dashboard_protocol::{DashboardToServer, ErrorData, ProtocolError, ServerToDashboard};
+use dashboard_protocol::{
+    DashboardToServer, ErrorData, ProtocolError, RequestId, ServerToDashboard, WidgetDescriptor,
+    WidgetId,
+};
 use rand::seq::SliceRandom;
-use tokio::net::TcpListener as TokioTcpListener;
+use tokio::{net::TcpListener as TokioTcpListener, sync::mpsc, task::JoinHandle};
 use tower_http::services::ServeDir;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
+use crate::widget::WidgetManifest;
+
 const DEFAULT_HOST: &str = "127.0.0.1";
 const PORT_RANGE: std::ops::Range<u16> = 7000..8000;
 const WEB_DIST: &str = "web/dist";
+const WIDGETS_DIR: &str = "widgets";
+
+#[derive(Clone)]
+struct AppState {
+    widgets: Arc<Vec<WidgetManifest>>,
+}
 
 #[derive(Debug)]
 struct Config {
@@ -58,13 +75,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let config = Config::from_environment()?;
     ensure_web_dist_exists()?;
+    let widgets = widget::discover_widgets(Path::new(WIDGETS_DIR))?;
+    info!(count = widgets.len(), "discovered widgets");
 
     let listener = bind_listener(&config)?;
     let address = listener.local_addr()?;
     let app = Router::new()
         .route("/health", get(health))
         .route("/ws", get(websocket))
-        .fallback_service(ServeDir::new(WEB_DIST).append_index_html_on_directories(true));
+        .fallback_service(ServeDir::new(WEB_DIST).append_index_html_on_directories(true))
+        .with_state(AppState {
+            widgets: Arc::new(widgets),
+        });
 
     info!(%address, "dashboardd listening");
     axum::serve(TokioTcpListener::from_std(listener)?, app)
@@ -115,8 +137,8 @@ async fn health() -> StatusCode {
     StatusCode::OK
 }
 
-async fn websocket(upgrade: WebSocketUpgrade) -> impl IntoResponse {
-    upgrade.on_upgrade(handle_socket)
+async fn websocket(State(state): State<AppState>, upgrade: WebSocketUpgrade) -> impl IntoResponse {
+    upgrade.on_upgrade(move |socket| handle_socket(socket, state))
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -126,56 +148,136 @@ enum SessionState {
     Ready,
 }
 
-async fn handle_socket(mut socket: WebSocket) {
+#[derive(Debug, PartialEq, Eq)]
+enum SessionAction {
+    Reply(ServerToDashboard),
+    StartWidget {
+        request_id: RequestId,
+        widget_id: WidgetId,
+    },
+}
+
+async fn handle_socket(mut socket: WebSocket, app: AppState) {
     let mut state = SessionState::default();
+    let (updates_tx, mut updates_rx) = mpsc::unbounded_channel();
+    let mut backend: Option<JoinHandle<()>> = None;
 
-    while let Some(Ok(websocket_message)) = socket.recv().await {
-        let WebSocketMessage::Text(text) = websocket_message else {
-            continue;
-        };
+    loop {
+        tokio::select! {
+            browser_message = socket.recv() => {
+                let Some(Ok(WebSocketMessage::Text(text))) = browser_message else {
+                    break;
+                };
 
-        let response = match dashboard_protocol::parse::<DashboardToServer>(text.as_str()) {
-            Ok(request) => {
-                let (next_state, response) = process_message(state, request);
-                state = next_state;
-                response
+                let action = match dashboard_protocol::parse::<DashboardToServer>(text.as_str()) {
+                    Ok(request) => {
+                        let descriptors = app.widgets.iter().map(|widget| widget.descriptor.clone()).collect();
+                        let (next_state, action) = process_message(state, request, descriptors);
+                        state = next_state;
+                        action
+                    }
+                    Err(error) => SessionAction::Reply(protocol_error(
+                        None,
+                        protocol_error_code(&error),
+                        error.to_string(),
+                    )),
+                };
+
+                let response = match action {
+                    SessionAction::Reply(response) => response,
+                    SessionAction::StartWidget { request_id, widget_id } => {
+                        if backend.is_some() {
+                            protocol_error(
+                                Some(request_id),
+                                "instance_exists",
+                                "this dashboard session already has a widget instance",
+                            )
+                        } else if let Some(manifest) = app.widgets.iter().find(|widget| widget.descriptor.id == widget_id) {
+                            let instance_id = format!("{widget_id}-1");
+                            backend = Some(widget::start_backend(
+                                Arc::new(manifest.clone()),
+                                instance_id.clone(),
+                                updates_tx.clone(),
+                            ));
+                            ServerToDashboard::InstanceCreated {
+                                request_id,
+                                instance_id,
+                                widget_id,
+                            }
+                        } else {
+                            protocol_error(Some(request_id), "unknown_widget", "widget was not found")
+                        }
+                    }
+                };
+
+                if send_dashboard_message(&mut socket, response).await.is_err() {
+                    break;
+                }
             }
-            Err(error) => protocol_error(protocol_error_code(&error), error.to_string()),
-        };
-        let Ok(encoded) = dashboard_protocol::serialize(response) else {
-            tracing::error!("failed to serialize WebSocket response");
-            break;
-        };
-
-        if socket
-            .send(WebSocketMessage::Text(encoded.into()))
-            .await
-            .is_err()
-        {
-            break;
+            Some(update) = updates_rx.recv(), if backend.is_some() => {
+                if send_dashboard_message(&mut socket, update).await.is_err() {
+                    break;
+                }
+            }
         }
     }
+
+    if let Some(backend) = backend {
+        backend.abort();
+    }
+}
+
+async fn send_dashboard_message(
+    socket: &mut WebSocket,
+    message: ServerToDashboard,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let encoded = dashboard_protocol::serialize(message)?;
+    socket.send(WebSocketMessage::Text(encoded.into())).await?;
+    Ok(())
 }
 
 fn process_message(
     state: SessionState,
     request: DashboardToServer,
-) -> (SessionState, ServerToDashboard) {
+    widgets: Vec<WidgetDescriptor>,
+) -> (SessionState, SessionAction) {
     match request {
-        DashboardToServer::Hello {} => (SessionState::Ready, ServerToDashboard::Ready {}),
+        DashboardToServer::Hello {} => (
+            SessionState::Ready,
+            SessionAction::Reply(ServerToDashboard::Ready {}),
+        ),
         _ if state == SessionState::AwaitingHello => (
             state,
-            protocol_error(
+            SessionAction::Reply(protocol_error(
+                None,
                 "handshake_required",
                 "send hello before other dashboard messages",
-            ),
+            )),
+        ),
+        DashboardToServer::ListWidgets { request_id } => (
+            state,
+            SessionAction::Reply(ServerToDashboard::Widgets {
+                request_id,
+                widgets,
+            }),
+        ),
+        DashboardToServer::CreateInstance {
+            request_id,
+            widget_id,
+        } => (
+            state,
+            SessionAction::StartWidget {
+                request_id,
+                widget_id,
+            },
         ),
         _ => (
             state,
-            protocol_error(
+            SessionAction::Reply(protocol_error(
+                None,
                 "not_implemented",
                 "dashboard message is not implemented yet",
-            ),
+            )),
         ),
     }
 }
@@ -187,9 +289,13 @@ fn protocol_error_code(error: &ProtocolError) -> &'static str {
     }
 }
 
-fn protocol_error(code: impl Into<String>, message: impl Into<String>) -> ServerToDashboard {
+fn protocol_error(
+    request_id: Option<RequestId>,
+    code: impl Into<String>,
+    message: impl Into<String>,
+) -> ServerToDashboard {
     ServerToDashboard::Error {
-        request_id: None,
+        request_id,
         error: ErrorData {
             code: code.into(),
             message: message.into(),
@@ -209,29 +315,55 @@ mod tests {
 
     #[test]
     fn hello_returns_ready_and_completes_the_handshake() {
-        let (state, response) =
-            process_message(SessionState::default(), DashboardToServer::Hello {});
+        let (state, action) =
+            process_message(SessionState::default(), DashboardToServer::Hello {}, vec![]);
 
         assert_eq!(state, SessionState::Ready);
-        assert_eq!(response, ServerToDashboard::Ready {});
+        assert_eq!(action, SessionAction::Reply(ServerToDashboard::Ready {}));
+    }
+
+    #[test]
+    fn ready_session_lists_widgets() {
+        let descriptor = WidgetDescriptor {
+            id: "cpu".into(),
+            name: "CPU".into(),
+        };
+        let (state, action) = process_message(
+            SessionState::Ready,
+            DashboardToServer::ListWidgets {
+                request_id: "widgets-1".into(),
+            },
+            vec![descriptor.clone()],
+        );
+
+        assert_eq!(state, SessionState::Ready);
+        assert_eq!(
+            action,
+            SessionAction::Reply(ServerToDashboard::Widgets {
+                request_id: "widgets-1".into(),
+                widgets: vec![descriptor],
+            })
+        );
     }
 
     #[test]
     fn messages_before_hello_return_an_error() {
-        let (state, response) = process_message(
+        let (state, action) = process_message(
             SessionState::default(),
             DashboardToServer::ListWidgets {
                 request_id: "request-1".into(),
             },
+            vec![],
         );
 
         assert_eq!(state, SessionState::AwaitingHello);
         assert_eq!(
-            response,
-            protocol_error(
+            action,
+            SessionAction::Reply(protocol_error(
+                None,
                 "handshake_required",
                 "send hello before other dashboard messages"
-            )
+            ))
         );
     }
 }
