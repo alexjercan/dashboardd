@@ -18,7 +18,10 @@ use tokio::{net::TcpListener as TokioTcpListener, sync::broadcast};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
-use crate::{instance::InstanceManager, widget::WidgetsManager};
+use crate::{
+    instance::{DashboardLayout, InstanceManager},
+    widget::WidgetsManager,
+};
 
 const DEFAULT_HOST: &str = "127.0.0.1";
 const PORT_RANGE: std::ops::Range<u16> = 7000..8000;
@@ -71,7 +74,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let (shutdown, _) = broadcast::channel(1);
     let state = AppState {
         widgets: WidgetsManager::discover(&config.widgets_dir)?,
-        instances: InstanceManager::new(),
+        instances: InstanceManager::new(DashboardLayout::default()),
         shutdown,
     };
     info!(

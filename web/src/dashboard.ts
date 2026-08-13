@@ -1,21 +1,24 @@
 import {
   parseDashboardEvent,
-  parseInstance,
+  parseDashboardLayout,
   parseInstanceList,
   parseWidgetList,
+  type DashboardLayout,
   type ErrorResponse,
   type Instance,
   type WidgetDescriptor,
 } from "./protocol";
-
-const DEFAULT_WIDGET_IDS = ["cpu", "memory"] as const;
 
 export type ConnectionStatus =
   "connecting" | "connected" | "disconnected" | "error";
 
 export type DashboardEvents = {
   onStatus(status: ConnectionStatus): void;
-  onSnapshot(widgets: WidgetDescriptor[], instances: Instance[]): void;
+  onSnapshot(
+    layout: DashboardLayout,
+    widgets: WidgetDescriptor[],
+    instances: Instance[],
+  ): void;
   onInstanceCreated(instance: Instance): void;
   onInstanceUpdated(instance: Instance): void;
   onInstanceDestroyed(instanceId: string): void;
@@ -100,48 +103,12 @@ export function connectDashboard(events: DashboardEvents): DashboardConnection {
 
 async function reconcile(events: DashboardEvents): Promise<void> {
   console.debug("Reconciling dashboard state");
-  const [widgetList, instanceList] = await Promise.all([
+  const [layout, widgetList, instanceList] = await Promise.all([
+    requestJson("/api/v1/layout", parseDashboardLayout),
     requestJson("/api/v1/widgets", parseWidgetList),
     requestJson("/api/v1/instances", parseInstanceList),
   ]);
-  const instances = await ensureDefaultInstances(
-    widgetList.widgets,
-    instanceList.instances,
-  );
-  events.onSnapshot(widgetList.widgets, instances);
-}
-
-async function ensureDefaultInstances(
-  widgets: WidgetDescriptor[],
-  initialInstances: Instance[],
-): Promise<Instance[]> {
-  let instances = initialInstances;
-  const available = new Set(widgets.map((widget) => widget.id));
-
-  for (const widgetId of DEFAULT_WIDGET_IDS) {
-    if (
-      !available.has(widgetId) ||
-      instances.some((instance) => instance.widget_id === widgetId)
-    ) {
-      continue;
-    }
-
-    console.info("Creating default widget instance", { widgetId });
-    try {
-      const instance = await requestJson("/api/v1/instances", parseInstance, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ widget_id: widgetId }),
-      });
-      instances = [...instances, instance];
-    } catch (error) {
-      if (!(error instanceof ApiError) || error.status !== 409) throw error;
-      instances = (await requestJson("/api/v1/instances", parseInstanceList))
-        .instances;
-    }
-  }
-
-  return instances;
+  events.onSnapshot(layout, widgetList.widgets, instanceList.instances);
 }
 
 async function requestJson<T>(

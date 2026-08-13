@@ -26,6 +26,17 @@ use crate::{
     widget::WidgetConfig,
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct DashboardLayout {
+    pub columns: u32,
+}
+
+impl Default for DashboardLayout {
+    fn default() -> Self {
+        Self { columns: 3 }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct InstanceLayout {
     pub column: u32,
@@ -58,6 +69,7 @@ pub struct InstanceManager {
 }
 
 struct Inner {
+    layout: DashboardLayout,
     instances: Mutex<HashMap<InstanceId, ManagedInstance>>,
     events: broadcast::Sender<DashboardEvent>,
     next_id: AtomicU64,
@@ -78,26 +90,31 @@ struct WidgetBackend {
 pub enum InstanceError {
     #[error("instance was not found")]
     UnknownInstance,
-    #[error("this widget already has an instance")]
-    InstanceExists,
     #[error("widget backend executable was not found")]
     BackendNotFound,
     #[error("widget backend is unavailable")]
     BackendUnavailable,
-    #[error("layout width and height must be greater than zero")]
+    #[error("layout must fit within the dashboard grid and have a positive size")]
     InvalidLayout,
+    #[error("layout overlaps another widget instance")]
+    LayoutOccupied,
 }
 
 impl InstanceManager {
-    pub fn new() -> Self {
+    pub fn new(layout: DashboardLayout) -> Self {
         let (events, _) = broadcast::channel(256);
         Self {
             inner: Arc::new(Inner {
+                layout,
                 instances: Mutex::new(HashMap::new()),
                 events,
                 next_id: AtomicU64::new(1),
             }),
         }
+    }
+
+    pub fn layout(&self) -> DashboardLayout {
+        self.inner.layout
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<DashboardEvent> {
@@ -124,7 +141,11 @@ impl InstanceManager {
             .ok_or(InstanceError::UnknownInstance)
     }
 
-    pub async fn create(&self, config: Arc<WidgetConfig>) -> Result<Instance, InstanceError> {
+    pub async fn create(
+        &self,
+        config: Arc<WidgetConfig>,
+        layout: InstanceLayout,
+    ) -> Result<Instance, InstanceError> {
         if !config.backend.is_file() {
             tracing::warn!(
                 widget_id = %config.descriptor.id,
@@ -136,18 +157,17 @@ impl InstanceManager {
 
         let widget_id = &config.descriptor.id;
         let mut instances = self.inner.instances.lock().await;
-        if instances
-            .values()
-            .any(|instance| instance.resource.widget_id == *widget_id)
-        {
-            return Err(InstanceError::InstanceExists);
-        }
+        validate_layout(
+            self.inner.layout,
+            &layout,
+            instances.values().map(|instance| &instance.resource.layout),
+        )?;
 
         let sequence = self.inner.next_id.fetch_add(1, Ordering::Relaxed);
         let resource = Instance {
             id: format!("{widget_id}-{sequence}"),
             widget_id: widget_id.clone(),
-            layout: InstanceLayout::default(),
+            layout,
         };
         tracing::info!(
             instance_id = %resource.id,
@@ -175,14 +195,21 @@ impl InstanceManager {
         instance_id: &str,
         layout: InstanceLayout,
     ) -> Result<Instance, InstanceError> {
-        if layout.width == 0 || layout.height == 0 {
-            return Err(InstanceError::InvalidLayout);
-        }
-
         let mut instances = self.inner.instances.lock().await;
+        if !instances.contains_key(instance_id) {
+            return Err(InstanceError::UnknownInstance);
+        }
+        validate_layout(
+            self.inner.layout,
+            &layout,
+            instances
+                .iter()
+                .filter(|(id, _)| id.as_str() != instance_id)
+                .map(|(_, instance)| &instance.resource.layout),
+        )?;
         let instance = instances
             .get_mut(instance_id)
-            .ok_or(InstanceError::UnknownInstance)?;
+            .expect("instance existence is checked");
         instance.resource.layout = layout;
         let resource = instance.resource.clone();
         drop(instances);
@@ -242,9 +269,35 @@ impl InstanceManager {
     }
 }
 
+fn validate_layout<'a>(
+    dashboard: DashboardLayout,
+    layout: &InstanceLayout,
+    mut occupied: impl Iterator<Item = &'a InstanceLayout>,
+) -> Result<(), InstanceError> {
+    if layout.width == 0
+        || layout.height == 0
+        || layout.width > dashboard.columns
+        || layout.column >= dashboard.columns
+        || layout.column + layout.width > dashboard.columns
+    {
+        return Err(InstanceError::InvalidLayout);
+    }
+    if occupied.any(|other| layouts_overlap(layout, other)) {
+        return Err(InstanceError::LayoutOccupied);
+    }
+    Ok(())
+}
+
+fn layouts_overlap(left: &InstanceLayout, right: &InstanceLayout) -> bool {
+    left.column < right.column.saturating_add(right.width)
+        && left.column.saturating_add(left.width) > right.column
+        && left.row < right.row.saturating_add(right.height)
+        && left.row.saturating_add(left.height) > right.row
+}
+
 impl Default for InstanceManager {
     fn default() -> Self {
-        Self::new()
+        Self::new(DashboardLayout::default())
     }
 }
 
@@ -449,7 +502,7 @@ mod tests {
 
     #[tokio::test]
     async fn empty_manager_lists_no_instances() {
-        let manager = InstanceManager::new();
+        let manager = InstanceManager::default();
 
         assert!(manager.list().await.is_empty());
         assert!(matches!(
@@ -458,23 +511,42 @@ mod tests {
         ));
     }
 
-    #[tokio::test]
-    async fn rejects_zero_sized_layout_before_lookup() {
-        let manager = InstanceManager::new();
+    #[test]
+    fn layout_validation_rejects_invalid_bounds_and_collisions() {
+        let occupied = InstanceLayout {
+            column: 1,
+            row: 1,
+            width: 1,
+            height: 1,
+        };
+        let valid = InstanceLayout {
+            column: 2,
+            row: 0,
+            width: 1,
+            height: 2,
+        };
+        let invalid = InstanceLayout {
+            column: 2,
+            row: 0,
+            width: 2,
+            height: 1,
+        };
+        let collision = InstanceLayout {
+            column: 0,
+            row: 1,
+            width: 2,
+            height: 1,
+        };
 
+        let dashboard = DashboardLayout { columns: 3 };
+        assert!(validate_layout(dashboard, &valid, [&occupied].into_iter()).is_ok());
         assert!(matches!(
-            manager
-                .update(
-                    "missing",
-                    InstanceLayout {
-                        column: 0,
-                        row: 0,
-                        width: 0,
-                        height: 1,
-                    },
-                )
-                .await,
+            validate_layout(dashboard, &invalid, std::iter::empty()),
             Err(InstanceError::InvalidLayout)
+        ));
+        assert!(matches!(
+            validate_layout(dashboard, &collision, [&occupied].into_iter()),
+            Err(InstanceError::LayoutOccupied)
         ));
     }
 }

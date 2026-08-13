@@ -1,5 +1,9 @@
 export const EVENT_VERSION = 1;
 
+export type DashboardLayout = {
+  columns: number;
+};
+
 export type WidgetDescriptor = {
   id: string;
   name: string;
@@ -73,6 +77,17 @@ export type DashboardEvent =
   | InstanceDestroyedEvent
   | InstanceErrorEvent
   | WidgetUpdateEvent;
+
+export function parseDashboardLayout(value: unknown): DashboardLayout {
+  if (
+    !isRecord(value) ||
+    !Number.isInteger(value.columns) ||
+    (value.columns as number) <= 0
+  ) {
+    throw new Error("invalid dashboard layout");
+  }
+  return { columns: value.columns as number };
+}
 
 export function parseWidgetList(value: unknown): WidgetList {
   if (!isRecord(value) || !Array.isArray(value.widgets)) {

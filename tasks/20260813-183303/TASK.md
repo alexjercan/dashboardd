@@ -1,6 +1,6 @@
 # Build tested TypeScript widget frontend platform
 
-- STATUS: IMPLEMENTED
+- STATUS: CLOSED
 - PRIORITY: 100
 - TAGS: frontend, widget, sdk, testing, tooling
 

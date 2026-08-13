@@ -23,7 +23,7 @@ use utoipa_swagger_ui::SwaggerUi;
 use crate::{
     AppState,
     event::{self, DashboardError, DashboardEvent},
-    instance::{Instance, InstanceError, InstanceLayout},
+    instance::{DashboardLayout, Instance, InstanceError, InstanceLayout},
     widget::WidgetDescriptor,
 };
 
@@ -42,6 +42,7 @@ pub struct InstanceList {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct CreateInstance {
     pub widget_id: WidgetId,
+    pub layout: InstanceLayout,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -58,6 +59,7 @@ pub struct ErrorResponse {
 #[openapi(
     paths(
         health,
+        get_layout,
         list_widgets,
         get_widget,
         list_instances,
@@ -72,6 +74,7 @@ pub struct ErrorResponse {
         CreateInstance,
         DashboardError,
         DashboardEvent,
+        DashboardLayout,
         ErrorResponse,
         Instance,
         InstanceLayout,
@@ -91,6 +94,7 @@ struct ApiDoc;
 pub fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
+        .route("/api/v1/layout", get(get_layout))
         .route("/api/v1/widgets", get(list_widgets))
         .route("/api/v1/widgets/{widget_id}", get(get_widget))
         .route(
@@ -122,6 +126,15 @@ pub fn build_router(state: AppState) -> Router {
 )]
 async fn health() -> StatusCode {
     StatusCode::OK
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/layout",
+    responses((status = 200, description = "Canonical dashboard layout constraints", body = DashboardLayout))
+)]
+async fn get_layout(State(state): State<AppState>) -> Json<DashboardLayout> {
+    Json(state.instances.layout())
 }
 
 #[utoipa::path(
@@ -195,7 +208,7 @@ async fn get_instance(
         (status = 201, description = "Instance created", body = Instance),
         (status = 400, description = "Request JSON is invalid", body = ErrorResponse),
         (status = 404, description = "Widget was not found", body = ErrorResponse),
-        (status = 409, description = "Widget already has an instance", body = ErrorResponse),
+        (status = 409, description = "Layout overlaps another instance", body = ErrorResponse),
         (status = 500, description = "Backend executable was not found", body = ErrorResponse)
     )
 )]
@@ -207,7 +220,7 @@ async fn create_instance(
         .widgets
         .get(&request.widget_id)
         .ok_or_else(ApiError::unknown_widget)?;
-    let instance = state.instances.create(config).await?;
+    let instance = state.instances.create(config, request.layout).await?;
     Ok((
         StatusCode::CREATED,
         [(
@@ -384,7 +397,6 @@ impl From<InstanceError> for ApiError {
     fn from(error: InstanceError) -> Self {
         let (status, code) = match error {
             InstanceError::UnknownInstance => (StatusCode::NOT_FOUND, "unknown_instance"),
-            InstanceError::InstanceExists => (StatusCode::CONFLICT, "instance_exists"),
             InstanceError::BackendNotFound => {
                 (StatusCode::INTERNAL_SERVER_ERROR, "backend_not_found")
             }
@@ -392,6 +404,7 @@ impl From<InstanceError> for ApiError {
                 (StatusCode::SERVICE_UNAVAILABLE, "backend_unavailable")
             }
             InstanceError::InvalidLayout => (StatusCode::BAD_REQUEST, "invalid_layout"),
+            InstanceError::LayoutOccupied => (StatusCode::CONFLICT, "layout_occupied"),
         };
 
         Self {
@@ -432,9 +445,21 @@ mod tests {
     fn test_app() -> Router {
         build_router(AppState {
             widgets: WidgetsManager::default(),
-            instances: InstanceManager::new(),
+            instances: InstanceManager::default(),
             shutdown: broadcast::channel(1).0,
         })
+    }
+
+    #[tokio::test]
+    async fn returns_canonical_layout_constraints() {
+        let response = test_app()
+            .oneshot(Request::get("/api/v1/layout").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(body.as_ref(), br#"{"columns":3}"#);
     }
 
     #[tokio::test]
@@ -500,6 +525,11 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let document: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            document["components"]["schemas"]["DashboardLayout"]["type"],
+            "object"
+        );
+        assert!(document["paths"]["/api/v1/layout"].is_object());
         assert!(document["paths"]["/api/v1/instances"].is_object());
         assert!(document["paths"]["/api/v1/events"].is_object());
     }

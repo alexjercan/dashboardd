@@ -1,6 +1,6 @@
 # Add Memory widget
 
-- STATUS: IMPLEMENTED
+- STATUS: CLOSED
 - PRIORITY: 100
 - TAGS: widget, memory, frontend, backend, testing
 

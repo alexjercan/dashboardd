@@ -29,7 +29,7 @@ const dashboardd = spawn(path.join(root, "target/debug/dashboardd"), [], {
   stdio: ["ignore", log, log],
 });
 let browser;
-let pages = [];
+const pages = [];
 const proxy = networkProxy(browserPort, dashboardPort);
 
 try {
@@ -45,164 +45,122 @@ try {
   const page = await context.newPage();
   pages.push(page);
 
-  const pageStartedAt = Date.now();
   await page.goto(baseUrl);
-  const cpuWidget = page.locator('.dashboard-widget[data-widget-id="cpu"]');
-  const memoryWidget = page.locator(
-    '.dashboard-widget[data-widget-id="memory"]',
+  await page.locator('#connection-status:text-is("Connected")').waitFor();
+  const layoutResponse = await page.request.get(`${baseUrl}/api/v1/layout`);
+  assert.equal(layoutResponse.status(), 200);
+  assert.deepEqual(await layoutResponse.json(), { columns: 3 });
+  assert.equal(await instanceCount(page, baseUrl), 0, "startup is empty");
+  assert.equal(
+    await page.locator("#finish-editing").isVisible(),
+    true,
+    "empty dashboard enters edit mode",
   );
-  await cpuWidget.waitFor();
-  await memoryWidget.waitFor();
-  assert.ok(
-    Date.now() - pageStartedAt < 5_000,
-    "initial SSE data starts reconciliation without waiting for keep-alive",
+  assert.equal(
+    await page.locator(".dashboard-slot").count(),
+    6,
+    "empty edit canvas is 3x2",
   );
-  await waitForTelemetry(cpuWidget);
+  assert.equal(
+    await page.locator(".dashboard-footer").isVisible(),
+    true,
+    "connection status is in footer",
+  );
+
+  const cpuOne = await addWidget(page, "0", "0", "CPU");
+  await waitForTelemetry(page.locator(`[data-instance-id="${cpuOne}"]`));
+  assert.equal(
+    await page.locator(".dashboard-slot").count(),
+    5,
+    "occupied first row retains one empty row",
+  );
+
+  const cpuTwo = await addWidget(page, "1", "0", "CPU");
+  await waitForTelemetry(page.locator(`[data-instance-id="${cpuTwo}"]`));
+  assert.notEqual(
+    cpuTwo,
+    cpuOne,
+    "duplicate widget definitions create independent instances",
+  );
+
+  const memory = await addWidget(page, "2", "0", "Memory");
+  const memoryWidget = page.locator(`[data-instance-id="${memory}"]`);
   await waitForTelemetry(memoryWidget);
   await memoryWidget.locator(".ram .bar-fill").waitFor();
   await memoryWidget.locator(".swap .bar-fill").waitFor();
-  assert.match(
-    await memoryWidget.locator('[data-memory="used"]').textContent(),
-    /\/.*(?:MiB|GiB|TiB)/,
-  );
-  assert.equal(
-    await page.locator("#dashboard-error").isHidden(),
-    true,
-    "creation race does not report a missing widget descriptor",
-  );
-  assert.equal(
-    await instanceCount(page, baseUrl),
-    2,
-    "creates CPU and Memory instances",
-  );
-  for (const widgetId of ["cpu", "memory"]) {
-    const frontendResponse = await page.request.get(
-      `${baseUrl}/widgets/${widgetId}/frontend.js`,
-    );
-    assert.equal(frontendResponse.headers()["cache-control"], "no-cache");
-  }
+  assert.equal(await instanceCount(page, baseUrl), 3);
 
-  const cpuInstanceId = await cpuWidget.getAttribute("data-instance-id");
-  const memoryInstanceId = await memoryWidget.getAttribute("data-instance-id");
-  assert.ok(cpuInstanceId);
-  assert.ok(memoryInstanceId);
-  await page.reload();
-  await waitForTelemetry(page.locator(`[data-instance-id="${cpuInstanceId}"]`));
-  await waitForTelemetry(
-    page.locator(`[data-instance-id="${memoryInstanceId}"]`),
-  );
+  await page.locator("#finish-editing").click();
   assert.equal(
-    await instanceCount(page, baseUrl),
-    2,
-    "refresh keeps both server-owned instances",
+    await page.locator(".dashboard-slot").count(),
+    0,
+    "normal mode hides empty slots",
+  );
+  assert.equal(await page.locator("#edit-layout").isVisible(), true);
+  const boxes = await Promise.all(
+    [cpuOne, cpuTwo, memory].map((id) =>
+      page.locator(`[data-instance-id="${id}"]`).boundingBox(),
+    ),
+  );
+  assert.ok(boxes.every(Boolean));
+  assert.ok(boxes.every((box) => box.height === 350));
+
+  await page.reload();
+  await page.locator(`[data-instance-id="${cpuOne}"]`).waitFor();
+  assert.equal(
+    await page.locator("#edit-layout").isVisible(),
+    true,
+    "refresh retains composed dashboard",
   );
 
   const secondPage = await context.newPage();
   pages.push(secondPage);
   await secondPage.goto(baseUrl);
-  await secondPage.locator(`[data-instance-id="${cpuInstanceId}"]`).waitFor();
+  await secondPage.locator(`[data-instance-id="${memory}"]`).waitFor();
+  await page.locator("#edit-layout").click();
+  await page.locator(`[data-instance-id="${cpuTwo}"] .remove-widget`).click();
+  assert.match(await page.locator("#remove-title").textContent(), /Remove CPU/);
+  await page.locator("#remove-widget .button[value=cancel]").click();
+  await page.locator(`[data-instance-id="${cpuTwo}"]`).waitFor();
+  await page.locator(`[data-instance-id="${cpuTwo}"] .remove-widget`).click();
+  await page.locator("#confirm-remove").click();
+  await page
+    .locator(`[data-instance-id="${cpuTwo}"]`)
+    .waitFor({ state: "detached" });
   await secondPage
-    .locator(`[data-instance-id="${memoryInstanceId}"]`)
-    .waitFor();
+    .locator(`[data-instance-id="${cpuTwo}"]`)
+    .waitFor({ state: "detached" });
   assert.equal(
-    await instanceCount(secondPage, baseUrl),
+    await instanceCount(page, baseUrl),
     2,
-    "two pages share both backends",
+    "confirmed removal synchronizes across pages",
   );
 
-  const cpuBox = await page
-    .locator(`[data-instance-id="${cpuInstanceId}"]`)
-    .boundingBox();
-  const memoryBox = await page
-    .locator(`[data-instance-id="${memoryInstanceId}"]`)
-    .boundingBox();
-  assert.ok(cpuBox);
-  assert.ok(memoryBox);
-  assert.ok(
-    Math.abs(memoryBox.width - cpuBox.width) < 0.1,
-    "1x1 widgets have equal width",
-  );
+  const memoryTwo = await addWidget(page, "1", "0", "Memory");
+  await secondPage.locator(`[data-instance-id="${memoryTwo}"]`).waitFor();
   assert.equal(
-    memoryBox.height,
-    cpuBox.height,
-    "1x1 widgets have equal height",
-  );
-  assert.equal(cpuBox.height, 350, "one grid height unit is 350 px");
-
-  const expanded = await page.request.patch(
-    `${baseUrl}/api/v1/instances/${memoryInstanceId}`,
-    { data: { layout: { column: 0, row: 0, width: 2, height: 2 } } },
-  );
-  assert.equal(expanded.status(), 200);
-  await page
-    .locator(`[data-instance-id="${memoryInstanceId}"][data-layout="2x2"]`)
-    .waitFor();
-  const expandedBox = await page
-    .locator(`[data-instance-id="${memoryInstanceId}"]`)
-    .boundingBox();
-  assert.ok(expandedBox);
-  assert.ok(Math.abs(expandedBox.width - (cpuBox.width * 2 + 20)) < 0.1);
-  assert.equal(expandedBox.height, cpuBox.height * 2 + 20);
-
-  const restored = await page.request.patch(
-    `${baseUrl}/api/v1/instances/${memoryInstanceId}`,
-    { data: { layout: { column: 0, row: 0, width: 1, height: 1 } } },
-  );
-  assert.equal(restored.status(), 200);
-  await page
-    .locator(`[data-instance-id="${memoryInstanceId}"][data-layout="1x1"]`)
-    .waitFor();
-
-  assert.equal(
-    await page
-      .locator(".dashboard-grid")
-      .evaluate(
-        (element) =>
-          getComputedStyle(element).gridTemplateColumns.split(" ").length,
-      ),
+    await instanceCount(page, baseUrl),
     3,
-    "wide dashboard has three columns",
+    "addition synchronizes across pages",
   );
-  const rows = await page.locator(".dashboard-grid").evaluate((grid) => {
-    const samples = Array.from({ length: 4 }, () => {
-      const item = document.createElement("section");
-      item.className = "dashboard-widget";
-      grid.append(item);
-      return item;
-    });
-    const positions = Array.from(grid.children, (element) => ({
-      left: element.getBoundingClientRect().left,
-      top: element.getBoundingClientRect().top,
-    }));
-    for (const sample of samples) sample.remove();
-    return {
-      columns: new Set(positions.map((position) => position.left)).size,
-      rows: new Set(positions.map((position) => position.top)).size,
-    };
+
+  const collision = await page.request.post(`${baseUrl}/api/v1/instances`, {
+    data: {
+      widget_id: "cpu",
+      layout: { column: 0, row: 0, width: 1, height: 1 },
+    },
   });
-  assert.deepEqual(
-    rows,
-    { columns: 3, rows: 2 },
-    "six widgets form a 3x2 grid",
+  assert.equal(
+    collision.status(),
+    409,
+    "server rejects occupied atomic creation",
   );
 
   await page.screenshot({
-    path: path.join(artifacts, "dashboard-wide.png"),
+    path: path.join(artifacts, "dashboard-edit-wide.png"),
     fullPage: true,
   });
-
   await page.setViewportSize({ width: 420, height: 900 });
-  const narrowCpuBox = await page
-    .locator(`[data-instance-id="${cpuInstanceId}"]`)
-    .boundingBox();
-  const narrowMemoryBox = await page
-    .locator(`[data-instance-id="${memoryInstanceId}"]`)
-    .boundingBox();
-  assert.ok(narrowCpuBox);
-  assert.ok(narrowMemoryBox);
-  assert.ok(Math.abs(narrowMemoryBox.width - narrowCpuBox.width) < 0.1);
-  assert.equal(narrowMemoryBox.height, narrowCpuBox.height);
-  assert.equal(narrowCpuBox.height, 350);
   assert.equal(
     await page
       .locator(".dashboard-grid")
@@ -211,57 +169,39 @@ try {
           getComputedStyle(element).gridTemplateColumns.split(" ").length,
       ),
     1,
-    "narrow dashboard has one column",
+    "mobile edit canvas projects to one column",
   );
   assert.equal(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
     ),
     true,
-    "narrow widget does not overflow",
   );
   await page.screenshot({
-    path: path.join(artifacts, "dashboard-narrow.png"),
+    path: path.join(artifacts, "dashboard-edit-narrow.png"),
     fullPage: true,
   });
 
   await proxy.stop();
   await page
-    .locator('#connection-status[data-status="disconnected"]')
+    .locator('#connection-indicator[data-status="disconnected"]')
     .waitFor();
   await proxy.start();
-  await page.locator('#connection-status[data-status="connected"]').waitFor();
-  await page.locator(`[data-instance-id="${cpuInstanceId}"]`).waitFor();
-  await page.locator(`[data-instance-id="${memoryInstanceId}"]`).waitFor();
+  await page
+    .locator('#connection-indicator[data-status="connected"]')
+    .waitFor();
   assert.equal(
     await instanceCount(page, baseUrl),
-    2,
-    "reconnect reconciles both authoritative instances",
+    3,
+    "reconnect retains composition",
   );
 
-  const response = await page.request.delete(
-    `${baseUrl}/api/v1/instances/${memoryInstanceId}`,
-  );
-  assert.equal(response.status(), 204);
-  await page.locator(`[data-instance-id="${memoryInstanceId}"]`).waitFor({
-    state: "detached",
-  });
-  await secondPage
-    .locator(`[data-instance-id="${memoryInstanceId}"]`)
-    .waitFor({ state: "detached" });
-  await page.locator(`[data-instance-id="${cpuInstanceId}"]`).waitFor();
-  assert.equal(
-    await instanceCount(page, baseUrl),
-    1,
-    "memory deletion leaves CPU running",
-  );
-
-  const replacement = await page.request.post(`${baseUrl}/api/v1/instances`, {
-    data: { widget_id: "memory" },
-  });
-  assert.equal(replacement.status(), 201);
-  const replacementId = (await replacement.json()).id;
-  await page.locator(`[data-instance-id="${replacementId}"]`).waitFor();
+  for (const widgetId of ["cpu", "memory"]) {
+    const response = await page.request.get(
+      `${baseUrl}/widgets/${widgetId}/frontend.js`,
+    );
+    assert.equal(response.headers()["cache-control"], "no-cache");
+  }
 
   await requestGracefulStop(dashboardd);
   console.log("browser integration scenarios passed");
@@ -283,14 +223,41 @@ try {
   closeSync(log);
 }
 
+async function addWidget(page, column, row, name) {
+  await page
+    .locator(`.dashboard-slot[data-column="${column}"][data-row="${row}"]`)
+    .click();
+  await page.locator("#add-widget").waitFor();
+  assert.match(
+    await page.locator("#add-position").textContent(),
+    /Position: Column \d, Row \d/,
+  );
+  await page.locator(".widget-choice", { hasText: name }).click();
+  assert.equal(await page.locator("#widget-selection").isVisible(), true);
+  assert.match(
+    await page.locator("#widget-selection").textContent(),
+    /No options/,
+  );
+  const responsePromise = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/v1/instances") &&
+      response.request().method() === "POST",
+  );
+  await page.locator("#confirm-add").click();
+  const response = await responsePromise;
+  assert.equal(response.status(), 201);
+  const instance = await response.json();
+  await page.locator(`[data-instance-id="${instance.id}"]`).waitFor();
+  return instance.id;
+}
+
 function run(command, args) {
   const result = spawnSync(command, args, { cwd: root, stdio: "inherit" });
   if (result.error) throw result.error;
-  if (result.status !== 0) {
+  if (result.status !== 0)
     throw new Error(
       `${command} ${args.join(" ")} failed with ${result.status}`,
     );
-  }
 }
 
 function chromiumPath() {
@@ -303,9 +270,8 @@ function chromiumPath() {
     "/usr/bin/chromium-browser",
   ].filter(Boolean);
   const executable = candidates.find(existsSync);
-  if (!executable) {
+  if (!executable)
     throw new Error("system Chromium not found; set CHROMIUM_PATH");
-  }
   return executable;
 }
 
@@ -344,7 +310,6 @@ function networkProxy(listenPort, targetPort) {
     upstream.once("error", forget);
   });
   let listening = false;
-
   return {
     async start() {
       if (listening) return;
@@ -372,9 +337,7 @@ async function waitForHealth(baseUrl) {
     try {
       const response = await fetch(`${baseUrl}/health`);
       if (response.ok) return;
-    } catch {
-      // The reserved port stays closed until dashboardd starts listening.
-    }
+    } catch {}
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   throw new Error("dashboardd did not become healthy");
@@ -386,10 +349,7 @@ async function waitForTelemetry(widget) {
   await usage.evaluate(
     (element) =>
       new Promise((resolve, reject) => {
-        if (element.textContent !== "--.-%") {
-          resolve();
-          return;
-        }
+        if (element.textContent !== "--.-%") return resolve();
         const observer = new MutationObserver(() => {
           if (element.textContent !== "--.-%") {
             observer.disconnect();
@@ -415,10 +375,10 @@ async function requestGracefulStop(child) {
   if (child.exitCode !== null) return;
   child.kill("SIGINT");
   const exited = new Promise((resolve) => child.once("exit", resolve));
-  const timeout = new Promise((resolve) =>
-    setTimeout(resolve, 5_000, "timeout"),
-  );
-  const exitCode = await Promise.race([exited, timeout]);
+  const exitCode = await Promise.race([
+    exited,
+    new Promise((resolve) => setTimeout(resolve, 5_000, "timeout")),
+  ]);
   assert.notEqual(
     exitCode,
     "timeout",
@@ -431,10 +391,12 @@ async function stopRecordedProcess(child) {
   if (child.exitCode !== null) return;
   child.kill("SIGINT");
   const exited = new Promise((resolve) => child.once("exit", resolve));
-  const timeout = new Promise((resolve) =>
-    setTimeout(resolve, 5_000, "timeout"),
-  );
-  if ((await Promise.race([exited, timeout])) === "timeout") {
+  if (
+    (await Promise.race([
+      exited,
+      new Promise((resolve) => setTimeout(resolve, 5_000, "timeout")),
+    ])) === "timeout"
+  ) {
     child.kill("SIGKILL");
     await exited;
   }
