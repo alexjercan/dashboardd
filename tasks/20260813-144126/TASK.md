@@ -1,6 +1,6 @@
 # Add dashboardd WebSocket handshake
 
-- STATUS: IN_PROGRESS
+- STATUS: CLOSED
 - PRIORITY: 100
 - TAGS: dashboardd, websocket, protocol
 
