@@ -11,3 +11,5 @@ cd ..
 cargo build -p cpu
 cargo run -p dashboardd
 ```
+
+Open the Swagger API documentation at the logged `/docs` URL.
