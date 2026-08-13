@@ -1,0 +1,16 @@
+@import "tailwindcss";
+
+@theme {
+  --color-dashboard-background: #181818;
+  --color-dashboard-raised: #282828;
+  --color-dashboard-selected: #453d41;
+  --color-dashboard-foreground: #e4e4ef;
+  --color-dashboard-bright: #f4f4ff;
+  --color-dashboard-muted: #65737e;
+  --color-dashboard-dim: #535057;
+  --color-dashboard-accent: #ffdd33;
+  --color-dashboard-border: #96a6c8;
+  --color-dashboard-success: #73c936;
+  --color-dashboard-error: #f43841;
+  --color-dashboard-secondary: #9e95c7;
+}
