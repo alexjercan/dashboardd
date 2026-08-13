@@ -2,7 +2,7 @@
 
 - STATUS: CLOSED
 - PRIORITY: 100
-- TAGS: skeleton,tooling
+- TAGS: skeleton, tooling
 
 # Project skeleton decisions
 
