@@ -33,6 +33,8 @@
               pkgs.nodejs_22
               pkgs.rust-analyzer
             ];
+
+            RUST_SRC_PATH = "${rustNightly}/lib/rustlib/src/rust/library";
           };
         };
     };

@@ -10,7 +10,14 @@ use std::{
     path::Path,
 };
 
-use axum::{Router, http::StatusCode, routing::get};
+use axum::{
+    Router,
+    extract::ws::{Message as WebSocketMessage, WebSocket, WebSocketUpgrade},
+    http::StatusCode,
+    response::IntoResponse,
+    routing::get,
+};
+use dashboard_protocol::{DashboardToServer, ErrorData, ProtocolError, ServerToDashboard};
 use rand::seq::SliceRandom;
 use tokio::net::TcpListener as TokioTcpListener;
 use tower_http::services::ServeDir;
@@ -56,6 +63,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let address = listener.local_addr()?;
     let app = Router::new()
         .route("/health", get(health))
+        .route("/ws", get(websocket))
         .fallback_service(ServeDir::new(WEB_DIST).append_index_html_on_directories(true));
 
     info!(%address, "dashboardd listening");
@@ -107,8 +115,123 @@ async fn health() -> StatusCode {
     StatusCode::OK
 }
 
+async fn websocket(upgrade: WebSocketUpgrade) -> impl IntoResponse {
+    upgrade.on_upgrade(handle_socket)
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+enum SessionState {
+    #[default]
+    AwaitingHello,
+    Ready,
+}
+
+async fn handle_socket(mut socket: WebSocket) {
+    let mut state = SessionState::default();
+
+    while let Some(Ok(websocket_message)) = socket.recv().await {
+        let WebSocketMessage::Text(text) = websocket_message else {
+            continue;
+        };
+
+        let response = match dashboard_protocol::parse::<DashboardToServer>(text.as_str()) {
+            Ok(request) => {
+                let (next_state, response) = process_message(state, request);
+                state = next_state;
+                response
+            }
+            Err(error) => protocol_error(protocol_error_code(&error), error.to_string()),
+        };
+        let Ok(encoded) = dashboard_protocol::serialize(response) else {
+            tracing::error!("failed to serialize WebSocket response");
+            break;
+        };
+
+        if socket
+            .send(WebSocketMessage::Text(encoded.into()))
+            .await
+            .is_err()
+        {
+            break;
+        }
+    }
+}
+
+fn process_message(
+    state: SessionState,
+    request: DashboardToServer,
+) -> (SessionState, ServerToDashboard) {
+    match request {
+        DashboardToServer::Hello {} => (SessionState::Ready, ServerToDashboard::Ready {}),
+        _ if state == SessionState::AwaitingHello => (
+            state,
+            protocol_error(
+                "handshake_required",
+                "send hello before other dashboard messages",
+            ),
+        ),
+        _ => (
+            state,
+            protocol_error(
+                "not_implemented",
+                "dashboard message is not implemented yet",
+            ),
+        ),
+    }
+}
+
+fn protocol_error_code(error: &ProtocolError) -> &'static str {
+    match error {
+        ProtocolError::InvalidMessage(_) => "invalid_message",
+        ProtocolError::UnsupportedVersion(_) => "unsupported_version",
+    }
+}
+
+fn protocol_error(code: impl Into<String>, message: impl Into<String>) -> ServerToDashboard {
+    ServerToDashboard::Error {
+        request_id: None,
+        error: ErrorData {
+            code: code.into(),
+            message: message.into(),
+        },
+    }
+}
+
 async fn shutdown_signal() {
     if let Err(error) = tokio::signal::ctrl_c().await {
         tracing::error!(%error, "failed to listen for Ctrl-C");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hello_returns_ready_and_completes_the_handshake() {
+        let (state, response) =
+            process_message(SessionState::default(), DashboardToServer::Hello {});
+
+        assert_eq!(state, SessionState::Ready);
+        assert_eq!(response, ServerToDashboard::Ready {});
+    }
+
+    #[test]
+    fn messages_before_hello_return_an_error() {
+        let (state, response) = process_message(
+            SessionState::default(),
+            DashboardToServer::ListWidgets {
+                request_id: "request-1".into(),
+            },
+        );
+
+        assert_eq!(state, SessionState::AwaitingHello);
+        assert_eq!(
+            response,
+            protocol_error(
+                "handshake_required",
+                "send hello before other dashboard messages"
+            )
+        );
     }
 }

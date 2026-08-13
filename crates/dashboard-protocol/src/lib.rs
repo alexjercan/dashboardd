@@ -3,8 +3,9 @@
 //! This crate owns transport-neutral messages and payloads; change it when the
 //! wire contract changes.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
+use thiserror::Error;
 
 pub mod prelude;
 
@@ -34,6 +35,39 @@ pub fn message<T>(message: T) -> Envelope<T> {
         version: PROTOCOL_VERSION,
         message,
     }
+}
+
+/// Errors raised while decoding a protocol message.
+#[derive(Debug, Error)]
+pub enum ProtocolError {
+    /// The input is not valid JSON or does not match the requested message type.
+    #[error("invalid protocol message: {0}")]
+    InvalidMessage(#[from] serde_json::Error),
+    /// The message uses a protocol version this crate does not support.
+    #[error("unsupported protocol version: {0}")]
+    UnsupportedVersion(u16),
+}
+
+/// Parses and validates a versioned protocol message.
+pub fn parse<T>(json: &str) -> Result<T, ProtocolError>
+where
+    T: DeserializeOwned,
+{
+    let envelope: Envelope<T> = serde_json::from_str(json)?;
+
+    if envelope.version != PROTOCOL_VERSION {
+        return Err(ProtocolError::UnsupportedVersion(envelope.version));
+    }
+
+    Ok(envelope.message)
+}
+
+/// Wraps and serializes a protocol message.
+pub fn serialize<T>(message: T) -> Result<String, serde_json::Error>
+where
+    T: Serialize,
+{
+    serde_json::to_string(&self::message(message))
 }
 
 /// Messages sent by the browser dashboard to `dashboardd`.
@@ -110,10 +144,8 @@ pub enum ServerToDashboard {
     Error {
         /// Request correlation ID when the error belongs to a request.
         request_id: Option<RequestId>,
-        /// Stable machine-readable error code.
-        code: String,
-        /// Human-readable error description.
-        message: String,
+        /// Error details.
+        error: ErrorData,
     },
 }
 
@@ -124,6 +156,15 @@ pub struct WidgetDescriptor {
     pub id: WidgetId,
     /// Display name shown by the dashboard.
     pub name: String,
+}
+
+/// Machine-readable and human-readable details for an application error.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ErrorData {
+    /// Stable machine-readable error code.
+    pub code: String,
+    /// Human-readable error description.
+    pub message: String,
 }
 
 /// Messages sent by a widget backend process to `dashboardd`.
@@ -146,10 +187,8 @@ pub enum WidgetToServer {
     Error {
         /// Affected instance, when one exists.
         instance_id: Option<InstanceId>,
-        /// Stable machine-readable error code.
-        code: String,
-        /// Human-readable error description.
-        message: String,
+        /// Error details.
+        error: ErrorData,
     },
 }
 
@@ -170,6 +209,11 @@ pub enum ServerToWidget {
         instance_id: InstanceId,
         /// Widget-owned JSON payload.
         payload: Value,
+    },
+    /// Reports an error to the widget backend process.
+    Error {
+        /// Error details.
+        error: ErrorData,
     },
     /// Requests that the backend process exit.
     Shutdown {},
@@ -275,8 +319,10 @@ mod tests {
     fn server_error_can_omit_request_id() {
         let message = message(ServerToDashboard::Error {
             request_id: None,
-            code: "unknown_widget".into(),
-            message: "Widget 'cpu' was not found".into(),
+            error: ErrorData {
+                code: "unknown_widget".into(),
+                message: "Widget 'cpu' was not found".into(),
+            },
         });
 
         assert_eq!(
@@ -286,10 +332,34 @@ mod tests {
                 "kind": "error",
                 "data": {
                     "request_id": null,
-                    "code": "unknown_widget",
-                    "message": "Widget 'cpu' was not found"
+                    "error": {
+                        "code": "unknown_widget",
+                        "message": "Widget 'cpu' was not found"
+                    }
                 }
             })
+        );
+    }
+
+    #[test]
+    fn parse_returns_message_data_and_validates_version() {
+        let parsed =
+            parse::<DashboardToServer>(r#"{"version":1,"kind":"hello","data":{}}"#).unwrap();
+
+        assert_eq!(parsed, DashboardToServer::Hello {});
+        assert_eq!(
+            parse::<DashboardToServer>(r#"{"version":2,"kind":"hello","data":{}}"#)
+                .unwrap_err()
+                .to_string(),
+            "unsupported protocol version: 2"
+        );
+    }
+
+    #[test]
+    fn serialize_wraps_message_with_current_version() {
+        assert_eq!(
+            serialize(ServerToWidget::Shutdown {}).unwrap(),
+            r#"{"version":1,"kind":"shutdown","data":{}}"#
         );
     }
 
