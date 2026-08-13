@@ -69,6 +69,7 @@ struct ManagedInstance {
 }
 
 struct WidgetBackend {
+    instance_id: InstanceId,
     commands: mpsc::UnboundedSender<ServerToWidget>,
     task: Option<JoinHandle<()>>,
 }
@@ -125,6 +126,11 @@ impl InstanceManager {
 
     pub async fn create(&self, config: Arc<WidgetConfig>) -> Result<Instance, InstanceError> {
         if !config.backend.is_file() {
+            tracing::warn!(
+                widget_id = %config.descriptor.id,
+                path = %config.backend.display(),
+                "widget backend executable was not found"
+            );
             return Err(InstanceError::BackendNotFound);
         }
 
@@ -143,6 +149,11 @@ impl InstanceManager {
             widget_id: widget_id.clone(),
             layout: InstanceLayout::default(),
         };
+        tracing::info!(
+            instance_id = %resource.id,
+            widget_id = %resource.widget_id,
+            "creating widget instance"
+        );
         let backend = WidgetBackend::start(config, resource.id.clone(), self.inner.events.clone());
         instances.insert(
             resource.id.clone(),
@@ -176,6 +187,7 @@ impl InstanceManager {
         let resource = instance.resource.clone();
         drop(instances);
 
+        tracing::info!(instance_id, ?resource.layout, "updated widget instance");
         let _ = self.inner.events.send(DashboardEvent::InstanceUpdated {
             instance: resource.clone(),
         });
@@ -191,6 +203,7 @@ impl InstanceManager {
             .remove(instance_id)
             .ok_or(InstanceError::UnknownInstance)?;
 
+        tracing::info!(instance_id, "destroying widget instance");
         let _ = self.inner.events.send(DashboardEvent::InstanceDestroyed {
             instance_id: instance_id.into(),
         });
@@ -203,6 +216,7 @@ impl InstanceManager {
         let instance = instances
             .get(instance_id)
             .ok_or(InstanceError::UnknownInstance)?;
+        tracing::debug!(instance_id, "forwarding command to widget backend");
         instance
             .backend
             .send(ServerToWidget::Message {
@@ -221,6 +235,7 @@ impl InstanceManager {
                 .collect::<Vec<_>>()
         };
 
+        tracing::info!(count = instances.len(), "shutting down widget instances");
         for instance in instances {
             instance.backend.shutdown().await;
         }
@@ -244,6 +259,12 @@ impl WidgetBackend {
         let task = tokio::spawn(async move {
             if let Err(error) = run_backend(&config, &task_instance_id, &events, commands_rx).await
             {
+                tracing::error!(
+                    %error,
+                    instance_id = %task_instance_id,
+                    widget_id = %config.descriptor.id,
+                    "widget backend failed"
+                );
                 let _ = events.send(DashboardEvent::InstanceError {
                     instance_id: Some(task_instance_id),
                     error: DashboardError {
@@ -255,6 +276,7 @@ impl WidgetBackend {
         });
 
         Self {
+            instance_id,
             commands: commands_tx,
             task: Some(task),
         }
@@ -265,9 +287,28 @@ impl WidgetBackend {
     }
 
     async fn shutdown(mut self) {
+        tracing::debug!(instance_id = %self.instance_id, "sending shutdown to widget backend");
         let _ = self.commands.send(ServerToWidget::Shutdown {});
-        if let Some(task) = self.task.take() {
-            let _ = task.await;
+        if let Some(mut task) = self.task.take() {
+            match tokio::time::timeout(std::time::Duration::from_secs(3), &mut task).await {
+                Ok(result) => {
+                    if let Err(error) = result {
+                        tracing::debug!(
+                            %error,
+                            instance_id = %self.instance_id,
+                            "widget backend task did not join cleanly"
+                        );
+                    }
+                }
+                Err(_) => {
+                    tracing::warn!(
+                        instance_id = %self.instance_id,
+                        "widget backend shutdown timed out; terminating it"
+                    );
+                    task.abort();
+                    let _ = task.await;
+                }
+            }
         }
     }
 }
@@ -286,12 +327,22 @@ async fn run_backend(
     events: &broadcast::Sender<DashboardEvent>,
     mut commands: mpsc::UnboundedReceiver<ServerToWidget>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let mut child = Command::new(&config.backend)
+    tracing::info!(
+        instance_id,
+        widget_id = %config.descriptor.id,
+        path = %config.backend.display(),
+        "starting widget backend"
+    );
+    let mut command = Command::new(&config.backend);
+    command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
-        .kill_on_drop(true)
-        .spawn()?;
+        .kill_on_drop(true);
+    #[cfg(unix)]
+    command.process_group(0);
+    let mut child = command.spawn()?;
+    tracing::debug!(instance_id, process_id = ?child.id(), "widget backend started");
     let mut stdin = child
         .stdin
         .take()
@@ -323,7 +374,7 @@ async fn run_backend(
             }
             line = lines.next_line() => {
                 let Some(line) = line? else { break };
-                handle_backend_message(config, events, &line)?;
+                handle_backend_message(config, instance_id, events, &line)?;
             }
         }
     }
@@ -334,6 +385,7 @@ async fn run_backend(
         return Err(format!("widget backend exited with {status}").into());
     }
 
+    tracing::info!(instance_id, %status, "widget backend stopped");
     Ok(())
 }
 
@@ -350,21 +402,35 @@ async fn write_backend_message(
 
 fn handle_backend_message(
     config: &WidgetConfig,
+    expected_instance_id: &str,
     events: &broadcast::Sender<DashboardEvent>,
     line: &str,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     match dashboard_protocol::parse::<WidgetToServer>(line)? {
-        WidgetToServer::Ready { widget_id } if widget_id == config.descriptor.id => {}
+        WidgetToServer::Ready { widget_id } if widget_id == config.descriptor.id => {
+            tracing::info!(
+                instance_id = expected_instance_id,
+                %widget_id,
+                "widget backend is ready"
+            );
+        }
         WidgetToServer::Update {
             instance_id,
             payload,
         } => {
+            tracing::debug!(%instance_id, "received widget telemetry");
             let _ = events.send(DashboardEvent::WidgetUpdate {
                 instance_id,
                 payload,
             });
         }
         WidgetToServer::Error { instance_id, error } => {
+            tracing::warn!(
+                instance_id = ?instance_id,
+                code = %error.code,
+                message = %error.message,
+                "widget backend reported an error"
+            );
             let _ = events.send(DashboardEvent::InstanceError {
                 instance_id,
                 error: error.into(),

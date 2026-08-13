@@ -36,6 +36,7 @@ export function connectDashboard(events: DashboardEvents): DashboardConnection {
   events.onStatus("connecting");
 
   source.addEventListener("open", () => {
+    console.info("Dashboard event stream connected");
     events.onStatus("connected");
     reconciliation = reconciliation
       .then(() => reconcile(events))
@@ -48,6 +49,7 @@ export function connectDashboard(events: DashboardEvents): DashboardConnection {
   source.addEventListener("message", (message) => {
     try {
       const event = parseDashboardEvent(JSON.parse(message.data));
+      console.debug("Dashboard event received", { kind: event.kind });
 
       switch (event.kind) {
         case "instance_created":
@@ -72,7 +74,10 @@ export function connectDashboard(events: DashboardEvents): DashboardConnection {
   });
 
   source.addEventListener("error", () => {
-    if (!closed) events.onStatus("disconnected");
+    if (!closed) {
+      console.info("Dashboard event stream disconnected; reconnecting");
+      events.onStatus("disconnected");
+    }
   });
 
   return {
@@ -94,6 +99,7 @@ export function connectDashboard(events: DashboardEvents): DashboardConnection {
 }
 
 async function reconcile(events: DashboardEvents): Promise<void> {
+  console.debug("Reconciling dashboard state");
   const [widgetList, instanceList] = await Promise.all([
     requestJson("/api/v1/widgets", parseWidgetList),
     requestJson("/api/v1/instances", parseInstanceList),
@@ -107,6 +113,7 @@ async function reconcile(events: DashboardEvents): Promise<void> {
   );
 
   if (cpuAvailable && !cpuExists) {
+    console.info("Creating default CPU widget instance");
     try {
       const cpu = await requestJson("/api/v1/instances", parseInstance, {
         method: "POST",

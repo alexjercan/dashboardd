@@ -31,10 +31,12 @@
             packages = [
               rustNightly
               pkgs.nodejs_22
+              pkgs.chromium
               pkgs.rust-analyzer
             ];
 
             RUST_SRC_PATH = "${rustNightly}/lib/rustlib/src/rust/library";
+            CHROMIUM_PATH = "${pkgs.chromium}/bin/chromium";
           };
         };
     };

@@ -1,0 +1,10 @@
+:host {
+  display: block;
+  min-width: 0;
+  color: var(--scufris-color-text);
+  font-family: var(--scufris-font-mono);
+}
+
+* {
+  box-sizing: border-box;
+}

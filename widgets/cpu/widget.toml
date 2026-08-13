@@ -1,0 +1,9 @@
+id = "cpu"
+name = "CPU"
+
+[backend]
+package = "cpu"
+
+[frontend]
+workspace = "@scufris/cpu-widget"
+entry = "src/index.ts"

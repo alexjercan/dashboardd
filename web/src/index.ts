@@ -1,4 +1,5 @@
 import "./styles.css";
+import { isWidgetModule, type WidgetFrontend } from "@scufris/widget-sdk";
 import {
   connectDashboard,
   type ConnectionStatus,
@@ -6,37 +7,22 @@ import {
 } from "./dashboard";
 import type { Instance, WidgetDescriptor } from "./protocol";
 
-type WidgetContext = {
-  widgetId: string;
-  instanceId: string;
-  send(payload: unknown): void;
-};
-
-type WidgetFrontend = {
-  update(payload: unknown): void;
-  destroy(): void;
-};
-
-type WidgetFrontendModule = {
-  mount(container: HTMLElement, context: WidgetContext): WidgetFrontend;
-};
-
 const app = document.querySelector<HTMLElement>("#app")!;
 
 app.innerHTML = `
-  <section class="min-h-screen bg-dashboard-background px-5 py-8 text-dashboard-foreground sm:px-8">
-    <div class="mx-auto max-w-6xl">
-      <header class="flex items-end justify-between gap-6 border-b border-dashboard-selected pb-5">
+  <section class="dashboard-shell">
+    <div class="dashboard-content">
+      <header class="dashboard-header">
         <div>
-          <p class="text-xs uppercase tracking-[0.24em] text-dashboard-accent">Scufris</p>
-          <h1 class="mt-2 text-3xl font-semibold text-dashboard-bright">Dashboard</h1>
+          <p class="dashboard-brand">Scufris</p>
+          <h1>Dashboard</h1>
         </div>
-        <p class="text-xs text-dashboard-dim">
-          Server <span id="connection-status" class="text-dashboard-accent">Connecting...</span>
+        <p class="dashboard-server">
+          Server <span id="connection-status">Connecting...</span>
         </p>
       </header>
-      <div id="dashboard-error" class="mt-5 hidden rounded border border-dashboard-error bg-dashboard-raised px-4 py-3 text-sm text-dashboard-error"></div>
-      <main id="widgets" class="mt-6 grid items-start gap-5 md:grid-cols-2 xl:grid-cols-3"></main>
+      <div id="dashboard-error" class="dashboard-error" role="alert" hidden></div>
+      <main id="widgets" class="dashboard-grid"></main>
     </div>
   </section>
 `;
@@ -62,17 +48,12 @@ function renderStatus(status: ConnectionStatus): void {
   };
 
   statusElement.textContent = labels[status];
-  statusElement.className =
-    status === "connected"
-      ? "text-dashboard-success"
-      : status === "error"
-        ? "text-dashboard-error"
-        : "text-dashboard-accent";
+  statusElement.dataset.status = status;
 }
 
 function showError(message: string): void {
   errorElement.textContent = message;
-  errorElement.classList.remove("hidden");
+  errorElement.hidden = false;
 }
 
 function applySnapshot(
@@ -81,6 +62,10 @@ function applySnapshot(
 ): void {
   descriptors.clear();
   for (const descriptor of widgets) descriptors.set(descriptor.id, descriptor);
+  console.info("Dashboard state reconciled", {
+    widgets: widgets.length,
+    instances: instances.length,
+  });
 
   const currentIds = new Set(instances.map((instance) => instance.id));
   for (const instanceId of resources.keys()) {
@@ -91,6 +76,13 @@ function applySnapshot(
 
 function upsertInstance(instance: Instance): void {
   resources.set(instance.id, instance);
+  if (!descriptors.has(instance.widget_id)) {
+    console.debug("Instance arrived before widget descriptors", {
+      instanceId: instance.id,
+      widgetId: instance.widget_id,
+    });
+    return;
+  }
   if (!frontends.has(instance.id) && !mounting.has(instance.id)) {
     const promise = mountWidget(instance).finally(() =>
       mounting.delete(instance.id),
@@ -101,46 +93,48 @@ function upsertInstance(instance: Instance): void {
 
 async function mountWidget(instance: Instance): Promise<void> {
   const descriptor = descriptors.get(instance.widget_id);
-  if (!descriptor) {
-    showError(`Widget descriptor not found: ${instance.widget_id}`);
-    return;
-  }
+  if (!descriptor) return;
 
-  const container = document.createElement("section");
-  container.dataset.instanceId = instance.id;
-  containers.set(instance.id, container);
-  widgetsElement.append(container);
+  const frame = document.createElement("section");
+  frame.className = "dashboard-widget";
+  frame.dataset.instanceId = instance.id;
+  frame.dataset.widgetId = instance.widget_id;
+  const mount = document.createElement("div");
+  mount.className = "dashboard-widget-mount";
+  frame.append(mount);
+  containers.set(instance.id, frame);
+  widgetsElement.append(frame);
 
   try {
-    const module = (await import(
+    const module: unknown = await import(
       /* webpackIgnore: true */ descriptor.frontend_url
-    )) as WidgetFrontendModule;
-    const frontend = module.mount(container, {
+    );
+    if (!isWidgetModule(module)) throw new Error("invalid widget module");
+
+    const frontend = module.mount(mount, {
       widgetId: instance.widget_id,
       instanceId: instance.id,
-      send: (payload) => {
-        void connection
-          .sendWidget(instance.id, payload)
-          .catch((error) =>
-            showError(error instanceof Error ? error.message : String(error)),
-          );
-      },
+      send: (payload) => connection.sendWidget(instance.id, payload),
     });
 
     if (!resources.has(instance.id)) {
       frontend.destroy();
-      container.remove();
+      frame.remove();
       containers.delete(instance.id);
       return;
     }
 
     frontends.set(instance.id, frontend);
+    console.info("Widget frontend mounted", {
+      instanceId: instance.id,
+      widgetId: instance.widget_id,
+    });
     if (pendingUpdates.has(instance.id)) {
       frontend.update(pendingUpdates.get(instance.id));
       pendingUpdates.delete(instance.id);
     }
   } catch (error) {
-    container.remove();
+    frame.remove();
     containers.delete(instance.id);
     showError(
       `Could not load ${descriptor.name}: ${error instanceof Error ? error.message : String(error)}`,
@@ -149,6 +143,7 @@ async function mountWidget(instance: Instance): Promise<void> {
 }
 
 function removeInstance(instanceId: string): void {
+  console.info("Widget instance removed", { instanceId });
   resources.delete(instanceId);
   pendingUpdates.delete(instanceId);
   frontends.get(instanceId)?.destroy();

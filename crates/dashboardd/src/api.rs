@@ -5,7 +5,10 @@ use std::{convert::Infallible, time::Duration};
 use axum::{
     Json, Router,
     extract::{FromRequest, Path as AxumPath, Request, State},
-    http::{StatusCode, header::CONTENT_TYPE},
+    http::{
+        StatusCode,
+        header::{CACHE_CONTROL, CONTENT_TYPE},
+    },
     response::{IntoResponse, Response, Sse, sse::Event, sse::KeepAlive},
     routing::{get, post},
 };
@@ -13,7 +16,7 @@ use dashboard_protocol::{InstanceId, WidgetId};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use tokio_stream::{Stream, StreamExt, wrappers::BroadcastStream};
-use tower_http::services::ServeDir;
+use tower_http::{services::ServeDir, trace::TraceLayer};
 use utoipa::{OpenApi, ToSchema};
 use utoipa_swagger_ui::SwaggerUi;
 
@@ -108,6 +111,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/widgets/{widget_id}/frontend.js", get(widget_frontend))
         .merge(SwaggerUi::new("/docs").url("/api-docs/openapi.json", ApiDoc::openapi()))
         .fallback_service(ServeDir::new(WEB_DIST).append_index_html_on_directories(true))
+        .layer(TraceLayer::new_for_http())
         .with_state(state)
 }
 
@@ -288,12 +292,21 @@ async fn send_widget_message(
 async fn dashboard_events(
     State(state): State<AppState>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    let stream = BroadcastStream::new(state.instances.subscribe()).filter_map(|result| {
+    tracing::info!("dashboard event stream connected");
+    let mut shutdown = state.shutdown.subscribe();
+    let updates = BroadcastStream::new(state.instances.subscribe()).filter_map(|result| {
         result.ok().and_then(|event| {
             event::serialize(event)
                 .ok()
                 .map(|data| Ok(Event::default().data(data)))
         })
+    });
+    // Flush the response now. Browsers do not open EventSource until body data arrives.
+    let initial = tokio_stream::once(Ok::<_, Infallible>(Event::default().comment("connected")));
+    let stream = initial.chain(updates);
+    let stream = futures_util::StreamExt::take_until(stream, async move {
+        let _ = shutdown.recv().await;
+        tracing::debug!("closing dashboard event stream for shutdown");
     });
 
     Sse::new(stream).keep_alive(
@@ -308,11 +321,20 @@ async fn widget_frontend(
     State(state): State<AppState>,
 ) -> Response {
     let Some(config) = state.widgets.get(&widget_id) else {
+        tracing::debug!(widget_id, "widget frontend was not found");
         return StatusCode::NOT_FOUND.into_response();
     };
 
+    tracing::debug!(widget_id, path = %config.frontend.display(), "serving widget frontend");
     match tokio::fs::read_to_string(&config.frontend).await {
-        Ok(source) => ([(CONTENT_TYPE, "text/javascript; charset=utf-8")], source).into_response(),
+        Ok(source) => (
+            [
+                (CONTENT_TYPE, "text/javascript; charset=utf-8"),
+                (CACHE_CONTROL, "no-cache"),
+            ],
+            source,
+        )
+            .into_response(),
         Err(error) => {
             tracing::error!(%error, widget_id, "failed to read widget frontend");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
@@ -401,6 +423,7 @@ mod tests {
         body::{Body, to_bytes},
         http::Request,
     };
+    use tokio::sync::broadcast;
     use tower::ServiceExt;
 
     use super::*;
@@ -410,6 +433,7 @@ mod tests {
         build_router(AppState {
             widgets: WidgetsManager::default(),
             instances: InstanceManager::new(),
+            shutdown: broadcast::channel(1).0,
         })
     }
 

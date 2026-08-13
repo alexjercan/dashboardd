@@ -7,13 +7,14 @@ license.workspace = true
 [dependencies]
 axum = "0.8.8"
 dashboard-protocol = { path = "../dashboard-protocol" }
+futures-util = "0.3.31"
 rand = "0.10.2"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 thiserror = "2.0.20"
 tokio = { version = "1.53.1", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync"] }
 tokio-stream = { version = "0.1.18", features = ["sync"] }
-tower-http = { version = "0.7.0", features = ["fs"] }
+tower-http = { version = "0.7.0", features = ["fs", "trace"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
 utoipa = "5.4.0"

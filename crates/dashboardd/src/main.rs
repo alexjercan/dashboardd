@@ -10,11 +10,11 @@ use std::{
     error::Error,
     io,
     net::{IpAddr, SocketAddr, TcpListener},
-    path::Path,
+    path::PathBuf,
 };
 
 use rand::seq::SliceRandom;
-use tokio::net::TcpListener as TokioTcpListener;
+use tokio::{net::TcpListener as TokioTcpListener, sync::broadcast};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
@@ -22,18 +22,20 @@ use crate::{instance::InstanceManager, widget::WidgetsManager};
 
 const DEFAULT_HOST: &str = "127.0.0.1";
 const PORT_RANGE: std::ops::Range<u16> = 7000..8000;
-const WIDGETS_DIR: &str = "widgets";
+const DEFAULT_WIDGETS_DIR: &str = ".build/widgets";
 
 #[derive(Clone)]
 struct AppState {
     widgets: WidgetsManager,
     instances: InstanceManager,
+    shutdown: broadcast::Sender<()>,
 }
 
 #[derive(Debug)]
 struct Config {
     host: IpAddr,
     port: Option<u16>,
+    widgets_dir: PathBuf,
 }
 
 impl Config {
@@ -48,8 +50,15 @@ impl Config {
         if port == Some(0) {
             return Err("DASHBOARDD_PORT must be between 1 and 65535".into());
         }
+        let widgets_dir = env::var_os("DASHBOARDD_WIDGETS_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(DEFAULT_WIDGETS_DIR));
 
-        Ok(Self { host, port })
+        Ok(Self {
+            host,
+            port,
+            widgets_dir,
+        })
     }
 }
 
@@ -59,11 +68,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
     tracing_subscriber::fmt().with_env_filter(filter).init();
 
     let config = Config::from_environment()?;
+    let (shutdown, _) = broadcast::channel(1);
     let state = AppState {
-        widgets: WidgetsManager::discover(Path::new(WIDGETS_DIR))?,
+        widgets: WidgetsManager::discover(&config.widgets_dir)?,
         instances: InstanceManager::new(),
+        shutdown,
     };
-    info!(count = state.widgets.len(), "discovered widgets");
+    info!(
+        count = state.widgets.len(),
+        root = %config.widgets_dir.display(),
+        "discovered widgets"
+    );
 
     let listener = bind_listener(&config)?;
     let address = listener.local_addr()?;
@@ -71,7 +86,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     info!(%address, docs = %format!("http://{address}/docs"), "dashboardd listening");
     axum::serve(TokioTcpListener::from_std(listener)?, app)
-        .with_graceful_shutdown(shutdown_signal())
+        .with_graceful_shutdown(shutdown_signal(state.shutdown.clone()))
         .await?;
     state.instances.shutdown_all().await;
 
@@ -104,8 +119,12 @@ fn bind_socket(host: IpAddr, port: u16) -> io::Result<TcpListener> {
     Ok(listener)
 }
 
-async fn shutdown_signal() {
-    if let Err(error) = tokio::signal::ctrl_c().await {
-        tracing::error!(%error, "failed to listen for Ctrl-C");
+async fn shutdown_signal(shutdown: broadcast::Sender<()>) {
+    match tokio::signal::ctrl_c().await {
+        Ok(()) => {
+            info!("shutdown signal received");
+            let _ = shutdown.send(());
+        }
+        Err(error) => tracing::error!(%error, "failed to listen for Ctrl-C"),
     }
 }

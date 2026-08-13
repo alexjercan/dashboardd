@@ -31,6 +31,7 @@ pub struct WidgetsManager {
 
 #[derive(Debug, Deserialize)]
 struct ManifestFile {
+    schema_version: u32,
     id: String,
     name: String,
     backend: PathBuf,
@@ -46,6 +47,14 @@ impl WidgetsManager {
             .filter(|entry| entry.path().is_dir())
             .map(|entry| read_config(&entry.path()).map(Arc::new))
             .collect::<io::Result<Vec<_>>>()?;
+        for widget in &widgets {
+            tracing::debug!(
+                widget_id = %widget.descriptor.id,
+                backend = %widget.backend.display(),
+                frontend = %widget.frontend.display(),
+                "discovered widget"
+            );
+        }
 
         Ok(Self {
             widgets: Arc::new(widgets),
@@ -84,29 +93,40 @@ fn read_config(widget_directory: &Path) -> io::Result<WidgetConfig> {
         )
     })?;
 
+    if manifest.schema_version != 1 {
+        return Err(invalid_manifest(
+            &manifest_path,
+            "unsupported schema_version",
+        ));
+    }
     if manifest.id.is_empty() || manifest.name.is_empty() {
         return Err(invalid_manifest(
             &manifest_path,
             "id and name must not be empty",
         ));
     }
-    if manifest.frontend.is_absolute()
-        || manifest
-            .frontend
-            .components()
-            .any(|component| !matches!(component, Component::Normal(_)))
-    {
-        return Err(invalid_manifest(
-            &manifest_path,
-            "frontend must be a relative path inside the widget directory",
-        ));
+    for (label, path) in [
+        ("backend", &manifest.backend),
+        ("frontend", &manifest.frontend),
+    ] {
+        if path.is_absolute()
+            || path
+                .components()
+                .any(|component| !matches!(component, Component::Normal(_)))
+        {
+            return Err(invalid_manifest(
+                &manifest_path,
+                &format!("{label} must be a relative path inside the widget directory"),
+            ));
+        }
     }
 
+    let backend = widget_directory.join(manifest.backend);
     let frontend = widget_directory.join(manifest.frontend);
-    if !frontend.is_file() {
+    if !backend.is_file() || !frontend.is_file() {
         return Err(invalid_manifest(
             &manifest_path,
-            "declared frontend file does not exist",
+            "declared backend and frontend files must exist",
         ));
     }
 
@@ -117,7 +137,7 @@ fn read_config(widget_directory: &Path) -> io::Result<WidgetConfig> {
             name: manifest.name,
             frontend_url,
         },
-        backend: widget_directory.join(manifest.backend),
+        backend,
         frontend,
     })
 }
@@ -140,9 +160,10 @@ mod tests {
         fs::create_dir_all(&cpu).unwrap();
         fs::write(
             cpu.join("widget.json"),
-            r#"{"id":"cpu","name":"CPU","backend":"backend","frontend":"frontend.js"}"#,
+            r#"{"schema_version":1,"id":"cpu","name":"CPU","backend":"backend","frontend":"frontend.js"}"#,
         )
         .unwrap();
+        fs::write(cpu.join("backend"), "executable").unwrap();
         fs::write(cpu.join("frontend.js"), "export function mount() {}").unwrap();
 
         let widgets = WidgetsManager::discover(&root).unwrap();
@@ -166,7 +187,7 @@ mod tests {
         fs::create_dir_all(&cpu).unwrap();
         fs::write(
             cpu.join("widget.json"),
-            r#"{"id":"cpu","name":"CPU","backend":"backend","frontend":"../frontend.js"}"#,
+            r#"{"schema_version":1,"id":"cpu","name":"CPU","backend":"backend","frontend":"../frontend.js"}"#,
         )
         .unwrap();
 
