@@ -10,6 +10,7 @@ import {
   type DashboardLayout,
   type Instance,
   type WidgetDescriptor,
+  type WidgetVariant,
 } from "./protocol";
 
 const app = document.querySelector<HTMLElement>("#app")!;
@@ -38,7 +39,7 @@ app.innerHTML = `
       <div id="widget-catalog" class="widget-catalog"></div>
       <section id="widget-selection" class="widget-selection" hidden>
         <h3 id="selected-widget-name"></h3>
-        <dl><div><dt>Size</dt><dd>1x1</dd></div><div><dt>Options</dt><dd>No options</dd></div></dl>
+        <dl><div><dt>Size</dt><dd id="selected-widget-size"></dd></div><div><dt>Options</dt><dd>No options</dd></div></dl>
       </section>
       <footer><button class="button" value="cancel">Cancel</button><button id="confirm-add" class="button primary" type="button" disabled>Add widget</button></footer>
     </form>
@@ -64,6 +65,7 @@ const removeDialog = required<HTMLDialogElement>("#remove-widget");
 const catalogElement = required<HTMLElement>("#widget-catalog");
 const selectionElement = required<HTMLElement>("#widget-selection");
 const selectedNameElement = required<HTMLElement>("#selected-widget-name");
+const selectedSizeElement = required<HTMLElement>("#selected-widget-size");
 const addPositionElement = required<HTMLElement>("#add-position");
 const confirmAddButton = required<HTMLButtonElement>("#confirm-add");
 const confirmRemoveButton = required<HTMLButtonElement>("#confirm-remove");
@@ -82,7 +84,7 @@ const pendingUpdates = new Map<string, unknown>();
 let editing = false;
 let dashboardLayout: DashboardLayout = { columns: 1 };
 let selectedSlot: { column: number; row: number } | null = null;
-let selectedWidgetId: string | null = null;
+let selectedWidget: { widgetId: string; variantId: string } | null = null;
 let removeInstanceId: string | null = null;
 let drag: DragState | null = null;
 let connection: DashboardConnection;
@@ -93,7 +95,10 @@ type DragState = {
   startX: number;
   startY: number;
   started: boolean;
-  target: { column: number; row: number } | null;
+  target:
+    | { kind: "slot"; column: number; row: number }
+    | { kind: "instance"; instanceId: string }
+    | null;
 };
 
 editButton.addEventListener("click", () => setEditing(true));
@@ -194,11 +199,12 @@ async function mountWidget(instance: Instance): Promise<void> {
 
   try {
     const module: unknown = await import(
-      /* webpackIgnore: true */ descriptor.frontend_url
+      /* webpackIgnore: true */ variantFor(instance, descriptor).frontend_url
     );
     if (!isWidgetModule(module)) throw new Error("invalid widget module");
     const frontend = module.mount(mount, {
       widgetId: instance.widget_id,
+      variantId: instance.variant_id,
       instanceId: instance.id,
       send: (payload) => connection.sendWidget(instance.id, payload),
     });
@@ -268,7 +274,7 @@ function renderCanvas(): void {
       }
     }
   }
-  const rowCount = Math.max(2, occupiedRows + 1);
+  const rowCount = Math.max(6, occupiedRows + 1);
   for (let row = 0; row < rowCount; row++) {
     for (let column = 0; column < dashboardLayout.columns; column++) {
       const instance = occupied.get(`${column}:${row}`);
@@ -324,13 +330,20 @@ function updateDrag(event: PointerEvent): void {
     widgetsElement.classList.add("drag-active");
   }
   event.preventDefault();
-  const slot = document
-    .elementFromPoint(event.clientX, event.clientY)
-    ?.closest<HTMLElement>(".dashboard-slot");
+  const element = document.elementFromPoint(event.clientX, event.clientY);
+  const slot = element?.closest<HTMLElement>(".dashboard-slot");
+  const targetFrame = element?.closest<HTMLElement>(".dashboard-widget");
   setDragTarget(
     slot
-      ? { column: Number(slot.dataset.column), row: Number(slot.dataset.row) }
-      : null,
+      ? {
+          kind: "slot",
+          column: Number(slot.dataset.column),
+          row: Number(slot.dataset.row),
+        }
+      : targetFrame?.dataset.instanceId &&
+          targetFrame.dataset.instanceId !== drag.instanceId
+        ? { kind: "instance", instanceId: targetFrame.dataset.instanceId }
+        : null,
   );
 }
 
@@ -339,7 +352,10 @@ function finishDrag(event: PointerEvent): void {
   const target = drag.started ? drag.target : null;
   const instanceId = drag.instanceId;
   cancelDrag();
-  if (target) void moveInstance(instanceId, target.column, target.row);
+  if (target?.kind === "slot")
+    void moveInstance(instanceId, target.column, target.row);
+  else if (target?.kind === "instance")
+    void swapInstances(instanceId, target.instanceId);
 }
 
 function cancelDrag(): void {
@@ -354,16 +370,19 @@ function cancelDrag(): void {
   drag = null;
 }
 
-function setDragTarget(target: { column: number; row: number } | null): void {
-  for (const slot of widgetsElement.querySelectorAll(".dashboard-slot"))
-    slot.classList.remove("drop-target");
+function setDragTarget(target: DragState["target"]): void {
+  for (const element of widgetsElement.querySelectorAll(".drop-target"))
+    element.classList.remove("drop-target");
   drag && (drag.target = target);
-  if (!target) return;
-  widgetsElement
-    .querySelector<HTMLElement>(
-      `.dashboard-slot[data-column="${target.column}"][data-row="${target.row}"]`,
-    )
-    ?.classList.add("drop-target");
+  if (target?.kind === "slot") {
+    widgetsElement
+      .querySelector<HTMLElement>(
+        `.dashboard-slot[data-column="${target.column}"][data-row="${target.row}"]`,
+      )
+      ?.classList.add("drop-target");
+  } else if (target?.kind === "instance") {
+    containers.get(target.instanceId)?.classList.add("drop-target");
+  }
 }
 
 function moveWithKeyboard(event: KeyboardEvent): void {
@@ -383,31 +402,39 @@ function moveWithKeyboard(event: KeyboardEvent): void {
   const column = instance.layout.column + columnOffset;
   const row = instance.layout.row + rowOffset;
   event.preventDefault();
-  if (!isEmptyDestination(instance, column, row)) {
+  if (!isWithinBounds(instance, column, row)) {
     announce("That position is unavailable");
     return;
   }
-  void moveInstance(instance.id, column, row);
+  const target = instanceAt(column, row, instance.id);
+  if (target) void swapInstances(instance.id, target.id);
+  else void moveInstance(instance.id, column, row);
 }
 
-function isEmptyDestination(
+function isWithinBounds(
   instance: Instance,
   column: number,
   row: number,
 ): boolean {
-  if (
-    column < 0 ||
-    row < 0 ||
-    column + instance.layout.width > dashboardLayout.columns
-  )
-    return false;
-  return ![...resources.values()].some(
+  return (
+    column >= 0 &&
+    row >= 0 &&
+    column + instance.layout.width <= dashboardLayout.columns
+  );
+}
+
+function instanceAt(
+  column: number,
+  row: number,
+  excludeId: string,
+): Instance | undefined {
+  return [...resources.values()].find(
     (other) =>
-      other.id !== instance.id &&
+      other.id !== excludeId &&
+      column >= other.layout.column &&
       column < other.layout.column + other.layout.width &&
-      column + instance.layout.width > other.layout.column &&
-      row < other.layout.row + other.layout.height &&
-      row + instance.layout.height > other.layout.row,
+      row >= other.layout.row &&
+      row < other.layout.row + other.layout.height,
   );
 }
 
@@ -417,7 +444,11 @@ async function moveInstance(
   row: number,
 ): Promise<void> {
   const instance = resources.get(instanceId);
-  if (!instance || !isEmptyDestination(instance, column, row)) {
+  if (
+    !instance ||
+    !isWithinBounds(instance, column, row) ||
+    instanceAt(column, row, instanceId)
+  ) {
     announce("That position is unavailable");
     return;
   }
@@ -428,7 +459,7 @@ async function moveInstance(
       {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ layout: { ...instance.layout, column, row } }),
+        body: JSON.stringify({ position: { column, row } }),
       },
     );
     if (updated) upsertInstance(updated);
@@ -436,6 +467,44 @@ async function moveInstance(
       `${descriptors.get(instance.widget_id)?.name ?? "Widget"} moved to column ${column + 1}, row ${row + 1}`,
     );
     containers.get(instanceId)?.focus();
+  } catch (error) {
+    const message = errorMessage(error);
+    showError(message);
+    announce(message);
+  }
+}
+
+async function swapInstances(
+  sourceId: string,
+  targetId: string,
+): Promise<void> {
+  const source = resources.get(sourceId);
+  const target = resources.get(targetId);
+  if (!source || !target) return;
+  clearError();
+  try {
+    const response = await fetch("/api/v1/layout/swap", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        source_instance_id: sourceId,
+        target_instance_id: targetId,
+      }),
+    });
+    if (!response.ok) {
+      const body = (await response.json().catch(() => null)) as {
+        error?: { message?: string };
+      } | null;
+      throw new Error(
+        body?.error?.message ?? `${response.status} ${response.statusText}`,
+      );
+    }
+    const body = (await response.json()) as { instances: unknown[] };
+    for (const value of body.instances) upsertInstance(parseInstance(value));
+    announce(
+      `${descriptors.get(source.widget_id)?.name ?? "Widget"} swapped with ${descriptors.get(target.widget_id)?.name ?? "widget"}`,
+    );
+    containers.get(sourceId)?.focus();
   } catch (error) {
     const message = errorMessage(error);
     showError(message);
@@ -463,7 +532,7 @@ function applyLayout(frame: HTMLElement, instance: Instance): void {
 
 function openAddDialog(column: number, row: number): void {
   selectedSlot = { column, row };
-  selectedWidgetId = null;
+  selectedWidget = null;
   addPositionElement.textContent = `Position: Column ${column + 1}, Row ${row + 1}`;
   selectionElement.hidden = true;
   confirmAddButton.disabled = true;
@@ -471,26 +540,31 @@ function openAddDialog(column: number, row: number): void {
   for (const descriptor of [...descriptors.values()].sort((a, b) =>
     a.name.localeCompare(b.name),
   )) {
-    const choice = document.createElement("button");
-    choice.className = "widget-choice";
-    choice.type = "button";
-    choice.innerHTML = `<strong>${descriptor.name}</strong><span>${widgetDescription(descriptor.id)}</span>`;
-    choice.addEventListener("click", () => {
-      selectedWidgetId = descriptor.id;
-      for (const item of catalogElement.children)
-        item.classList.remove("selected");
-      choice.classList.add("selected");
-      selectedNameElement.textContent = descriptor.name;
-      selectionElement.hidden = false;
-      confirmAddButton.disabled = false;
-    });
-    catalogElement.append(choice);
+    for (const variant of descriptor.variants) {
+      const choice = document.createElement("button");
+      choice.className = "widget-choice";
+      choice.type = "button";
+      choice.dataset.widgetId = descriptor.id;
+      choice.dataset.variantId = variant.id;
+      choice.innerHTML = `<strong>${descriptor.name} - ${variant.name}</strong><span>${variant.width}x${variant.height} - ${widgetDescription(descriptor.id)}</span>`;
+      choice.addEventListener("click", () => {
+        selectedWidget = { widgetId: descriptor.id, variantId: variant.id };
+        for (const item of catalogElement.children)
+          item.classList.remove("selected");
+        choice.classList.add("selected");
+        selectedNameElement.textContent = `${descriptor.name} - ${variant.name}`;
+        selectedSizeElement.textContent = `${variant.width}x${variant.height}`;
+        selectionElement.hidden = false;
+        confirmAddButton.disabled = false;
+      });
+      catalogElement.append(choice);
+    }
   }
   addDialog.showModal();
 }
 
 async function createSelectedWidget(): Promise<void> {
-  if (!selectedSlot || !selectedWidgetId) return;
+  if (!selectedSlot || !selectedWidget) return;
   confirmAddButton.disabled = true;
   clearError();
   try {
@@ -498,8 +572,9 @@ async function createSelectedWidget(): Promise<void> {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        widget_id: selectedWidgetId,
-        layout: { ...selectedSlot, width: 1, height: 1 },
+        widget_id: selectedWidget.widgetId,
+        variant_id: selectedWidget.variantId,
+        position: selectedSlot,
       }),
     });
     addDialog.close();
@@ -561,6 +636,18 @@ async function apiRequest(
   }
   if (response.status === 204) return null;
   return parseInstance(await response.json());
+}
+
+function variantFor(
+  instance: Instance,
+  descriptor: WidgetDescriptor,
+): WidgetVariant {
+  const variant = descriptor.variants.find(
+    (candidate) => candidate.id === instance.variant_id,
+  );
+  if (!variant)
+    throw new Error(`unknown widget variant: ${instance.variant_id}`);
+  return variant;
 }
 
 function widgetDescription(widgetId: string): string {

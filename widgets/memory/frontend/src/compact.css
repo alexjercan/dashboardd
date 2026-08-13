@@ -1,0 +1,59 @@
+:host {
+  display: block;
+  height: 100%;
+}
+
+article {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 12px;
+  overflow: hidden;
+  background: var(--scufris-color-surface);
+}
+
+h2 {
+  margin: 0;
+  color: var(--scufris-color-text-bright);
+  font-size: 13px;
+  text-transform: uppercase;
+}
+
+.usage {
+  margin: auto 0;
+  color: var(--scufris-color-accent);
+  font-family: var(--scufris-font-mono);
+  font-size: clamp(24px, 3vw, 34px);
+  line-height: 1;
+}
+
+.bar {
+  height: 5px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--scufris-color-selection);
+}
+
+.fill {
+  width: var(--usage, 0%);
+  height: 100%;
+  background: var(--scufris-color-accent);
+}
+
+.fill.warm {
+  background: var(--scufris-color-warning);
+}
+
+.fill.hot {
+  background: var(--scufris-color-danger);
+}
+
+.amount {
+  margin-top: 5px;
+  overflow: hidden;
+  color: var(--scufris-color-text-muted);
+  font-family: var(--scufris-font-mono);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

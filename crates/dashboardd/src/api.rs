@@ -24,7 +24,7 @@ use crate::{
     AppState,
     event::{self, DashboardError, DashboardEvent},
     instance::{DashboardLayout, Instance, InstanceError, InstanceLayout},
-    widget::WidgetDescriptor,
+    widget::{WidgetDescriptor, WidgetVariant},
 };
 
 const WEB_DIST: &str = "web/dist";
@@ -40,14 +40,32 @@ pub struct InstanceList {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct Position {
+    pub column: u32,
+    pub row: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct CreateInstance {
     pub widget_id: WidgetId,
-    pub layout: InstanceLayout,
+    pub variant_id: String,
+    pub position: Position,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct UpdateInstance {
-    pub layout: InstanceLayout,
+    pub position: Position,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct SwapInstances {
+    pub source_instance_id: InstanceId,
+    pub target_instance_id: InstanceId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct SwapResult {
+    pub instances: Vec<Instance>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -66,6 +84,7 @@ pub struct ErrorResponse {
         get_instance,
         create_instance,
         update_instance,
+        swap_instances,
         delete_instance,
         send_widget_message,
         dashboard_events,
@@ -79,9 +98,13 @@ pub struct ErrorResponse {
         Instance,
         InstanceLayout,
         InstanceList,
+        Position,
+        SwapInstances,
+        SwapResult,
         UpdateInstance,
         WidgetDescriptor,
         WidgetList,
+        WidgetVariant,
     )),
     tags(
         (name = "widgets", description = "Read-only installed widget definitions"),
@@ -95,6 +118,7 @@ pub fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/api/v1/layout", get(get_layout))
+        .route("/api/v1/layout/swap", post(swap_instances))
         .route("/api/v1/widgets", get(list_widgets))
         .route("/api/v1/widgets/{widget_id}", get(get_widget))
         .route(
@@ -112,7 +136,10 @@ pub fn build_router(state: AppState) -> Router {
             post(send_widget_message),
         )
         .route("/api/v1/events", get(dashboard_events))
-        .route("/widgets/{widget_id}/frontend.js", get(widget_frontend))
+        .route(
+            "/widgets/{widget_id}/variants/{variant_id}/frontend.js",
+            get(widget_frontend),
+        )
         .merge(SwaggerUi::new("/docs").url("/api-docs/openapi.json", ApiDoc::openapi()))
         .fallback_service(ServeDir::new(WEB_DIST).append_index_html_on_directories(true))
         .layer(TraceLayer::new_for_http())
@@ -220,7 +247,15 @@ async fn create_instance(
         .widgets
         .get(&request.widget_id)
         .ok_or_else(ApiError::unknown_widget)?;
-    let instance = state.instances.create(config, request.layout).await?;
+    let instance = state
+        .instances
+        .create(
+            config,
+            request.variant_id,
+            request.position.column,
+            request.position.row,
+        )
+        .await?;
     Ok((
         StatusCode::CREATED,
         [(
@@ -250,8 +285,35 @@ async fn update_instance(
     ApiJson(request): ApiJson<UpdateInstance>,
 ) -> Result<Json<Instance>, ApiError> {
     Ok(Json(
-        state.instances.update(&instance_id, request.layout).await?,
+        state
+            .instances
+            .update(&instance_id, request.position.column, request.position.row)
+            .await?,
     ))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/layout/swap",
+    tag = "instances",
+    request_body = SwapInstances,
+    responses(
+        (status = 200, description = "Instances swapped", body = SwapResult),
+        (status = 400, description = "Request JSON is invalid", body = ErrorResponse),
+        (status = 404, description = "An instance was not found", body = ErrorResponse),
+        (status = 409, description = "Resulting layout is invalid", body = ErrorResponse)
+    )
+)]
+async fn swap_instances(
+    State(state): State<AppState>,
+    ApiJson(request): ApiJson<SwapInstances>,
+) -> Result<Json<SwapResult>, ApiError> {
+    Ok(Json(SwapResult {
+        instances: state
+            .instances
+            .swap(&request.source_instance_id, &request.target_instance_id)
+            .await?,
+    }))
 }
 
 #[utoipa::path(
@@ -330,16 +392,24 @@ async fn dashboard_events(
 }
 
 async fn widget_frontend(
-    AxumPath(widget_id): AxumPath<WidgetId>,
+    AxumPath((widget_id, variant_id)): AxumPath<(WidgetId, String)>,
     State(state): State<AppState>,
 ) -> Response {
     let Some(config) = state.widgets.get(&widget_id) else {
         tracing::debug!(widget_id, "widget frontend was not found");
         return StatusCode::NOT_FOUND.into_response();
     };
+    let Some(frontend) = config.frontend(&variant_id) else {
+        tracing::debug!(
+            widget_id,
+            variant_id,
+            "widget variant frontend was not found"
+        );
+        return StatusCode::NOT_FOUND.into_response();
+    };
 
-    tracing::debug!(widget_id, path = %config.frontend.display(), "serving widget frontend");
-    match tokio::fs::read_to_string(&config.frontend).await {
+    tracing::debug!(widget_id, variant_id, path = %frontend.display(), "serving widget frontend");
+    match tokio::fs::read_to_string(frontend).await {
         Ok(source) => (
             [
                 (CONTENT_TYPE, "text/javascript; charset=utf-8"),
@@ -397,6 +467,7 @@ impl From<InstanceError> for ApiError {
     fn from(error: InstanceError) -> Self {
         let (status, code) = match error {
             InstanceError::UnknownInstance => (StatusCode::NOT_FOUND, "unknown_instance"),
+            InstanceError::UnknownVariant => (StatusCode::NOT_FOUND, "unknown_variant"),
             InstanceError::BackendNotFound => {
                 (StatusCode::INTERNAL_SERVER_ERROR, "backend_not_found")
             }
@@ -459,7 +530,7 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::OK);
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        assert_eq!(body.as_ref(), br#"{"columns":3}"#);
+        assert_eq!(body.as_ref(), br#"{"columns":9}"#);
     }
 
     #[tokio::test]

@@ -33,7 +33,7 @@ pub struct DashboardLayout {
 
 impl Default for DashboardLayout {
     fn default() -> Self {
-        Self { columns: 3 }
+        Self { columns: 9 }
     }
 }
 
@@ -60,6 +60,7 @@ impl Default for InstanceLayout {
 pub struct Instance {
     pub id: InstanceId,
     pub widget_id: WidgetId,
+    pub variant_id: String,
     pub layout: InstanceLayout,
 }
 
@@ -90,6 +91,8 @@ struct WidgetBackend {
 pub enum InstanceError {
     #[error("instance was not found")]
     UnknownInstance,
+    #[error("widget variant was not found")]
+    UnknownVariant,
     #[error("widget backend executable was not found")]
     BackendNotFound,
     #[error("widget backend is unavailable")]
@@ -144,7 +147,9 @@ impl InstanceManager {
     pub async fn create(
         &self,
         config: Arc<WidgetConfig>,
-        layout: InstanceLayout,
+        variant_id: String,
+        column: u32,
+        row: u32,
     ) -> Result<Instance, InstanceError> {
         if !config.backend.is_file() {
             tracing::warn!(
@@ -156,6 +161,15 @@ impl InstanceManager {
         }
 
         let widget_id = &config.descriptor.id;
+        let variant = config
+            .variant(&variant_id)
+            .ok_or(InstanceError::UnknownVariant)?;
+        let layout = InstanceLayout {
+            column,
+            row,
+            width: variant.width,
+            height: variant.height,
+        };
         let mut instances = self.inner.instances.lock().await;
         validate_layout(
             self.inner.layout,
@@ -167,6 +181,7 @@ impl InstanceManager {
         let resource = Instance {
             id: format!("{widget_id}-{sequence}"),
             widget_id: widget_id.clone(),
+            variant_id,
             layout,
         };
         tracing::info!(
@@ -193,12 +208,20 @@ impl InstanceManager {
     pub async fn update(
         &self,
         instance_id: &str,
-        layout: InstanceLayout,
+        column: u32,
+        row: u32,
     ) -> Result<Instance, InstanceError> {
         let mut instances = self.inner.instances.lock().await;
         if !instances.contains_key(instance_id) {
             return Err(InstanceError::UnknownInstance);
         }
+        let current = &instances[instance_id].resource.layout;
+        let layout = InstanceLayout {
+            column,
+            row,
+            width: current.width,
+            height: current.height,
+        };
         validate_layout(
             self.inner.layout,
             &layout,
@@ -219,6 +242,72 @@ impl InstanceManager {
             instance: resource.clone(),
         });
         Ok(resource)
+    }
+
+    pub async fn swap(
+        &self,
+        source_id: &str,
+        target_id: &str,
+    ) -> Result<Vec<Instance>, InstanceError> {
+        let mut instances = self.inner.instances.lock().await;
+        if source_id == target_id
+            || !instances.contains_key(source_id)
+            || !instances.contains_key(target_id)
+        {
+            return Err(InstanceError::UnknownInstance);
+        }
+
+        let source_layout = instances[source_id].resource.layout.clone();
+        let target_layout = instances[target_id].resource.layout.clone();
+        let mut source_next = source_layout.clone();
+        source_next.column = target_layout.column;
+        source_next.row = target_layout.row;
+        let mut target_next = target_layout.clone();
+        target_next.column = source_layout.column;
+        target_next.row = source_layout.row;
+
+        validate_layout(
+            self.inner.layout,
+            &source_next,
+            instances
+                .iter()
+                .filter(|(id, _)| id.as_str() != source_id && id.as_str() != target_id)
+                .map(|(_, instance)| &instance.resource.layout),
+        )?;
+        validate_layout(
+            self.inner.layout,
+            &target_next,
+            instances
+                .iter()
+                .filter(|(id, _)| id.as_str() != source_id && id.as_str() != target_id)
+                .map(|(_, instance)| &instance.resource.layout),
+        )?;
+        if layouts_overlap(&source_next, &target_next) {
+            return Err(InstanceError::LayoutOccupied);
+        }
+
+        instances
+            .get_mut(source_id)
+            .expect("source existence is checked")
+            .resource
+            .layout = source_next;
+        instances
+            .get_mut(target_id)
+            .expect("target existence is checked")
+            .resource
+            .layout = target_next;
+        let updated = vec![
+            instances[source_id].resource.clone(),
+            instances[target_id].resource.clone(),
+        ];
+        drop(instances);
+
+        for instance in &updated {
+            let _ = self.inner.events.send(DashboardEvent::InstanceUpdated {
+                instance: instance.clone(),
+            });
+        }
+        Ok(updated)
     }
 
     pub async fn destroy(&self, instance_id: &str) -> Result<(), InstanceError> {
@@ -507,6 +596,16 @@ mod tests {
         assert!(manager.list().await.is_empty());
         assert!(matches!(
             manager.get("missing").await,
+            Err(InstanceError::UnknownInstance)
+        ));
+    }
+
+    #[tokio::test]
+    async fn swap_rejects_missing_instances() {
+        let manager = InstanceManager::default();
+
+        assert!(matches!(
+            manager.swap("missing", "also-missing").await,
             Err(InstanceError::UnknownInstance)
         ));
     }

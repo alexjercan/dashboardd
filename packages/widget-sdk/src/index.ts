@@ -1,5 +1,6 @@
 export interface WidgetContext {
   widgetId: string;
+  variantId: string;
   instanceId: string;
   send(payload: unknown): Promise<void>;
 }

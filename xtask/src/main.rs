@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     env,
     error::Error,
     fs,
@@ -10,6 +11,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize)]
 struct SourceManifest {
+    schema_version: u32,
     id: String,
     name: String,
     backend: BackendSource,
@@ -24,6 +26,14 @@ struct BackendSource {
 #[derive(Debug, Deserialize)]
 struct FrontendSource {
     workspace: String,
+    variants: Vec<VariantSource>,
+}
+
+#[derive(Debug, Deserialize)]
+struct VariantSource {
+    id: String,
+    name: String,
+    size: [u32; 2],
     entry: PathBuf,
 }
 
@@ -33,6 +43,15 @@ struct RuntimeManifest<'a> {
     id: &'a str,
     name: &'a str,
     backend: String,
+    variants: Vec<RuntimeVariant<'a>>,
+}
+
+#[derive(Serialize)]
+struct RuntimeVariant<'a> {
+    id: &'a str,
+    name: &'a str,
+    width: u32,
+    height: u32,
     frontend: String,
 }
 
@@ -96,7 +115,6 @@ fn prepare(
         cargo.arg("--release");
     }
     run(root, &mut cargo)?;
-
     run(
         root,
         Command::new("npm").args(["run", "build", "-w", &manifest.frontend.workspace]),
@@ -105,35 +123,54 @@ fn prepare(
     let profile = if release { "release" } else { "debug" };
     let backend_name = manifest.backend.package.replace('-', "_");
     let backend = root.join("target").join(profile).join(backend_name);
-    let frontend = widget_directory.join("frontend/dist/frontend.js");
     require_file(
         &backend,
         "backend build did not produce the declared package",
     )?;
-    require_file(&frontend, "frontend build did not produce frontend.js")?;
 
     let output = root.join(".build/widgets").join(&manifest.id);
+    if output.exists() {
+        fs::remove_dir_all(&output)?;
+    }
     fs::create_dir_all(output.join("bin"))?;
     fs::create_dir_all(output.join("frontend"))?;
     install(&backend, &output.join("bin").join(&manifest.id), mode)?;
-    install(&frontend, &output.join("frontend/frontend.js"), mode)?;
+
+    let mut variants = Vec::new();
+    for variant in &manifest.frontend.variants {
+        let frontend = widget_directory
+            .join("frontend/dist")
+            .join(format!("{}.js", variant.id));
+        require_file(&frontend, "frontend build did not produce variant bundle")?;
+        let relative = format!("frontend/{}.js", variant.id);
+        install(&frontend, &output.join(&relative), mode)?;
+        variants.push(RuntimeVariant {
+            id: &variant.id,
+            name: &variant.name,
+            width: variant.size[0],
+            height: variant.size[1],
+            frontend: relative,
+        });
+    }
 
     let runtime = RuntimeManifest {
-        schema_version: 1,
+        schema_version: 2,
         id: &manifest.id,
         name: &manifest.name,
         backend: format!("bin/{}", manifest.id),
-        frontend: "frontend/frontend.js".into(),
+        variants,
     };
     fs::write(
         output.join("widget.json"),
         format!("{}\n", serde_json::to_string_pretty(&runtime)?),
     )?;
-    require_file(&output.join(runtime.backend), "runtime backend is missing")?;
-    require_file(
-        &output.join(runtime.frontend),
-        "runtime frontend is missing",
-    )?;
+    require_file(&output.join(&runtime.backend), "runtime backend is missing")?;
+    for variant in &runtime.variants {
+        require_file(
+            &output.join(&variant.frontend),
+            "runtime frontend is missing",
+        )?;
+    }
     println!("prepared {} in {}", manifest.id, output.display());
     Ok(())
 }
@@ -143,6 +180,9 @@ fn validate_manifest(
     widget_directory: &Path,
     manifest: &SourceManifest,
 ) -> Result<(), Box<dyn Error>> {
+    if manifest.schema_version != 1 {
+        return Err("source widget schema_version must be 1".into());
+    }
     if !valid_name(&manifest.id) {
         return Err("widget id must contain lowercase ASCII letters, digits, or hyphens".into());
     }
@@ -155,21 +195,32 @@ fn validate_manifest(
     if !manifest.frontend.workspace.starts_with("@scufris/") {
         return Err("frontend workspace must use the @scufris scope".into());
     }
-    if manifest.frontend.entry.is_absolute()
-        || manifest
-            .frontend
-            .entry
-            .components()
-            .any(|component| !matches!(component, Component::Normal(_)))
-    {
-        return Err("frontend entry must stay inside the frontend workspace".into());
+    if manifest.frontend.variants.is_empty() {
+        return Err("frontend must declare at least one variant".into());
     }
-    require_file(
-        &widget_directory
-            .join("frontend")
-            .join(&manifest.frontend.entry),
-        "frontend entry does not exist",
-    )?;
+    let mut variant_ids = HashSet::new();
+    for variant in &manifest.frontend.variants {
+        if !valid_name(&variant.id)
+            || !variant_ids.insert(&variant.id)
+            || variant.name.trim().is_empty()
+            || variant.size[0] == 0
+            || variant.size[1] == 0
+        {
+            return Err("variants must have unique valid IDs, names, and positive sizes".into());
+        }
+        if variant.entry.is_absolute()
+            || variant
+                .entry
+                .components()
+                .any(|component| !matches!(component, Component::Normal(_)))
+        {
+            return Err("frontend entry must stay inside the frontend workspace".into());
+        }
+        require_file(
+            &widget_directory.join("frontend").join(&variant.entry),
+            "frontend entry does not exist",
+        )?;
+    }
 
     let package_source = fs::read_to_string(widget_directory.join("frontend/package.json"))?;
     let package: serde_json::Value = serde_json::from_str(&package_source)?;
@@ -242,5 +293,5 @@ fn require_file(path: &Path, message: &str) -> Result<(), Box<dyn Error>> {
 }
 
 fn usage() -> &'static str {
-    "usage: cargo xtask widget prepare <id>|--all [--copy] [--release]"
+    "usage: cargo xtask widget prepare (--all | <widget-id>) [--copy] [--release]"
 }

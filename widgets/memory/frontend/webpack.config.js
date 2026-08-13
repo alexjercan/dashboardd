@@ -1,10 +1,13 @@
 const path = require("path");
 
 module.exports = (_env, argv) => ({
-  entry: "./src/index.ts",
+  entry: {
+    full: "./src/full.ts",
+    compact: "./src/compact.ts",
+  },
   output: {
     path: path.resolve(__dirname, "dist"),
-    filename: "frontend.js",
+    filename: "[name].js",
     clean: true,
     library: { type: "module" },
   },

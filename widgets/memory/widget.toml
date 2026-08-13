@@ -1,3 +1,4 @@
+schema_version = 1
 id = "memory"
 name = "Memory"
 
@@ -6,4 +7,15 @@ package = "memory"
 
 [frontend]
 workspace = "@scufris/memory-widget"
-entry = "src/index.ts"
+
+[[frontend.variants]]
+id = "full"
+name = "Full"
+size = [3, 3]
+entry = "src/full.ts"
+
+[[frontend.variants]]
+id = "compact"
+name = "Compact"
+size = [1, 1]
+entry = "src/compact.ts"

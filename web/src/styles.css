@@ -103,8 +103,8 @@ h1 {
 .dashboard-grid {
   display: grid;
   grid-template-columns: repeat(var(--dashboard-columns, 1), minmax(0, 1fr));
-  grid-auto-rows: 350px;
-  gap: 20px;
+  grid-auto-rows: 110px;
+  gap: 10px;
   margin-top: 20px;
 }
 
@@ -172,6 +172,29 @@ h1 {
   user-select: none;
 }
 
+.dashboard-widget[data-layout="1x1"] .drag-handle {
+  left: 6px;
+  min-width: 34px;
+  padding-inline: 5px;
+  transform: none;
+}
+
+.dashboard-widget[data-layout="1x1"] .remove-widget {
+  right: 6px;
+  width: 34px;
+  overflow: hidden;
+  color: transparent;
+}
+
+.dashboard-widget[data-layout="1x1"] .remove-widget::after {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--scufris-color-danger);
+  content: "x";
+}
+
 .editing .dashboard-widget {
   outline: 1px dashed var(--scufris-color-accent);
   outline-offset: 4px;
@@ -193,6 +216,11 @@ h1 {
 
 .editing.drag-active .dashboard-widget:not(.dragging) {
   outline-color: var(--scufris-color-danger);
+}
+
+.editing.drag-active .dashboard-widget.drop-target {
+  outline: 3px solid var(--scufris-color-accent);
+  outline-offset: -6px;
 }
 
 .editing .drag-handle,
@@ -401,12 +429,12 @@ h1 {
 
 @media (max-width: 900px) {
   .dashboard-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(6, minmax(0, 1fr));
   }
 
   .dashboard-widget,
   .dashboard-slot {
-    grid-column: auto / span min(var(--widget-width, 1), 2);
+    grid-column: auto / span min(var(--widget-width, 1), 6);
     grid-row: auto / span var(--widget-height, 1);
   }
 }
@@ -421,12 +449,12 @@ h1 {
   }
 
   .dashboard-grid {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .dashboard-widget,
   .dashboard-slot {
-    grid-column: 1;
+    grid-column: auto / span min(var(--widget-width, 1), 3);
     grid-row: auto / span var(--widget-height, 1);
   }
 }

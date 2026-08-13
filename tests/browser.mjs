@@ -49,7 +49,7 @@ try {
   await page.locator('#connection-status:text-is("Connected")').waitFor();
   const layoutResponse = await page.request.get(`${baseUrl}/api/v1/layout`);
   assert.equal(layoutResponse.status(), 200);
-  assert.deepEqual(await layoutResponse.json(), { columns: 3 });
+  assert.deepEqual(await layoutResponse.json(), { columns: 9 });
   assert.equal(await instanceCount(page, baseUrl), 0, "startup is empty");
   assert.equal(
     await page.locator("#finish-editing").isVisible(),
@@ -58,8 +58,8 @@ try {
   );
   assert.equal(
     await page.locator(".dashboard-slot").count(),
-    6,
-    "empty edit canvas is 3x2",
+    54,
+    "empty edit canvas is 9x6",
   );
   assert.equal(
     await page.locator(".dashboard-footer").isVisible(),
@@ -67,15 +67,15 @@ try {
     "connection status is in footer",
   );
 
-  const cpuOne = await addWidget(page, "0", "0", "CPU");
+  const cpuOne = await addWidget(page, "0", "0", "CPU", "Compact");
   await waitForTelemetry(page.locator(`[data-instance-id="${cpuOne}"]`));
   assert.equal(
     await page.locator(".dashboard-slot").count(),
-    5,
-    "occupied first row retains one empty row",
+    53,
+    "occupied first unit retains the minimum canvas",
   );
 
-  const cpuTwo = await addWidget(page, "1", "0", "CPU");
+  const cpuTwo = await addWidget(page, "1", "0", "CPU", "Compact");
   await waitForTelemetry(page.locator(`[data-instance-id="${cpuTwo}"]`));
   assert.notEqual(
     cpuTwo,
@@ -83,11 +83,10 @@ try {
     "duplicate widget definitions create independent instances",
   );
 
-  const memory = await addWidget(page, "2", "0", "Memory");
+  const memory = await addWidget(page, "2", "0", "Memory", "Compact");
   const memoryWidget = page.locator(`[data-instance-id="${memory}"]`);
   await waitForTelemetry(memoryWidget);
-  await memoryWidget.locator(".ram .bar-fill").waitFor();
-  await memoryWidget.locator(".swap .bar-fill").waitFor();
+  await memoryWidget.locator(".bar .fill").waitFor();
   assert.equal(await instanceCount(page, baseUrl), 3);
 
   await page.locator("#finish-editing").click();
@@ -103,7 +102,7 @@ try {
     ),
   );
   assert.ok(boxes.every(Boolean));
-  assert.ok(boxes.every((box) => box.height === 350));
+  assert.ok(boxes.every((box) => box.height === 110));
 
   await page.reload();
   await page.locator(`[data-instance-id="${cpuOne}"]`).waitFor();
@@ -136,7 +135,7 @@ try {
     "confirmed removal synchronizes across pages",
   );
 
-  const memoryTwo = await addWidget(page, "1", "0", "Memory");
+  const memoryTwo = await addWidget(page, "1", "0", "Memory", "Compact");
   await secondPage.locator(`[data-instance-id="${memoryTwo}"]`).waitFor();
   assert.equal(
     await instanceCount(page, baseUrl),
@@ -163,13 +162,37 @@ try {
     .waitFor();
   await cpuFrame.press("ArrowRight");
   await page
-    .locator('#dashboard-announcement:text-is("That position is unavailable")')
+    .locator('#dashboard-announcement:text-is("CPU swapped with Memory")')
     .waitFor();
+  await secondPage
+    .locator(`[data-instance-id="${cpuOne}"][data-column="1"]`)
+    .waitFor();
+  await secondPage
+    .locator(`[data-instance-id="${memoryTwo}"][data-column="0"]`)
+    .waitFor();
+
+  await dragToWidget(page, memoryTwo, memory);
+  await page
+    .locator('#dashboard-announcement:text-is("Memory swapped with Memory")')
+    .waitFor();
+  await secondPage
+    .locator(`[data-instance-id="${memoryTwo}"][data-column="2"][data-row="0"]`)
+    .waitFor();
+  await secondPage
+    .locator(`[data-instance-id="${memory}"][data-column="0"][data-row="1"]`)
+    .waitFor();
+  assert.equal(
+    await page
+      .locator(`[data-instance-id="${memoryTwo}"]`)
+      .evaluate((element) => element === document.activeElement),
+    true,
+  );
 
   const collision = await page.request.post(`${baseUrl}/api/v1/instances`, {
     data: {
       widget_id: "cpu",
-      layout: { column: 0, row: 1, width: 1, height: 1 },
+      variant_id: "compact",
+      position: { column: 2, row: 0 },
     },
   });
   assert.equal(
@@ -177,6 +200,30 @@ try {
     409,
     "server rejects occupied atomic creation",
   );
+
+  const fullResponse = await page.request.post(`${baseUrl}/api/v1/instances`, {
+    data: {
+      widget_id: "cpu",
+      variant_id: "full",
+      position: { column: 3, row: 0 },
+    },
+  });
+  assert.equal(fullResponse.status(), 201);
+  const fullInstance = await fullResponse.json();
+  const fullFrame = page.locator(`[data-instance-id="${fullInstance.id}"]`);
+  await fullFrame.waitFor();
+  await waitForTelemetry(fullFrame);
+  const fullBox = await fullFrame.boundingBox();
+  assert.ok(fullBox);
+  assert.equal(fullBox.height, 350);
+  assert.deepEqual(fullInstance.layout, {
+    column: 3,
+    row: 0,
+    width: 3,
+    height: 3,
+  });
+  await page.request.delete(`${baseUrl}/api/v1/instances/${fullInstance.id}`);
+  await fullFrame.waitFor({ state: "detached" });
 
   await page.screenshot({
     path: path.join(artifacts, "dashboard-edit-wide.png"),
@@ -190,8 +237,8 @@ try {
         (element) =>
           getComputedStyle(element).gridTemplateColumns.split(" ").length,
       ),
-    1,
-    "mobile edit canvas projects to one column",
+    3,
+    "mobile edit canvas projects to three unit columns",
   );
   assert.equal(
     await page.evaluate(
@@ -219,10 +266,13 @@ try {
   );
 
   for (const widgetId of ["cpu", "memory"]) {
-    const response = await page.request.get(
-      `${baseUrl}/widgets/${widgetId}/frontend.js`,
-    );
-    assert.equal(response.headers()["cache-control"], "no-cache");
+    for (const variantId of ["full", "compact"]) {
+      const response = await page.request.get(
+        `${baseUrl}/widgets/${widgetId}/variants/${variantId}/frontend.js`,
+      );
+      assert.equal(response.status(), 200);
+      assert.equal(response.headers()["cache-control"], "no-cache");
+    }
   }
 
   await requestGracefulStop(dashboardd);
@@ -245,6 +295,32 @@ try {
   closeSync(log);
 }
 
+async function dragToWidget(page, sourceId, targetId) {
+  const source = page.locator(`[data-instance-id="${sourceId}"]`);
+  const target = page.locator(`[data-instance-id="${targetId}"]`);
+  const handleBox = await source.locator(".drag-handle").boundingBox();
+  const targetBox = await target.boundingBox();
+  assert.ok(handleBox);
+  assert.ok(targetBox);
+  await page.mouse.move(
+    handleBox.x + handleBox.width / 2,
+    handleBox.y + handleBox.height / 2,
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    targetBox.x + targetBox.width / 2,
+    targetBox.y + targetBox.height / 2,
+    { steps: 5 },
+  );
+  assert.equal(
+    await target.evaluate((element) =>
+      element.classList.contains("drop-target"),
+    ),
+    true,
+  );
+  await page.mouse.up();
+}
+
 async function dragToSlot(page, instanceId, column, row) {
   const source = page.locator(`[data-instance-id="${instanceId}"]`);
   const target = page.locator(
@@ -260,9 +336,11 @@ async function dragToSlot(page, instanceId, column, row) {
     handleBox.y + handleBox.height / 2,
   );
   await page.mouse.down();
-  await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + 20, {
-    steps: 5,
-  });
+  await page.mouse.move(
+    targetBox.x + targetBox.width / 2,
+    targetBox.y + targetBox.height / 2,
+    { steps: 5 },
+  );
   assert.equal(
     await source.evaluate((element) => element.classList.contains("dragging")),
     true,
@@ -276,7 +354,7 @@ async function dragToSlot(page, instanceId, column, row) {
   await page.mouse.up();
 }
 
-async function addWidget(page, column, row, name) {
+async function addWidget(page, column, row, name, variant) {
   await page
     .locator(`.dashboard-slot[data-column="${column}"][data-row="${row}"]`)
     .click();
@@ -285,7 +363,11 @@ async function addWidget(page, column, row, name) {
     await page.locator("#add-position").textContent(),
     /Position: Column \d, Row \d/,
   );
-  await page.locator(".widget-choice", { hasText: name }).click();
+  await page
+    .locator(
+      `.widget-choice[data-widget-id="${name.toLowerCase()}"][data-variant-id="${variant.toLowerCase()}"]`,
+    )
+    .click();
   assert.equal(await page.locator("#widget-selection").isVisible(), true);
   assert.match(
     await page.locator("#widget-selection").textContent(),
