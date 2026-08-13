@@ -20,12 +20,22 @@ type CreateInstanceMessage = {
   data: { request_id: string; widget_id: string };
 };
 
+type WidgetMessageToServer = {
+  version: typeof PROTOCOL_VERSION;
+  kind: "widget_message";
+  data: { instance_id: string; payload: unknown };
+};
+
 export type DashboardToServer =
-  HelloMessage | ListWidgetsMessage | CreateInstanceMessage;
+  | HelloMessage
+  | ListWidgetsMessage
+  | CreateInstanceMessage
+  | WidgetMessageToServer;
 
 export type WidgetDescriptor = {
   id: string;
   name: string;
+  frontend_url: string;
 };
 
 type ReadyMessage = {
@@ -89,6 +99,16 @@ export function createInstanceMessage(
   });
 }
 
+export function widgetMessage(
+  instanceId: string,
+  payload: unknown,
+): DashboardToServer {
+  return envelope("widget_message", {
+    instance_id: instanceId,
+    payload,
+  });
+}
+
 export function parseServerMessage(value: unknown): ServerToDashboard {
   if (!isRecord(value) || value.version !== PROTOCOL_VERSION) {
     throw new Error("unsupported dashboard protocol version");
@@ -108,14 +128,6 @@ export function parseServerMessage(value: unknown): ServerToDashboard {
   }
 
   throw new Error("unknown dashboard message");
-}
-
-export function cpuUsage(payload: unknown): number | null {
-  if (!isRecord(payload) || typeof payload.usage_percent !== "number") {
-    return null;
-  }
-
-  return payload.usage_percent;
 }
 
 function envelope<K extends string, D>(

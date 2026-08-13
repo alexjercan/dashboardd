@@ -1,5 +1,6 @@
 {
   "id": "cpu",
   "name": "CPU",
-  "backend": "../../target/debug/cpu"
+  "backend": "../../target/debug/cpu",
+  "frontend": "frontend.js"
 }

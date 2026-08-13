@@ -1,5 +1,20 @@
 @import "tailwindcss";
 
+:root {
+  --dashboard-background: #181818;
+  --dashboard-raised: #282828;
+  --dashboard-selected: #453d41;
+  --dashboard-foreground: #e4e4ef;
+  --dashboard-bright: #f4f4ff;
+  --dashboard-muted: #65737e;
+  --dashboard-dim: #535057;
+  --dashboard-accent: #ffdd33;
+  --dashboard-border: #96a6c8;
+  --dashboard-success: #73c936;
+  --dashboard-error: #f43841;
+  --dashboard-secondary: #9e95c7;
+}
+
 @theme {
   --color-dashboard-background: #181818;
   --color-dashboard-raised: #282828;

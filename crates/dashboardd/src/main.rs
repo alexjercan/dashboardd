@@ -16,19 +16,20 @@ use std::{
 use axum::{
     Router,
     extract::{
-        State,
+        Path as AxumPath, State,
         ws::{Message as WebSocketMessage, WebSocket, WebSocketUpgrade},
     },
-    http::StatusCode,
-    response::IntoResponse,
+    http::{StatusCode, header::CONTENT_TYPE},
+    response::{IntoResponse, Response},
     routing::get,
 };
 use dashboard_protocol::{
-    DashboardToServer, ErrorData, ProtocolError, RequestId, ServerToDashboard, WidgetDescriptor,
-    WidgetId,
+    DashboardToServer, ErrorData, InstanceId, ProtocolError, RequestId, ServerToDashboard,
+    ServerToWidget, WidgetDescriptor, WidgetId,
 };
 use rand::seq::SliceRandom;
-use tokio::{net::TcpListener as TokioTcpListener, sync::mpsc, task::JoinHandle};
+use serde_json::Value;
+use tokio::{net::TcpListener as TokioTcpListener, sync::mpsc};
 use tower_http::services::ServeDir;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
@@ -83,6 +84,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let app = Router::new()
         .route("/health", get(health))
         .route("/ws", get(websocket))
+        .route("/widgets/{widget_id}/frontend.js", get(widget_frontend))
         .fallback_service(ServeDir::new(WEB_DIST).append_index_html_on_directories(true))
         .with_state(AppState {
             widgets: Arc::new(widgets),
@@ -141,6 +143,27 @@ async fn websocket(State(state): State<AppState>, upgrade: WebSocketUpgrade) -> 
     upgrade.on_upgrade(move |socket| handle_socket(socket, state))
 }
 
+async fn widget_frontend(
+    AxumPath(widget_id): AxumPath<WidgetId>,
+    State(state): State<AppState>,
+) -> Response {
+    let Some(manifest) = state
+        .widgets
+        .iter()
+        .find(|widget| widget.descriptor.id == widget_id)
+    else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    match tokio::fs::read_to_string(&manifest.frontend).await {
+        Ok(source) => ([(CONTENT_TYPE, "text/javascript; charset=utf-8")], source).into_response(),
+        Err(error) => {
+            tracing::error!(%error, widget_id, "failed to read widget frontend");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
 #[derive(Debug, Default, PartialEq, Eq)]
 enum SessionState {
     #[default]
@@ -155,12 +178,16 @@ enum SessionAction {
         request_id: RequestId,
         widget_id: WidgetId,
     },
+    SendWidget {
+        instance_id: InstanceId,
+        payload: Value,
+    },
 }
 
 async fn handle_socket(mut socket: WebSocket, app: AppState) {
     let mut state = SessionState::default();
     let (updates_tx, mut updates_rx) = mpsc::unbounded_channel();
-    let mut backend: Option<JoinHandle<()>> = None;
+    let mut backend: Option<widget::WidgetBackend> = None;
 
     loop {
         tokio::select! {
@@ -208,6 +235,15 @@ async fn handle_socket(mut socket: WebSocket, app: AppState) {
                             protocol_error(Some(request_id), "unknown_widget", "widget was not found")
                         }
                     }
+                    SessionAction::SendWidget { instance_id, payload } => {
+                        match &backend {
+                            Some(backend) if backend.send(ServerToWidget::Message { instance_id, payload }).is_ok() => {
+                                continue;
+                            }
+                            Some(_) => protocol_error(None, "backend_failed", "widget backend is unavailable"),
+                            None => protocol_error(None, "unknown_instance", "widget instance was not found"),
+                        }
+                    }
                 };
 
                 if send_dashboard_message(&mut socket, response).await.is_err() {
@@ -222,9 +258,7 @@ async fn handle_socket(mut socket: WebSocket, app: AppState) {
         }
     }
 
-    if let Some(backend) = backend {
-        backend.abort();
-    }
+    drop(backend);
 }
 
 async fn send_dashboard_message(
@@ -269,6 +303,16 @@ fn process_message(
             SessionAction::StartWidget {
                 request_id,
                 widget_id,
+            },
+        ),
+        DashboardToServer::WidgetMessage {
+            instance_id,
+            payload,
+        } => (
+            state,
+            SessionAction::SendWidget {
+                instance_id,
+                payload,
             },
         ),
         _ => (
@@ -327,6 +371,7 @@ mod tests {
         let descriptor = WidgetDescriptor {
             id: "cpu".into(),
             name: "CPU".into(),
+            frontend_url: "/widgets/cpu/frontend.js".into(),
         };
         let (state, action) = process_message(
             SessionState::Ready,
@@ -343,6 +388,28 @@ mod tests {
                 request_id: "widgets-1".into(),
                 widgets: vec![descriptor],
             })
+        );
+    }
+
+    #[test]
+    fn ready_session_routes_widget_messages() {
+        let payload = serde_json::json!({"mode": "performance"});
+        let (state, action) = process_message(
+            SessionState::Ready,
+            DashboardToServer::WidgetMessage {
+                instance_id: "cpu-1".into(),
+                payload: payload.clone(),
+            },
+            vec![],
+        );
+
+        assert_eq!(state, SessionState::Ready);
+        assert_eq!(
+            action,
+            SessionAction::SendWidget {
+                instance_id: "cpu-1".into(),
+                payload,
+            }
         );
     }
 

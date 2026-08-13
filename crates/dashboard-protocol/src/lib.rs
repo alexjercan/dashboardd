@@ -156,6 +156,8 @@ pub struct WidgetDescriptor {
     pub id: WidgetId,
     /// Display name shown by the dashboard.
     pub name: String,
+    /// Browser module URL served by dashboardd.
+    pub frontend_url: String,
 }
 
 /// Machine-readable and human-readable details for an application error.
@@ -241,7 +243,11 @@ mod tests {
             "kind": "widgets",
             "data": {
                 "request_id": "request-1",
-                "widgets": [{"id": "cpu", "name": "CPU"}]
+                "widgets": [{
+                    "id": "cpu",
+                    "name": "CPU",
+                    "frontend_url": "/widgets/cpu/frontend.js"
+                }]
             }
         }))
         .unwrap();
@@ -255,6 +261,7 @@ mod tests {
                     widgets: vec![WidgetDescriptor {
                         id: "cpu".into(),
                         name: "CPU".into(),
+                        frontend_url: "/widgets/cpu/frontend.js".into(),
                     }],
                 },
             }

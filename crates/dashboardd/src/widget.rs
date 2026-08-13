@@ -4,7 +4,7 @@
 
 use std::{
     fs, io,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
     process::Stdio,
     sync::Arc,
 };
@@ -15,7 +15,7 @@ use dashboard_protocol::{
 use serde::Deserialize;
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
-    process::Command,
+    process::{ChildStdin, Command},
     sync::mpsc,
     task::JoinHandle,
 };
@@ -24,6 +24,7 @@ use tokio::{
 pub struct WidgetManifest {
     pub descriptor: WidgetDescriptor,
     pub backend: PathBuf,
+    pub frontend: PathBuf,
 }
 
 #[derive(Debug, Deserialize)]
@@ -31,6 +32,24 @@ struct ManifestFile {
     id: String,
     name: String,
     backend: PathBuf,
+    frontend: PathBuf,
+}
+
+pub struct WidgetBackend {
+    commands: mpsc::UnboundedSender<ServerToWidget>,
+    task: JoinHandle<()>,
+}
+
+impl WidgetBackend {
+    pub fn send(&self, message: ServerToWidget) -> Result<(), ServerToWidget> {
+        self.commands.send(message).map_err(|error| error.0)
+    }
+}
+
+impl Drop for WidgetBackend {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
 }
 
 pub fn discover_widgets(root: &Path) -> io::Result<Vec<WidgetManifest>> {
@@ -58,31 +77,58 @@ fn read_manifest(widget_directory: &Path) -> io::Result<WidgetManifest> {
     })?;
 
     if manifest.id.is_empty() || manifest.name.is_empty() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!(
-                "widget manifest {} has an empty id or name",
-                manifest_path.display()
-            ),
+        return Err(invalid_manifest(
+            &manifest_path,
+            "id and name must not be empty",
+        ));
+    }
+    if manifest.frontend.is_absolute()
+        || manifest
+            .frontend
+            .components()
+            .any(|component| !matches!(component, Component::Normal(_)))
+    {
+        return Err(invalid_manifest(
+            &manifest_path,
+            "frontend must be a relative path inside the widget directory",
         ));
     }
 
+    let frontend = widget_directory.join(manifest.frontend);
+    if !frontend.is_file() {
+        return Err(invalid_manifest(
+            &manifest_path,
+            "declared frontend file does not exist",
+        ));
+    }
+
+    let frontend_url = format!("/widgets/{}/frontend.js", manifest.id);
     Ok(WidgetManifest {
         descriptor: WidgetDescriptor {
             id: manifest.id,
             name: manifest.name,
+            frontend_url,
         },
         backend: widget_directory.join(manifest.backend),
+        frontend,
     })
+}
+
+fn invalid_manifest(path: &Path, message: &str) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        format!("invalid widget manifest {}: {message}", path.display()),
+    )
 }
 
 pub fn start_backend(
     manifest: Arc<WidgetManifest>,
     instance_id: InstanceId,
     updates: mpsc::UnboundedSender<ServerToDashboard>,
-) -> JoinHandle<()> {
-    tokio::spawn(async move {
-        if let Err(error) = run_backend(&manifest, &instance_id, &updates).await {
+) -> WidgetBackend {
+    let (commands_tx, commands_rx) = mpsc::unbounded_channel();
+    let task = tokio::spawn(async move {
+        if let Err(error) = run_backend(&manifest, &instance_id, &updates, commands_rx).await {
             let _ = updates.send(ServerToDashboard::Error {
                 request_id: None,
                 error: ErrorData {
@@ -91,13 +137,19 @@ pub fn start_backend(
                 },
             });
         }
-    })
+    });
+
+    WidgetBackend {
+        commands: commands_tx,
+        task,
+    }
 }
 
 async fn run_backend(
     manifest: &WidgetManifest,
     instance_id: &str,
     updates: &mpsc::UnboundedSender<ServerToDashboard>,
+    mut commands: mpsc::UnboundedReceiver<ServerToWidget>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut child = Command::new(&manifest.backend)
         .stdin(Stdio::piped())
@@ -115,38 +167,33 @@ async fn run_backend(
         .ok_or("widget backend stdout is unavailable")?;
     let mut lines = BufReader::new(stdout).lines();
 
-    let initialize = dashboard_protocol::serialize(ServerToWidget::Initialize {
-        instance_id: instance_id.into(),
-        widget_id: manifest.descriptor.id.clone(),
-    })?;
-    stdin.write_all(initialize.as_bytes()).await?;
-    stdin.write_all(b"\n").await?;
-    stdin.flush().await?;
+    write_backend_message(
+        &mut stdin,
+        ServerToWidget::Initialize {
+            instance_id: instance_id.into(),
+            widget_id: manifest.descriptor.id.clone(),
+        },
+    )
+    .await?;
 
-    while let Some(line) = lines.next_line().await? {
-        match dashboard_protocol::parse::<WidgetToServer>(&line)? {
-            WidgetToServer::Ready { widget_id } if widget_id == manifest.descriptor.id => {}
-            WidgetToServer::Update {
-                instance_id,
-                payload,
-            } => {
-                let _ = updates.send(ServerToDashboard::WidgetMessage {
-                    instance_id,
-                    payload,
-                });
+    loop {
+        tokio::select! {
+            command = commands.recv() => {
+                let Some(command) = command else { break };
+                let shutdown = matches!(command, ServerToWidget::Shutdown {});
+                write_backend_message(&mut stdin, command).await?;
+                if shutdown {
+                    break;
+                }
             }
-            WidgetToServer::Error { error, .. } => {
-                let _ = updates.send(ServerToDashboard::Error {
-                    request_id: None,
-                    error,
-                });
-            }
-            WidgetToServer::Ready { widget_id } => {
-                return Err(format!("backend announced unexpected widget id {widget_id}").into());
+            line = lines.next_line() => {
+                let Some(line) = line? else { break };
+                handle_backend_message(manifest, updates, &line)?;
             }
         }
     }
 
+    drop(stdin);
     let status = child.wait().await?;
     if !status.success() {
         return Err(format!("widget backend exited with {status}").into());
@@ -155,28 +202,92 @@ async fn run_backend(
     Ok(())
 }
 
+async fn write_backend_message(
+    stdin: &mut ChildStdin,
+    message: ServerToWidget,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let encoded = dashboard_protocol::serialize(message)?;
+    stdin.write_all(encoded.as_bytes()).await?;
+    stdin.write_all(b"\n").await?;
+    stdin.flush().await?;
+    Ok(())
+}
+
+fn handle_backend_message(
+    manifest: &WidgetManifest,
+    updates: &mpsc::UnboundedSender<ServerToDashboard>,
+    line: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    match dashboard_protocol::parse::<WidgetToServer>(line)? {
+        WidgetToServer::Ready { widget_id } if widget_id == manifest.descriptor.id => {}
+        WidgetToServer::Update {
+            instance_id,
+            payload,
+        } => {
+            let _ = updates.send(ServerToDashboard::WidgetMessage {
+                instance_id,
+                payload,
+            });
+        }
+        WidgetToServer::Error { error, .. } => {
+            let _ = updates.send(ServerToDashboard::Error {
+                request_id: None,
+                error,
+            });
+        }
+        WidgetToServer::Ready { widget_id } => {
+            return Err(format!("backend announced unexpected widget id {widget_id}").into());
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn discovers_widget_manifests() {
+    fn discovers_widget_manifests_and_frontend() {
         let root = std::env::temp_dir().join(format!("scufris-widgets-{}", std::process::id()));
         let cpu = root.join("cpu");
         fs::create_dir_all(&cpu).unwrap();
         fs::write(
             cpu.join("widget.json"),
-            r#"{"id":"cpu","name":"CPU","backend":"backend"}"#,
+            r#"{"id":"cpu","name":"CPU","backend":"backend","frontend":"frontend.js"}"#,
         )
         .unwrap();
+        fs::write(cpu.join("frontend.js"), "export function mount() {}").unwrap();
 
         let widgets = discover_widgets(&root).unwrap();
 
         assert_eq!(widgets.len(), 1);
         assert_eq!(widgets[0].descriptor.id, "cpu");
         assert_eq!(widgets[0].descriptor.name, "CPU");
+        assert_eq!(
+            widgets[0].descriptor.frontend_url,
+            "/widgets/cpu/frontend.js"
+        );
         assert_eq!(widgets[0].backend, cpu.join("backend"));
+        assert_eq!(widgets[0].frontend, cpu.join("frontend.js"));
 
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn rejects_frontend_paths_outside_the_widget_directory() {
+        let root =
+            std::env::temp_dir().join(format!("scufris-invalid-widget-{}", std::process::id()));
+        let cpu = root.join("cpu");
+        fs::create_dir_all(&cpu).unwrap();
+        fs::write(
+            cpu.join("widget.json"),
+            r#"{"id":"cpu","name":"CPU","backend":"backend","frontend":"../frontend.js"}"#,
+        )
+        .unwrap();
+
+        let error = discover_widgets(&root).unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
         fs::remove_dir_all(root).unwrap();
     }
 }

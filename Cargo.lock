@@ -121,6 +121,7 @@ name = "cpu"
 version = "0.1.0"
 dependencies = [
  "dashboard-protocol",
+ "serde",
  "serde_json",
  "sysinfo",
  "tokio",
