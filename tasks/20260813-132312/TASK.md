@@ -1,6 +1,6 @@
 # Project skeleton decisions
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 100
 - TAGS: skeleton,tooling
 
