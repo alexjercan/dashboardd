@@ -4,7 +4,7 @@ import {
   type ConnectionStatus,
   type DashboardConnection,
 } from "./dashboard";
-import type { WidgetDescriptor } from "./protocol";
+import type { Instance, WidgetDescriptor } from "./protocol";
 
 type WidgetContext = {
   widgetId: string;
@@ -46,7 +46,10 @@ const statusElement =
 const widgetsElement = document.querySelector<HTMLElement>("#widgets")!;
 const errorElement = document.querySelector<HTMLElement>("#dashboard-error")!;
 const descriptors = new Map<string, WidgetDescriptor>();
-const instances = new Map<string, WidgetFrontend>();
+const resources = new Map<string, Instance>();
+const frontends = new Map<string, WidgetFrontend>();
+const containers = new Map<string, HTMLElement>();
+const mounting = new Map<string, Promise<void>>();
 const pendingUpdates = new Map<string, unknown>();
 let connection: DashboardConnection;
 
@@ -54,7 +57,7 @@ function renderStatus(status: ConnectionStatus): void {
   const labels: Record<ConnectionStatus, string> = {
     connecting: "Connecting...",
     connected: "Connected",
-    disconnected: "Disconnected",
+    disconnected: "Reconnecting...",
     error: "Connection error",
   };
 
@@ -72,18 +75,40 @@ function showError(message: string): void {
   errorElement.classList.remove("hidden");
 }
 
-async function mountWidget(
-  instanceId: string,
-  widgetId: string,
-): Promise<void> {
-  const descriptor = descriptors.get(widgetId);
+function applySnapshot(
+  widgets: WidgetDescriptor[],
+  instances: Instance[],
+): void {
+  descriptors.clear();
+  for (const descriptor of widgets) descriptors.set(descriptor.id, descriptor);
+
+  const currentIds = new Set(instances.map((instance) => instance.id));
+  for (const instanceId of resources.keys()) {
+    if (!currentIds.has(instanceId)) removeInstance(instanceId);
+  }
+  for (const instance of instances) upsertInstance(instance);
+}
+
+function upsertInstance(instance: Instance): void {
+  resources.set(instance.id, instance);
+  if (!frontends.has(instance.id) && !mounting.has(instance.id)) {
+    const promise = mountWidget(instance).finally(() =>
+      mounting.delete(instance.id),
+    );
+    mounting.set(instance.id, promise);
+  }
+}
+
+async function mountWidget(instance: Instance): Promise<void> {
+  const descriptor = descriptors.get(instance.widget_id);
   if (!descriptor) {
-    showError(`Widget descriptor not found: ${widgetId}`);
+    showError(`Widget descriptor not found: ${instance.widget_id}`);
     return;
   }
 
   const container = document.createElement("section");
-  container.dataset.instanceId = instanceId;
+  container.dataset.instanceId = instance.id;
+  containers.set(instance.id, container);
   widgetsElement.append(container);
 
   try {
@@ -91,37 +116,57 @@ async function mountWidget(
       /* webpackIgnore: true */ descriptor.frontend_url
     )) as WidgetFrontendModule;
     const frontend = module.mount(container, {
-      widgetId,
-      instanceId,
-      send: (payload) => connection.sendWidget(instanceId, payload),
+      widgetId: instance.widget_id,
+      instanceId: instance.id,
+      send: (payload) => {
+        void connection
+          .sendWidget(instance.id, payload)
+          .catch((error) =>
+            showError(error instanceof Error ? error.message : String(error)),
+          );
+      },
     });
-    instances.set(instanceId, frontend);
 
-    if (pendingUpdates.has(instanceId)) {
-      frontend.update(pendingUpdates.get(instanceId));
-      pendingUpdates.delete(instanceId);
+    if (!resources.has(instance.id)) {
+      frontend.destroy();
+      container.remove();
+      containers.delete(instance.id);
+      return;
+    }
+
+    frontends.set(instance.id, frontend);
+    if (pendingUpdates.has(instance.id)) {
+      frontend.update(pendingUpdates.get(instance.id));
+      pendingUpdates.delete(instance.id);
     }
   } catch (error) {
     container.remove();
+    containers.delete(instance.id);
     showError(
       `Could not load ${descriptor.name}: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
 }
 
+function removeInstance(instanceId: string): void {
+  resources.delete(instanceId);
+  pendingUpdates.delete(instanceId);
+  frontends.get(instanceId)?.destroy();
+  frontends.delete(instanceId);
+  containers.get(instanceId)?.remove();
+  containers.delete(instanceId);
+}
+
 connection = connectDashboard({
   onStatus: renderStatus,
-  onWidgets(widgets) {
-    for (const descriptor of widgets) {
-      descriptors.set(descriptor.id, descriptor);
-      connection.createInstance(descriptor.id);
-    }
+  onSnapshot: applySnapshot,
+  onInstanceCreated: upsertInstance,
+  onInstanceUpdated(instance) {
+    resources.set(instance.id, instance);
   },
-  onInstanceCreated(instanceId, widgetId) {
-    void mountWidget(instanceId, widgetId);
-  },
-  onWidgetMessage(instanceId, payload) {
-    const frontend = instances.get(instanceId);
+  onInstanceDestroyed: removeInstance,
+  onWidgetUpdate(instanceId, payload) {
+    const frontend = frontends.get(instanceId);
     if (frontend) frontend.update(payload);
     else pendingUpdates.set(instanceId, payload);
   },
@@ -129,6 +174,6 @@ connection = connectDashboard({
 });
 
 window.addEventListener("beforeunload", () => {
-  for (const frontend of instances.values()) frontend.destroy();
+  for (const frontend of frontends.values()) frontend.destroy();
   connection.close();
 });

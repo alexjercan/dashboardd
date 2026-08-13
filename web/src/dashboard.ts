@@ -1,100 +1,161 @@
 import {
-  createInstanceMessage,
-  helloMessage,
-  listWidgetsMessage,
-  parseServerMessage,
-  widgetMessage,
-  type DashboardToServer,
+  parseDashboardEvent,
+  parseInstance,
+  parseInstanceList,
+  parseWidgetList,
+  type ErrorResponse,
+  type Instance,
   type WidgetDescriptor,
 } from "./protocol";
+
+const CPU_WIDGET_ID = "cpu";
 
 export type ConnectionStatus =
   "connecting" | "connected" | "disconnected" | "error";
 
 export type DashboardEvents = {
   onStatus(status: ConnectionStatus): void;
-  onWidgets(widgets: WidgetDescriptor[]): void;
-  onInstanceCreated(instanceId: string, widgetId: string): void;
-  onWidgetMessage(instanceId: string, payload: unknown): void;
+  onSnapshot(widgets: WidgetDescriptor[], instances: Instance[]): void;
+  onInstanceCreated(instance: Instance): void;
+  onInstanceUpdated(instance: Instance): void;
+  onInstanceDestroyed(instanceId: string): void;
+  onWidgetUpdate(instanceId: string, payload: unknown): void;
   onError(message: string): void;
 };
 
 export type DashboardConnection = {
-  createInstance(widgetId: string): void;
-  sendWidget(instanceId: string, payload: unknown): void;
+  sendWidget(instanceId: string, payload: unknown): Promise<void>;
   close(): void;
 };
 
 export function connectDashboard(events: DashboardEvents): DashboardConnection {
-  const scheme = window.location.protocol === "https:" ? "wss" : "ws";
-  const socket = new WebSocket(`${scheme}://${window.location.host}/ws`);
-  let failed = false;
-  let requestSequence = 0;
+  const source = new EventSource("/api/v1/events");
+  let closed = false;
+  let reconciliation = Promise.resolve();
 
   events.onStatus("connecting");
-  socket.addEventListener("open", () => send(socket, helloMessage()));
 
-  socket.addEventListener("message", (event) => {
+  source.addEventListener("open", () => {
+    events.onStatus("connected");
+    reconciliation = reconciliation
+      .then(() => reconcile(events))
+      .catch((error) => {
+        events.onStatus("error");
+        events.onError(errorMessage(error));
+      });
+  });
+
+  source.addEventListener("message", (message) => {
     try {
-      const message = parseServerMessage(JSON.parse(event.data));
+      const event = parseDashboardEvent(JSON.parse(message.data));
 
-      switch (message.kind) {
-        case "ready":
-          events.onStatus("connected");
-          send(socket, listWidgetsMessage(nextRequestId("widgets")));
-          break;
-        case "widgets":
-          events.onWidgets(message.data.widgets);
-          break;
+      switch (event.kind) {
         case "instance_created":
-          events.onInstanceCreated(
-            message.data.instance_id,
-            message.data.widget_id,
-          );
+          events.onInstanceCreated(event.data.instance);
           break;
-        case "widget_message":
-          events.onWidgetMessage(
-            message.data.instance_id,
-            message.data.payload,
-          );
+        case "instance_updated":
+          events.onInstanceUpdated(event.data.instance);
           break;
-        case "error":
-          events.onError(message.data.error.message);
+        case "instance_destroyed":
+          events.onInstanceDestroyed(event.data.instance_id);
+          break;
+        case "instance_error":
+          events.onError(event.data.error.message);
+          break;
+        case "widget_update":
+          events.onWidgetUpdate(event.data.instance_id, event.data.payload);
           break;
       }
-    } catch {
-      failed = true;
-      events.onStatus("error");
-      socket.close();
+    } catch (error) {
+      events.onError(errorMessage(error));
     }
   });
 
-  socket.addEventListener("error", () => {
-    failed = true;
-    events.onStatus("error");
+  source.addEventListener("error", () => {
+    if (!closed) events.onStatus("disconnected");
   });
-  socket.addEventListener("close", () => {
-    if (!failed) events.onStatus("disconnected");
-  });
-
-  function nextRequestId(prefix: string): string {
-    requestSequence += 1;
-    return `${prefix}-${requestSequence}`;
-  }
 
   return {
-    createInstance(widgetId) {
-      send(socket, createInstanceMessage(nextRequestId("instance"), widgetId));
-    },
-    sendWidget(instanceId, payload) {
-      send(socket, widgetMessage(instanceId, payload));
+    async sendWidget(instanceId, payload) {
+      await request(
+        `/api/v1/instances/${encodeURIComponent(instanceId)}/messages`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(payload),
+        },
+      );
     },
     close() {
-      socket.close();
+      closed = true;
+      source.close();
     },
   };
 }
 
-function send(socket: WebSocket, message: DashboardToServer): void {
-  socket.send(JSON.stringify(message));
+async function reconcile(events: DashboardEvents): Promise<void> {
+  const [widgetList, instanceList] = await Promise.all([
+    requestJson("/api/v1/widgets", parseWidgetList),
+    requestJson("/api/v1/instances", parseInstanceList),
+  ]);
+  let instances = instanceList.instances;
+  const cpuAvailable = widgetList.widgets.some(
+    (widget) => widget.id === CPU_WIDGET_ID,
+  );
+  const cpuExists = instances.some(
+    (instance) => instance.widget_id === CPU_WIDGET_ID,
+  );
+
+  if (cpuAvailable && !cpuExists) {
+    try {
+      const cpu = await requestJson("/api/v1/instances", parseInstance, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ widget_id: CPU_WIDGET_ID }),
+      });
+      instances = [...instances, cpu];
+    } catch (error) {
+      if (!(error instanceof ApiError) || error.status !== 409) throw error;
+      instances = (await requestJson("/api/v1/instances", parseInstanceList))
+        .instances;
+    }
+  }
+
+  events.onSnapshot(widgetList.widgets, instances);
+}
+
+async function requestJson<T>(
+  input: string,
+  parse: (value: unknown) => T,
+  init?: RequestInit,
+): Promise<T> {
+  const response = await request(input, init);
+  return parse(await response.json());
+}
+
+async function request(input: string, init?: RequestInit): Promise<Response> {
+  const response = await fetch(input, init);
+  if (response.ok) return response;
+
+  let message = `${response.status} ${response.statusText}`;
+  try {
+    const body = (await response.json()) as ErrorResponse;
+    if (typeof body.error?.message === "string") message = body.error.message;
+  } catch {
+    // Keep the HTTP status when the server does not return the API error shape.
+  }
+  throw new ApiError(response.status, message);
+}
+
+class ApiError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

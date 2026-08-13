@@ -1,36 +1,4 @@
-export const PROTOCOL_VERSION = 1;
-
-type EmptyData = Record<string, never>;
-
-type HelloMessage = {
-  version: typeof PROTOCOL_VERSION;
-  kind: "hello";
-  data: EmptyData;
-};
-
-type ListWidgetsMessage = {
-  version: typeof PROTOCOL_VERSION;
-  kind: "list_widgets";
-  data: { request_id: string };
-};
-
-type CreateInstanceMessage = {
-  version: typeof PROTOCOL_VERSION;
-  kind: "create_instance";
-  data: { request_id: string; widget_id: string };
-};
-
-type WidgetMessageToServer = {
-  version: typeof PROTOCOL_VERSION;
-  kind: "widget_message";
-  data: { instance_id: string; payload: unknown };
-};
-
-export type DashboardToServer =
-  | HelloMessage
-  | ListWidgetsMessage
-  | CreateInstanceMessage
-  | WidgetMessageToServer;
+export const EVENT_VERSION = 1;
 
 export type WidgetDescriptor = {
   id: string;
@@ -38,103 +6,203 @@ export type WidgetDescriptor = {
   frontend_url: string;
 };
 
-type ReadyMessage = {
-  version: number;
-  kind: "ready";
-  data: EmptyData;
+export type InstanceLayout = {
+  column: number;
+  row: number;
+  width: number;
+  height: number;
 };
 
-type WidgetsMessage = {
-  version: number;
-  kind: "widgets";
-  data: { request_id: string; widgets: WidgetDescriptor[] };
+export type Instance = {
+  id: string;
+  widget_id: string;
+  layout: InstanceLayout;
 };
 
-type InstanceCreatedMessage = {
-  version: number;
-  kind: "instance_created";
-  data: { request_id: string; instance_id: string; widget_id: string };
+export type WidgetList = {
+  widgets: WidgetDescriptor[];
 };
 
-type WidgetMessage = {
-  version: number;
-  kind: "widget_message";
-  data: { instance_id: string; payload: unknown };
+export type InstanceList = {
+  instances: Instance[];
 };
 
-type ErrorMessage = {
-  version: number;
-  kind: "error";
-  data: {
-    request_id: string | null;
-    error: {
-      code: string;
-      message: string;
-    };
+export type ErrorResponse = {
+  error: {
+    code: string;
+    message: string;
   };
 };
 
-export type ServerToDashboard =
-  | ReadyMessage
-  | WidgetsMessage
-  | InstanceCreatedMessage
-  | WidgetMessage
-  | ErrorMessage;
+type InstanceCreatedEvent = {
+  version: typeof EVENT_VERSION;
+  kind: "instance_created";
+  data: { instance: Instance };
+};
 
-export function helloMessage(): DashboardToServer {
-  return envelope("hello", {});
-}
+type InstanceUpdatedEvent = {
+  version: typeof EVENT_VERSION;
+  kind: "instance_updated";
+  data: { instance: Instance };
+};
 
-export function listWidgetsMessage(requestId: string): DashboardToServer {
-  return envelope("list_widgets", { request_id: requestId });
-}
+type InstanceDestroyedEvent = {
+  version: typeof EVENT_VERSION;
+  kind: "instance_destroyed";
+  data: { instance_id: string };
+};
 
-export function createInstanceMessage(
-  requestId: string,
-  widgetId: string,
-): DashboardToServer {
-  return envelope("create_instance", {
-    request_id: requestId,
-    widget_id: widgetId,
-  });
-}
+type InstanceErrorEvent = {
+  version: typeof EVENT_VERSION;
+  kind: "instance_error";
+  data: {
+    instance_id: string | null;
+    error: { code: string; message: string };
+  };
+};
 
-export function widgetMessage(
-  instanceId: string,
-  payload: unknown,
-): DashboardToServer {
-  return envelope("widget_message", {
-    instance_id: instanceId,
-    payload,
-  });
-}
+type WidgetUpdateEvent = {
+  version: typeof EVENT_VERSION;
+  kind: "widget_update";
+  data: { instance_id: string; payload: unknown };
+};
 
-export function parseServerMessage(value: unknown): ServerToDashboard {
-  if (!isRecord(value) || value.version !== PROTOCOL_VERSION) {
-    throw new Error("unsupported dashboard protocol version");
+export type DashboardEvent =
+  | InstanceCreatedEvent
+  | InstanceUpdatedEvent
+  | InstanceDestroyedEvent
+  | InstanceErrorEvent
+  | WidgetUpdateEvent;
+
+export function parseWidgetList(value: unknown): WidgetList {
+  if (!isRecord(value) || !Array.isArray(value.widgets)) {
+    throw new Error("invalid widget list");
   }
 
+  const widgets = value.widgets.map(parseWidget);
+  return { widgets };
+}
+
+export function parseInstanceList(value: unknown): InstanceList {
+  if (!isRecord(value) || !Array.isArray(value.instances)) {
+    throw new Error("invalid instance list");
+  }
+
+  const instances = value.instances.map(parseInstance);
+  return { instances };
+}
+
+export function parseInstance(value: unknown): Instance {
   if (
-    [
-      "ready",
-      "widgets",
-      "instance_created",
-      "widget_message",
-      "error",
-    ].includes(String(value.kind)) &&
-    isRecord(value.data)
+    !isRecord(value) ||
+    typeof value.id !== "string" ||
+    typeof value.widget_id !== "string" ||
+    !isRecord(value.layout) ||
+    !isNumber(value.layout.column) ||
+    !isNumber(value.layout.row) ||
+    !isNumber(value.layout.width) ||
+    !isNumber(value.layout.height)
   ) {
-    return value as unknown as ServerToDashboard;
+    throw new Error("invalid instance");
   }
 
-  throw new Error("unknown dashboard message");
+  return {
+    id: value.id,
+    widget_id: value.widget_id,
+    layout: {
+      column: value.layout.column,
+      row: value.layout.row,
+      width: value.layout.width,
+      height: value.layout.height,
+    },
+  };
 }
 
-function envelope<K extends string, D>(
-  kind: K,
-  data: D,
-): { version: typeof PROTOCOL_VERSION; kind: K; data: D } {
-  return { version: PROTOCOL_VERSION, kind, data };
+export function parseDashboardEvent(value: unknown): DashboardEvent {
+  if (
+    !isRecord(value) ||
+    value.version !== EVENT_VERSION ||
+    typeof value.kind !== "string" ||
+    !isRecord(value.data)
+  ) {
+    throw new Error("invalid dashboard event");
+  }
+
+  switch (value.kind) {
+    case "instance_created":
+    case "instance_updated":
+      return {
+        version: EVENT_VERSION,
+        kind: value.kind,
+        data: { instance: parseInstance(value.data.instance) },
+      };
+    case "instance_destroyed":
+      if (typeof value.data.instance_id !== "string") break;
+      return {
+        version: EVENT_VERSION,
+        kind: value.kind,
+        data: { instance_id: value.data.instance_id },
+      };
+    case "instance_error":
+      if (
+        !(
+          value.data.instance_id === null ||
+          typeof value.data.instance_id === "string"
+        ) ||
+        !isError(value.data.error)
+      ) {
+        break;
+      }
+      return {
+        version: EVENT_VERSION,
+        kind: value.kind,
+        data: {
+          instance_id: value.data.instance_id,
+          error: value.data.error,
+        },
+      };
+    case "widget_update":
+      if (typeof value.data.instance_id !== "string") break;
+      return {
+        version: EVENT_VERSION,
+        kind: value.kind,
+        data: {
+          instance_id: value.data.instance_id,
+          payload: value.data.payload,
+        },
+      };
+  }
+
+  throw new Error("unknown dashboard event");
+}
+
+function parseWidget(value: unknown): WidgetDescriptor {
+  if (
+    !isRecord(value) ||
+    typeof value.id !== "string" ||
+    typeof value.name !== "string" ||
+    typeof value.frontend_url !== "string"
+  ) {
+    throw new Error("invalid widget descriptor");
+  }
+
+  return {
+    id: value.id,
+    name: value.name,
+    frontend_url: value.frontend_url,
+  };
+}
+
+function isError(value: unknown): value is ErrorResponse["error"] {
+  return (
+    isRecord(value) &&
+    typeof value.code === "string" &&
+    typeof value.message === "string"
+  );
+}
+
+function isNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
