@@ -137,12 +137,12 @@ h1 {
   height: 100%;
 }
 
+.drag-handle,
 .remove-widget {
   display: none;
   position: absolute;
   z-index: 2;
   top: 8px;
-  right: 8px;
   min-height: 30px;
   padding: 5px 9px;
   border: 1px solid var(--scufris-color-danger);
@@ -153,11 +153,49 @@ h1 {
   font-size: 12px;
 }
 
+.remove-widget {
+  right: 8px;
+}
+
+.drag-handle {
+  left: 50%;
+  min-width: 44px;
+  padding: 5px 10px;
+  transform: translateX(-50%);
+  border-color: var(--scufris-color-accent);
+  color: var(--scufris-color-accent);
+  cursor: grab;
+  font-family: var(--scufris-font-mono);
+  font-size: 15px;
+  letter-spacing: 2px;
+  touch-action: none;
+  user-select: none;
+}
+
 .editing .dashboard-widget {
   outline: 1px dashed var(--scufris-color-accent);
   outline-offset: 4px;
 }
 
+.editing .dashboard-widget-mount {
+  pointer-events: none;
+  user-select: none;
+}
+
+.editing .dashboard-widget.dragging {
+  z-index: 3;
+  opacity: 0.45;
+}
+
+.editing .dashboard-widget.dragging .drag-handle {
+  cursor: grabbing;
+}
+
+.editing.drag-active .dashboard-widget:not(.dragging) {
+  outline-color: var(--scufris-color-danger);
+}
+
+.editing .drag-handle,
 .editing .remove-widget {
   display: block;
 }
@@ -174,11 +212,17 @@ h1 {
 }
 
 .dashboard-slot:hover,
-.dashboard-slot:focus-visible {
+.dashboard-slot:focus-visible,
+.dashboard-slot.drop-target {
   border-color: var(--scufris-color-accent);
   background: rgb(255 221 51 / 5%);
   color: var(--scufris-color-accent);
   outline: none;
+}
+
+.dashboard-slot.drop-target {
+  outline: 3px solid var(--scufris-color-accent);
+  outline-offset: -6px;
 }
 
 .dashboard-footer {

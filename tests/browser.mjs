@@ -144,10 +144,32 @@ try {
     "addition synchronizes across pages",
   );
 
+  await dragToSlot(page, memoryTwo, "1", "1");
+  await page
+    .locator(`[data-instance-id="${memoryTwo}"][data-row="1"]`)
+    .waitFor();
+  await secondPage
+    .locator(`[data-instance-id="${memoryTwo}"][data-row="1"]`)
+    .waitFor();
+
+  const cpuFrame = page.locator(`[data-instance-id="${cpuOne}"]`);
+  await cpuFrame.focus();
+  await cpuFrame.press("ArrowDown");
+  await page
+    .locator('#dashboard-announcement:text-is("CPU moved to column 1, row 2")')
+    .waitFor();
+  await secondPage
+    .locator(`[data-instance-id="${cpuOne}"][data-row="1"]`)
+    .waitFor();
+  await cpuFrame.press("ArrowRight");
+  await page
+    .locator('#dashboard-announcement:text-is("That position is unavailable")')
+    .waitFor();
+
   const collision = await page.request.post(`${baseUrl}/api/v1/instances`, {
     data: {
       widget_id: "cpu",
-      layout: { column: 0, row: 0, width: 1, height: 1 },
+      layout: { column: 0, row: 1, width: 1, height: 1 },
     },
   });
   assert.equal(
@@ -221,6 +243,37 @@ try {
   await proxy.stop();
   await stopRecordedProcess(dashboardd);
   closeSync(log);
+}
+
+async function dragToSlot(page, instanceId, column, row) {
+  const source = page.locator(`[data-instance-id="${instanceId}"]`);
+  const target = page.locator(
+    `.dashboard-slot[data-column="${column}"][data-row="${row}"]`,
+  );
+  const handle = source.locator(".drag-handle");
+  const handleBox = await handle.boundingBox();
+  const targetBox = await target.boundingBox();
+  assert.ok(handleBox);
+  assert.ok(targetBox);
+  await page.mouse.move(
+    handleBox.x + handleBox.width / 2,
+    handleBox.y + handleBox.height / 2,
+  );
+  await page.mouse.down();
+  await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + 20, {
+    steps: 5,
+  });
+  assert.equal(
+    await source.evaluate((element) => element.classList.contains("dragging")),
+    true,
+  );
+  assert.equal(
+    await target.evaluate((element) =>
+      element.classList.contains("drop-target"),
+    ),
+    true,
+  );
+  await page.mouse.up();
 }
 
 async function addWidget(page, column, row, name) {

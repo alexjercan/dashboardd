@@ -23,6 +23,7 @@ app.innerHTML = `
         <button id="finish-editing" class="button primary" type="button" hidden>Done</button>
       </header>
       <div id="dashboard-error" class="dashboard-error" role="alert" hidden></div>
+      <div id="dashboard-announcement" class="sr-only" aria-live="polite"></div>
       <main id="widgets" class="dashboard-grid" aria-label="Dashboard widgets"></main>
       <footer class="dashboard-footer">
         <span id="connection-indicator" class="status-dot" aria-hidden="true"></span>
@@ -55,6 +56,7 @@ const statusElement = required<HTMLElement>("#connection-status");
 const indicatorElement = required<HTMLElement>("#connection-indicator");
 const widgetsElement = required<HTMLElement>("#widgets");
 const errorElement = required<HTMLElement>("#dashboard-error");
+const announcementElement = required<HTMLElement>("#dashboard-announcement");
 const editButton = required<HTMLButtonElement>("#edit-layout");
 const doneButton = required<HTMLButtonElement>("#finish-editing");
 const addDialog = required<HTMLDialogElement>("#add-widget");
@@ -82,7 +84,17 @@ let dashboardLayout: DashboardLayout = { columns: 1 };
 let selectedSlot: { column: number; row: number } | null = null;
 let selectedWidgetId: string | null = null;
 let removeInstanceId: string | null = null;
+let drag: DragState | null = null;
 let connection: DashboardConnection;
+
+type DragState = {
+  instanceId: string;
+  pointerId: number;
+  startX: number;
+  startY: number;
+  started: boolean;
+  target: { column: number; row: number } | null;
+};
 
 editButton.addEventListener("click", () => setEditing(true));
 doneButton.addEventListener("click", () => setEditing(false));
@@ -91,6 +103,9 @@ confirmRemoveButton.addEventListener(
   "click",
   () => void removeSelectedWidget(),
 );
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && drag) cancelDrag();
+});
 
 function renderStatus(status: ConnectionStatus): void {
   const labels: Record<ConnectionStatus, string> = {
@@ -157,13 +172,23 @@ async function mountWidget(instance: Instance): Promise<void> {
   applyLayout(frame, instance);
   const mount = document.createElement("div");
   mount.className = "dashboard-widget-mount";
+  const dragHandle = document.createElement("button");
+  dragHandle.className = "drag-handle";
+  dragHandle.type = "button";
+  dragHandle.innerHTML = '<span aria-hidden="true">:::</span>';
+  dragHandle.setAttribute("aria-label", `Move ${descriptor.name}`);
+  dragHandle.addEventListener("pointerdown", startDrag);
+  dragHandle.addEventListener("pointermove", updateDrag);
+  dragHandle.addEventListener("pointerup", finishDrag);
+  dragHandle.addEventListener("pointercancel", cancelDrag);
   const remove = document.createElement("button");
   remove.className = "remove-widget";
   remove.type = "button";
   remove.textContent = "Remove";
   remove.setAttribute("aria-label", `Remove ${descriptor.name}`);
   remove.addEventListener("click", () => openRemoveDialog(instance.id));
-  frame.append(mount, remove);
+  frame.addEventListener("keydown", moveWithKeyboard);
+  frame.append(mount, dragHandle, remove);
   containers.set(instance.id, frame);
   renderCanvas();
 
@@ -196,12 +221,14 @@ async function mountWidget(instance: Instance): Promise<void> {
 }
 
 function setEditing(value: boolean): void {
+  if (!value) cancelDrag();
   editing = value;
   renderCanvas();
 }
 
 function renderCanvas(): void {
   widgetsElement.classList.toggle("editing", editing);
+  for (const frame of containers.values()) frame.tabIndex = editing ? 0 : -1;
   editButton.hidden = editing;
   doneButton.hidden = !editing;
   const instances = [...resources.values()].sort(
@@ -266,12 +293,169 @@ function renderCanvas(): void {
   }
 }
 
+function startDrag(event: PointerEvent): void {
+  if (!editing || event.button !== 0) return;
+  const handle = event.currentTarget as HTMLElement;
+  const frame = handle.closest<HTMLElement>(".dashboard-widget");
+  const instanceId = frame?.dataset.instanceId;
+  if (!instanceId) return;
+  drag = {
+    instanceId,
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    started: false,
+    target: null,
+  };
+  handle.setPointerCapture(event.pointerId);
+}
+
+function updateDrag(event: PointerEvent): void {
+  if (!drag || drag.pointerId !== event.pointerId) return;
+  const frame = containers.get(drag.instanceId);
+  if (!frame) return cancelDrag();
+  if (!drag.started) {
+    if (
+      Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 8
+    )
+      return;
+    drag.started = true;
+    frame.classList.add("dragging");
+    widgetsElement.classList.add("drag-active");
+  }
+  event.preventDefault();
+  const slot = document
+    .elementFromPoint(event.clientX, event.clientY)
+    ?.closest<HTMLElement>(".dashboard-slot");
+  setDragTarget(
+    slot
+      ? { column: Number(slot.dataset.column), row: Number(slot.dataset.row) }
+      : null,
+  );
+}
+
+function finishDrag(event: PointerEvent): void {
+  if (!drag || drag.pointerId !== event.pointerId) return;
+  const target = drag.started ? drag.target : null;
+  const instanceId = drag.instanceId;
+  cancelDrag();
+  if (target) void moveInstance(instanceId, target.column, target.row);
+}
+
+function cancelDrag(): void {
+  if (!drag) return;
+  const frame = containers.get(drag.instanceId);
+  const handle = frame?.querySelector<HTMLElement>(".drag-handle");
+  if (handle?.hasPointerCapture(drag.pointerId))
+    handle.releasePointerCapture(drag.pointerId);
+  frame?.classList.remove("dragging");
+  widgetsElement.classList.remove("drag-active");
+  setDragTarget(null);
+  drag = null;
+}
+
+function setDragTarget(target: { column: number; row: number } | null): void {
+  for (const slot of widgetsElement.querySelectorAll(".dashboard-slot"))
+    slot.classList.remove("drop-target");
+  drag && (drag.target = target);
+  if (!target) return;
+  widgetsElement
+    .querySelector<HTMLElement>(
+      `.dashboard-slot[data-column="${target.column}"][data-row="${target.row}"]`,
+    )
+    ?.classList.add("drop-target");
+}
+
+function moveWithKeyboard(event: KeyboardEvent): void {
+  if (!editing || !event.key.startsWith("Arrow")) return;
+  const frame = event.currentTarget as HTMLElement;
+  const instance = frame.dataset.instanceId
+    ? resources.get(frame.dataset.instanceId)
+    : undefined;
+  if (!instance) return;
+  const offsets: Record<string, [number, number]> = {
+    ArrowLeft: [-1, 0],
+    ArrowRight: [1, 0],
+    ArrowUp: [0, -1],
+    ArrowDown: [0, 1],
+  };
+  const [columnOffset, rowOffset] = offsets[event.key];
+  const column = instance.layout.column + columnOffset;
+  const row = instance.layout.row + rowOffset;
+  event.preventDefault();
+  if (!isEmptyDestination(instance, column, row)) {
+    announce("That position is unavailable");
+    return;
+  }
+  void moveInstance(instance.id, column, row);
+}
+
+function isEmptyDestination(
+  instance: Instance,
+  column: number,
+  row: number,
+): boolean {
+  if (
+    column < 0 ||
+    row < 0 ||
+    column + instance.layout.width > dashboardLayout.columns
+  )
+    return false;
+  return ![...resources.values()].some(
+    (other) =>
+      other.id !== instance.id &&
+      column < other.layout.column + other.layout.width &&
+      column + instance.layout.width > other.layout.column &&
+      row < other.layout.row + other.layout.height &&
+      row + instance.layout.height > other.layout.row,
+  );
+}
+
+async function moveInstance(
+  instanceId: string,
+  column: number,
+  row: number,
+): Promise<void> {
+  const instance = resources.get(instanceId);
+  if (!instance || !isEmptyDestination(instance, column, row)) {
+    announce("That position is unavailable");
+    return;
+  }
+  clearError();
+  try {
+    const updated = await apiRequest(
+      `/api/v1/instances/${encodeURIComponent(instanceId)}`,
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ layout: { ...instance.layout, column, row } }),
+      },
+    );
+    if (updated) upsertInstance(updated);
+    announce(
+      `${descriptors.get(instance.widget_id)?.name ?? "Widget"} moved to column ${column + 1}, row ${row + 1}`,
+    );
+    containers.get(instanceId)?.focus();
+  } catch (error) {
+    const message = errorMessage(error);
+    showError(message);
+    announce(message);
+  }
+}
+
+function announce(message: string): void {
+  announcementElement.textContent = "";
+  requestAnimationFrame(() => (announcementElement.textContent = message));
+}
+
 function applyLayout(frame: HTMLElement, instance: Instance): void {
   frame.style.setProperty(
     "--widget-column",
     String(instance.layout.column + 1),
   );
   frame.style.setProperty("--widget-row", String(instance.layout.row + 1));
+  frame.dataset.column = String(instance.layout.column);
+  frame.dataset.row = String(instance.layout.row);
   frame.style.setProperty("--widget-width", String(instance.layout.width));
   frame.style.setProperty("--widget-height", String(instance.layout.height));
   frame.dataset.layout = `${instance.layout.width}x${instance.layout.height}`;
