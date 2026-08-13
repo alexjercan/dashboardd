@@ -9,7 +9,7 @@ const root = path.resolve(import.meta.dirname, "..");
 const artifacts = path.join(root, "tests/artifacts");
 mkdirSync(artifacts, { recursive: true });
 
-run("cargo", ["build", "-p", "dashboardd", "-p", "cpu"]);
+run("cargo", ["build", "-p", "dashboardd", "-p", "cpu", "-p", "memory"]);
 run("npm", ["run", "build"]);
 run("cargo", ["xtask", "widget", "prepare", "--all"]);
 
@@ -47,17 +47,23 @@ try {
 
   const pageStartedAt = Date.now();
   await page.goto(baseUrl);
-  await page.locator('.dashboard-widget[data-widget-id="cpu"]').waitFor();
+  const cpuWidget = page.locator('.dashboard-widget[data-widget-id="cpu"]');
+  const memoryWidget = page.locator(
+    '.dashboard-widget[data-widget-id="memory"]',
+  );
+  await cpuWidget.waitFor();
+  await memoryWidget.waitFor();
   assert.ok(
     Date.now() - pageStartedAt < 5_000,
     "initial SSE data starts reconciliation without waiting for keep-alive",
   );
-  await page.locator(".usage").waitFor();
-  await page.waitForFunction(
-    () =>
-      document
-        .querySelector(".dashboard-widget-mount")
-        ?.shadowRoot?.querySelector(".usage")?.textContent !== "--.-%",
+  await waitForTelemetry(cpuWidget);
+  await waitForTelemetry(memoryWidget);
+  await memoryWidget.locator(".ram .bar-fill").waitFor();
+  await memoryWidget.locator(".swap .bar-fill").waitFor();
+  assert.match(
+    await memoryWidget.locator('[data-memory="used"]').textContent(),
+    /\/.*(?:MiB|GiB|TiB)/,
   );
   assert.equal(
     await page.locator("#dashboard-error").isHidden(),
@@ -66,41 +72,86 @@ try {
   );
   assert.equal(
     await instanceCount(page, baseUrl),
-    1,
-    "creates one CPU instance",
+    2,
+    "creates CPU and Memory instances",
   );
-  const frontendResponse = await page.request.get(
-    `${baseUrl}/widgets/cpu/frontend.js`,
-  );
-  assert.equal(frontendResponse.headers()["cache-control"], "no-cache");
+  for (const widgetId of ["cpu", "memory"]) {
+    const frontendResponse = await page.request.get(
+      `${baseUrl}/widgets/${widgetId}/frontend.js`,
+    );
+    assert.equal(frontendResponse.headers()["cache-control"], "no-cache");
+  }
 
-  const instanceId = await page
-    .locator(".dashboard-widget")
-    .getAttribute("data-instance-id");
-  assert.ok(instanceId);
+  const cpuInstanceId = await cpuWidget.getAttribute("data-instance-id");
+  const memoryInstanceId = await memoryWidget.getAttribute("data-instance-id");
+  assert.ok(cpuInstanceId);
+  assert.ok(memoryInstanceId);
   await page.reload();
-  await page.locator(`[data-instance-id="${instanceId}"] .usage`).waitFor();
-  await page.waitForFunction(
-    () =>
-      document
-        .querySelector(".dashboard-widget-mount")
-        ?.shadowRoot?.querySelector(".usage")?.textContent !== "--.-%",
+  await waitForTelemetry(page.locator(`[data-instance-id="${cpuInstanceId}"]`));
+  await waitForTelemetry(
+    page.locator(`[data-instance-id="${memoryInstanceId}"]`),
   );
   assert.equal(
     await instanceCount(page, baseUrl),
-    1,
-    "refresh keeps the server-owned instance",
+    2,
+    "refresh keeps both server-owned instances",
   );
 
   const secondPage = await context.newPage();
   pages.push(secondPage);
   await secondPage.goto(baseUrl);
-  await secondPage.locator(`[data-instance-id="${instanceId}"]`).waitFor();
+  await secondPage.locator(`[data-instance-id="${cpuInstanceId}"]`).waitFor();
+  await secondPage
+    .locator(`[data-instance-id="${memoryInstanceId}"]`)
+    .waitFor();
   assert.equal(
     await instanceCount(secondPage, baseUrl),
-    1,
-    "two pages share one backend",
+    2,
+    "two pages share both backends",
   );
+
+  const cpuBox = await page
+    .locator(`[data-instance-id="${cpuInstanceId}"]`)
+    .boundingBox();
+  const memoryBox = await page
+    .locator(`[data-instance-id="${memoryInstanceId}"]`)
+    .boundingBox();
+  assert.ok(cpuBox);
+  assert.ok(memoryBox);
+  assert.ok(
+    Math.abs(memoryBox.width - cpuBox.width) < 0.1,
+    "1x1 widgets have equal width",
+  );
+  assert.equal(
+    memoryBox.height,
+    cpuBox.height,
+    "1x1 widgets have equal height",
+  );
+  assert.equal(cpuBox.height, 350, "one grid height unit is 350 px");
+
+  const expanded = await page.request.patch(
+    `${baseUrl}/api/v1/instances/${memoryInstanceId}`,
+    { data: { layout: { column: 0, row: 0, width: 2, height: 2 } } },
+  );
+  assert.equal(expanded.status(), 200);
+  await page
+    .locator(`[data-instance-id="${memoryInstanceId}"][data-layout="2x2"]`)
+    .waitFor();
+  const expandedBox = await page
+    .locator(`[data-instance-id="${memoryInstanceId}"]`)
+    .boundingBox();
+  assert.ok(expandedBox);
+  assert.ok(Math.abs(expandedBox.width - (cpuBox.width * 2 + 20)) < 0.1);
+  assert.equal(expandedBox.height, cpuBox.height * 2 + 20);
+
+  const restored = await page.request.patch(
+    `${baseUrl}/api/v1/instances/${memoryInstanceId}`,
+    { data: { layout: { column: 0, row: 0, width: 1, height: 1 } } },
+  );
+  assert.equal(restored.status(), 200);
+  await page
+    .locator(`[data-instance-id="${memoryInstanceId}"][data-layout="1x1"]`)
+    .waitFor();
 
   assert.equal(
     await page
@@ -113,7 +164,7 @@ try {
     "wide dashboard has three columns",
   );
   const rows = await page.locator(".dashboard-grid").evaluate((grid) => {
-    const samples = Array.from({ length: 5 }, () => {
+    const samples = Array.from({ length: 4 }, () => {
       const item = document.createElement("section");
       item.className = "dashboard-widget";
       grid.append(item);
@@ -135,7 +186,23 @@ try {
     "six widgets form a 3x2 grid",
   );
 
+  await page.screenshot({
+    path: path.join(artifacts, "dashboard-wide.png"),
+    fullPage: true,
+  });
+
   await page.setViewportSize({ width: 420, height: 900 });
+  const narrowCpuBox = await page
+    .locator(`[data-instance-id="${cpuInstanceId}"]`)
+    .boundingBox();
+  const narrowMemoryBox = await page
+    .locator(`[data-instance-id="${memoryInstanceId}"]`)
+    .boundingBox();
+  assert.ok(narrowCpuBox);
+  assert.ok(narrowMemoryBox);
+  assert.ok(Math.abs(narrowMemoryBox.width - narrowCpuBox.width) < 0.1);
+  assert.equal(narrowMemoryBox.height, narrowCpuBox.height);
+  assert.equal(narrowCpuBox.height, 350);
   assert.equal(
     await page
       .locator(".dashboard-grid")
@@ -153,6 +220,10 @@ try {
     true,
     "narrow widget does not overflow",
   );
+  await page.screenshot({
+    path: path.join(artifacts, "dashboard-narrow.png"),
+    fullPage: true,
+  });
 
   await proxy.stop();
   await page
@@ -160,31 +231,33 @@ try {
     .waitFor();
   await proxy.start();
   await page.locator('#connection-status[data-status="connected"]').waitFor();
-  await page.locator(`[data-instance-id="${instanceId}"]`).waitFor();
+  await page.locator(`[data-instance-id="${cpuInstanceId}"]`).waitFor();
+  await page.locator(`[data-instance-id="${memoryInstanceId}"]`).waitFor();
   assert.equal(
     await instanceCount(page, baseUrl),
-    1,
-    "reconnect reconciles authoritative state",
+    2,
+    "reconnect reconciles both authoritative instances",
   );
 
   const response = await page.request.delete(
-    `${baseUrl}/api/v1/instances/${instanceId}`,
+    `${baseUrl}/api/v1/instances/${memoryInstanceId}`,
   );
   assert.equal(response.status(), 204);
-  await page.locator(`[data-instance-id="${instanceId}"]`).waitFor({
+  await page.locator(`[data-instance-id="${memoryInstanceId}"]`).waitFor({
     state: "detached",
   });
-  await secondPage.locator(`[data-instance-id="${instanceId}"]`).waitFor({
-    state: "detached",
-  });
+  await secondPage
+    .locator(`[data-instance-id="${memoryInstanceId}"]`)
+    .waitFor({ state: "detached" });
+  await page.locator(`[data-instance-id="${cpuInstanceId}"]`).waitFor();
   assert.equal(
     await instanceCount(page, baseUrl),
-    0,
-    "deletion stops the instance",
+    1,
+    "memory deletion leaves CPU running",
   );
 
   const replacement = await page.request.post(`${baseUrl}/api/v1/instances`, {
-    data: { widget_id: "cpu" },
+    data: { widget_id: "memory" },
   });
   assert.equal(replacement.status(), 201);
   const replacementId = (await replacement.json()).id;
@@ -305,6 +378,31 @@ async function waitForHealth(baseUrl) {
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   throw new Error("dashboardd did not become healthy");
+}
+
+async function waitForTelemetry(widget) {
+  const usage = widget.locator(".usage");
+  await usage.waitFor();
+  await usage.evaluate(
+    (element) =>
+      new Promise((resolve, reject) => {
+        if (element.textContent !== "--.-%") {
+          resolve();
+          return;
+        }
+        const observer = new MutationObserver(() => {
+          if (element.textContent !== "--.-%") {
+            observer.disconnect();
+            resolve();
+          }
+        });
+        observer.observe(element, { childList: true, characterData: true });
+        setTimeout(() => {
+          observer.disconnect();
+          reject(new Error("widget telemetry did not arrive"));
+        }, 5_000);
+      }),
+  );
 }
 
 async function instanceCount(page, baseUrl) {

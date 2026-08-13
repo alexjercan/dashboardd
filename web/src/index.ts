@@ -76,6 +76,8 @@ function applySnapshot(
 
 function upsertInstance(instance: Instance): void {
   resources.set(instance.id, instance);
+  const frame = containers.get(instance.id);
+  if (frame) applyLayout(frame, instance);
   if (!descriptors.has(instance.widget_id)) {
     console.debug("Instance arrived before widget descriptors", {
       instanceId: instance.id,
@@ -99,6 +101,7 @@ async function mountWidget(instance: Instance): Promise<void> {
   frame.className = "dashboard-widget";
   frame.dataset.instanceId = instance.id;
   frame.dataset.widgetId = instance.widget_id;
+  applyLayout(frame, instance);
   const mount = document.createElement("div");
   mount.className = "dashboard-widget-mount";
   frame.append(mount);
@@ -142,6 +145,12 @@ async function mountWidget(instance: Instance): Promise<void> {
   }
 }
 
+function applyLayout(frame: HTMLElement, instance: Instance): void {
+  frame.style.setProperty("--widget-width", String(instance.layout.width));
+  frame.style.setProperty("--widget-height", String(instance.layout.height));
+  frame.dataset.layout = `${instance.layout.width}x${instance.layout.height}`;
+}
+
 function removeInstance(instanceId: string): void {
   console.info("Widget instance removed", { instanceId });
   resources.delete(instanceId);
@@ -156,9 +165,7 @@ connection = connectDashboard({
   onStatus: renderStatus,
   onSnapshot: applySnapshot,
   onInstanceCreated: upsertInstance,
-  onInstanceUpdated(instance) {
-    resources.set(instance.id, instance);
-  },
+  onInstanceUpdated: upsertInstance,
   onInstanceDestroyed: removeInstance,
   onWidgetUpdate(instanceId, payload) {
     const frontend = frontends.get(instanceId);

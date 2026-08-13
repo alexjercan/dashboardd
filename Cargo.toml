@@ -1,5 +1,11 @@
 [workspace]
-members = ["crates/dashboard-protocol", "crates/dashboardd", "widgets/cpu", "xtask"]
+members = [
+  "crates/dashboard-protocol",
+  "crates/dashboardd",
+  "widgets/cpu",
+  "widgets/memory",
+  "xtask",
+]
 resolver = "2"
 
 [workspace.package]

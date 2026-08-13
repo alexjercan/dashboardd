@@ -24,6 +24,7 @@ Useful commands:
 ```bash
 npm run build -w @scufris/cpu-widget
 npm run watch -w @scufris/cpu-widget
+npm run watch -w @scufris/memory-widget
 DASHBOARDD_WIDGETS_DIR=.build/widgets cargo run -p dashboardd
 RUST_LOG=dashboardd=debug,tower_http=debug cargo run -p dashboardd
 npm test

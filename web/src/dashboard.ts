@@ -8,7 +8,7 @@ import {
   type WidgetDescriptor,
 } from "./protocol";
 
-const CPU_WIDGET_ID = "cpu";
+const DEFAULT_WIDGET_IDS = ["cpu", "memory"] as const;
 
 export type ConnectionStatus =
   "connecting" | "connected" | "disconnected" | "error";
@@ -104,23 +104,36 @@ async function reconcile(events: DashboardEvents): Promise<void> {
     requestJson("/api/v1/widgets", parseWidgetList),
     requestJson("/api/v1/instances", parseInstanceList),
   ]);
-  let instances = instanceList.instances;
-  const cpuAvailable = widgetList.widgets.some(
-    (widget) => widget.id === CPU_WIDGET_ID,
+  const instances = await ensureDefaultInstances(
+    widgetList.widgets,
+    instanceList.instances,
   );
-  const cpuExists = instances.some(
-    (instance) => instance.widget_id === CPU_WIDGET_ID,
-  );
+  events.onSnapshot(widgetList.widgets, instances);
+}
 
-  if (cpuAvailable && !cpuExists) {
-    console.info("Creating default CPU widget instance");
+async function ensureDefaultInstances(
+  widgets: WidgetDescriptor[],
+  initialInstances: Instance[],
+): Promise<Instance[]> {
+  let instances = initialInstances;
+  const available = new Set(widgets.map((widget) => widget.id));
+
+  for (const widgetId of DEFAULT_WIDGET_IDS) {
+    if (
+      !available.has(widgetId) ||
+      instances.some((instance) => instance.widget_id === widgetId)
+    ) {
+      continue;
+    }
+
+    console.info("Creating default widget instance", { widgetId });
     try {
-      const cpu = await requestJson("/api/v1/instances", parseInstance, {
+      const instance = await requestJson("/api/v1/instances", parseInstance, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ widget_id: CPU_WIDGET_ID }),
+        body: JSON.stringify({ widget_id: widgetId }),
       });
-      instances = [...instances, cpu];
+      instances = [...instances, instance];
     } catch (error) {
       if (!(error instanceof ApiError) || error.status !== 409) throw error;
       instances = (await requestJson("/api/v1/instances", parseInstanceList))
@@ -128,7 +141,7 @@ async function reconcile(events: DashboardEvents): Promise<void> {
     }
   }
 
-  events.onSnapshot(widgetList.widgets, instances);
+  return instances;
 }
 
 async function requestJson<T>(

@@ -1,0 +1,9 @@
+id = "memory"
+name = "Memory"
+
+[backend]
+package = "memory"
+
+[frontend]
+workspace = "@scufris/memory-widget"
+entry = "src/index.ts"
