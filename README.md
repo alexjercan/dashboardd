@@ -68,7 +68,14 @@ canvas = "#181818"
 surface = "#282828"
 accent = "#ffdd33"
 text = "#e4e4ef"
+
+[theme.fonts]
+sans = "Iosevka"
+mono = "Iosevka"
 ```
+
+Font families use system-installed fonts and retain built-in system fallbacks.
+The default `Iosevka` family matches the regular font configured for Kitty.
 
 Initial widgets apply and are validated only when `dashboard.json` does not
 exist. Positions are one-based. The normalized composition is then persisted

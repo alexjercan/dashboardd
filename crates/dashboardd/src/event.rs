@@ -45,7 +45,7 @@ pub enum DashboardEvent {
         payload: Value,
     },
     ThemeUpdated {
-        theme: Theme,
+        theme: Box<Theme>,
     },
     ConfigurationError {
         error: DashboardError,

@@ -153,11 +153,21 @@ function showConfigurationError(message: string): void {
 }
 
 function applyTheme(theme: Theme): void {
-  for (const [name, value] of Object.entries(theme))
+  for (const [name, value] of Object.entries(theme)) {
+    if (name === "fonts") continue;
     document.documentElement.style.setProperty(
       `--scufris-color-${name.replaceAll("_", "-")}`,
-      value,
+      value as string,
     );
+  }
+  document.documentElement.style.setProperty(
+    "--scufris-font-sans",
+    `"${theme.fonts.sans}", ui-sans-serif, system-ui, sans-serif`,
+  );
+  document.documentElement.style.setProperty(
+    "--scufris-font-mono",
+    `"${theme.fonts.mono}", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace`,
+  );
   if (errorElement.dataset.source === "configuration") clearError();
 }
 

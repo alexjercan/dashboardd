@@ -76,6 +76,14 @@ try {
     ),
     "#123456",
   );
+  assert.match(
+    await page.evaluate(() =>
+      getComputedStyle(document.documentElement).getPropertyValue(
+        "--scufris-font-mono",
+      ),
+    ),
+    /^"Iosevka"/,
+  );
   writeConfiguration("#abcdef");
   await page.waitForFunction(
     () =>
@@ -104,6 +112,33 @@ try {
       getComputedStyle(document.documentElement).getPropertyValue(
         "--scufris-color-accent",
       ) === "#fedcba",
+  );
+  assert.equal(await page.locator("#dashboard-error").isHidden(), true);
+  writeConfiguration("#fedcba", "", "DejaVu Sans Mono");
+  await page.waitForFunction(() =>
+    getComputedStyle(document.documentElement)
+      .getPropertyValue("--scufris-font-mono")
+      .startsWith('"DejaVu Sans Mono"'),
+  );
+  writeConfiguration("#fedcba", "", "Iosevka; monospace");
+  await page
+    .locator(
+      "#dashboard-error:text-is('Configuration reload failed: theme.fonts.sans must contain only ASCII letters, digits, spaces, underscores, or hyphens')",
+    )
+    .waitFor();
+  assert.match(
+    await page.evaluate(() =>
+      getComputedStyle(document.documentElement).getPropertyValue(
+        "--scufris-font-mono",
+      ),
+    ),
+    /^"DejaVu Sans Mono"/,
+  );
+  writeConfiguration("#fedcba");
+  await page.waitForFunction(() =>
+    getComputedStyle(document.documentElement)
+      .getPropertyValue("--scufris-font-mono")
+      .startsWith('"Iosevka"'),
   );
   assert.equal(await page.locator("#dashboard-error").isHidden(), true);
   unlinkSync(configFile);
@@ -602,8 +637,11 @@ async function exerciseUsageCommands(page, widgetId) {
   }, widgetId);
 }
 
-function writeConfiguration(accent, dashboard = "") {
-  writeFileSync(configFile, `[theme]\naccent = "${accent}"\n${dashboard}`);
+function writeConfiguration(accent, dashboard = "", font = "Iosevka") {
+  writeFileSync(
+    configFile,
+    `[theme]\naccent = "${accent}"\n\n[theme.fonts]\nsans = "${font}"\nmono = "${font}"\n${dashboard}`,
+  );
 }
 
 function startDashboardd() {

@@ -45,6 +45,7 @@ pub struct InitialWidget {
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ThemeOverrides {
+    pub fonts: FontOverrides,
     pub canvas: Option<String>,
     pub surface: Option<String>,
     pub selection: Option<String>,
@@ -59,8 +60,22 @@ pub struct ThemeOverrides {
     pub secondary: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct FontOverrides {
+    pub sans: Option<String>,
+    pub mono: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ThemeFonts {
+    pub sans: String,
+    pub mono: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct Theme {
+    pub fonts: ThemeFonts,
     pub canvas: String,
     pub surface: String,
     pub selection: String,
@@ -95,6 +110,10 @@ impl ThemeManager {
 impl Default for Theme {
     fn default() -> Self {
         Self {
+            fonts: ThemeFonts {
+                sans: "Iosevka".into(),
+                mono: "Iosevka".into(),
+            },
             canvas: "#181818".into(),
             surface: "#282828".into(),
             selection: "#453d41".into(),
@@ -115,6 +134,10 @@ impl ThemeOverrides {
     pub fn effective(&self) -> Result<Theme, String> {
         let defaults = Theme::default();
         Ok(Theme {
+            fonts: ThemeFonts {
+                sans: family("sans", self.fonts.sans.as_ref(), defaults.fonts.sans)?,
+                mono: family("mono", self.fonts.mono.as_ref(), defaults.fonts.mono)?,
+            },
             canvas: color("canvas", self.canvas.as_ref(), defaults.canvas)?,
             surface: color("surface", self.surface.as_ref(), defaults.surface)?,
             selection: color("selection", self.selection.as_ref(), defaults.selection)?,
@@ -244,7 +267,9 @@ pub fn watch(
                             themes.replace(theme.clone());
                             if changed || had_error {
                                 tracing::info!(path = %path.display(), "reloaded user theme");
-                                instances.publish(DashboardEvent::ThemeUpdated { theme });
+                                instances.publish(DashboardEvent::ThemeUpdated {
+                                    theme: Box::new(theme),
+                                });
                             }
                             had_error = false;
                         }
@@ -275,6 +300,24 @@ fn publish_error(instances: &InstanceManager, message: String) {
             message,
         },
     });
+}
+
+fn family(name: &str, override_value: Option<&String>, default: String) -> Result<String, String> {
+    let Some(value) = override_value else {
+        return Ok(default);
+    };
+    if !value.is_empty()
+        && value.trim() == value
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b' ' | b'_' | b'-'))
+    {
+        Ok(value.clone())
+    } else {
+        Err(format!(
+            "theme.fonts.{name} must contain only ASCII letters, digits, spaces, underscores, or hyphens"
+        ))
+    }
 }
 
 fn color(name: &str, override_value: Option<&String>, default: String) -> Result<String, String> {
@@ -338,6 +381,10 @@ mod tests {
 [theme]
 accent = "#AABBCC"
 
+[theme.fonts]
+sans = "Iosevka Term"
+mono = "Iosevka Term Mono"
+
 [[dashboard.initial_widgets]]
 widget = "cpu"
 variant = "full"
@@ -348,7 +395,10 @@ history_points = 40
 "##,
         )
         .unwrap();
-        assert_eq!(configuration.theme.effective().unwrap().accent, "#aabbcc");
+        let theme = configuration.theme.effective().unwrap();
+        assert_eq!(theme.accent, "#aabbcc");
+        assert_eq!(theme.fonts.sans, "Iosevka Term");
+        assert_eq!(theme.fonts.mono, "Iosevka Term Mono");
         assert_eq!(configuration.dashboard.initial_widgets[0].position, [1, 2]);
         assert_eq!(
             configuration.dashboard.initial_widgets[0].options["history_points"],
@@ -361,6 +411,9 @@ history_points = 40
         assert!(toml::from_str::<UserConfiguration>("unknown = true").is_err());
         let configuration: UserConfiguration =
             toml::from_str("[theme]\naccent = 'yellow'").unwrap();
+        assert!(configuration.theme.effective().is_err());
+        let configuration: UserConfiguration =
+            toml::from_str("[theme.fonts]\nmono = 'Iosevka; monospace'").unwrap();
         assert!(configuration.theme.effective().is_err());
     }
 }

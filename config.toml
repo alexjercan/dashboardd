@@ -12,5 +12,9 @@ success = "#73c936"
 danger = "#f43841"
 secondary = "#9e95c7"
 
+[theme.fonts]
+sans = "Iosevka"
+mono = "Iosevka"
+
 [dashboard]
 initial_widgets = []

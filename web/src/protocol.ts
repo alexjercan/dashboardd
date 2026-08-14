@@ -3,6 +3,7 @@ export const EVENT_VERSION = 1;
 export type DashboardLayout = { columns: number };
 
 export type Theme = {
+  fonts: { sans: string; mono: string };
   canvas: string;
   surface: string;
   selection: string;
@@ -161,7 +162,7 @@ export function parseInstance(value: unknown): Instance {
 
 export function parseTheme(value: unknown): Theme {
   if (!isRecord(value)) throw new Error("invalid theme");
-  const keys: (keyof Theme)[] = [
+  const keys: Exclude<keyof Theme, "fonts">[] = [
     "canvas",
     "surface",
     "selection",
@@ -175,9 +176,17 @@ export function parseTheme(value: unknown): Theme {
     "danger",
     "secondary",
   ];
-  if (!keys.every((key) => typeof value[key] === "string"))
+  if (
+    !keys.every((key) => typeof value[key] === "string") ||
+    !isRecord(value.fonts) ||
+    typeof value.fonts.sans !== "string" ||
+    typeof value.fonts.mono !== "string"
+  )
     throw new Error("invalid theme");
-  return Object.fromEntries(keys.map((key) => [key, value[key]])) as Theme;
+  return {
+    ...Object.fromEntries(keys.map((key) => [key, value[key]])),
+    fonts: { sans: value.fonts.sans, mono: value.fonts.mono },
+  } as Theme;
 }
 
 export function parseDashboardEvent(value: unknown): DashboardEvent {

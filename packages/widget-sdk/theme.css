@@ -11,8 +11,8 @@
   --scufris-color-success: #73c936;
   --scufris-color-danger: #f43841;
   --scufris-color-secondary: #9e95c7;
-  --scufris-font-sans: ui-sans-serif, system-ui, sans-serif;
+  --scufris-font-sans: "Iosevka", ui-sans-serif, system-ui, sans-serif;
   --scufris-font-mono:
-    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    "Iosevka", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   --scufris-radius-widget: 7px;
 }
