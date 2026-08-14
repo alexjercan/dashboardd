@@ -1,0 +1,366 @@
+//! Read-only user configuration and effective public theme.
+
+use std::{
+    collections::BTreeMap,
+    env, fs,
+    path::{Path, PathBuf},
+    sync::{Arc, RwLock},
+    time::Duration,
+};
+
+use notify::{RecursiveMode, Watcher};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use tokio::{sync::broadcast, task::JoinHandle};
+use utoipa::ToSchema;
+
+use crate::{
+    event::{DashboardError, DashboardEvent},
+    instance::InstanceManager,
+};
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct UserConfiguration {
+    pub theme: ThemeOverrides,
+    pub dashboard: DashboardConfiguration,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DashboardConfiguration {
+    pub initial_widgets: Vec<InitialWidget>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InitialWidget {
+    pub widget: String,
+    pub variant: String,
+    pub position: [u32; 2],
+    #[serde(default)]
+    pub options: BTreeMap<String, Value>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ThemeOverrides {
+    pub canvas: Option<String>,
+    pub surface: Option<String>,
+    pub selection: Option<String>,
+    pub text: Option<String>,
+    pub text_bright: Option<String>,
+    pub text_muted: Option<String>,
+    pub text_dim: Option<String>,
+    pub accent: Option<String>,
+    pub border: Option<String>,
+    pub success: Option<String>,
+    pub danger: Option<String>,
+    pub secondary: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct Theme {
+    pub canvas: String,
+    pub surface: String,
+    pub selection: String,
+    pub text: String,
+    pub text_bright: String,
+    pub text_muted: String,
+    pub text_dim: String,
+    pub accent: String,
+    pub border: String,
+    pub success: String,
+    pub danger: String,
+    pub secondary: String,
+}
+
+#[derive(Clone)]
+pub struct ThemeManager(Arc<RwLock<Theme>>);
+
+impl ThemeManager {
+    pub fn new(theme: Theme) -> Self {
+        Self(Arc::new(RwLock::new(theme)))
+    }
+
+    pub fn current(&self) -> Theme {
+        self.0.read().expect("theme lock is not poisoned").clone()
+    }
+
+    fn replace(&self, theme: Theme) {
+        *self.0.write().expect("theme lock is not poisoned") = theme;
+    }
+}
+
+impl Default for Theme {
+    fn default() -> Self {
+        Self {
+            canvas: "#181818".into(),
+            surface: "#282828".into(),
+            selection: "#453d41".into(),
+            text: "#e4e4ef".into(),
+            text_bright: "#f4f4ff".into(),
+            text_muted: "#65737e".into(),
+            text_dim: "#535057".into(),
+            accent: "#ffdd33".into(),
+            border: "#96a6c8".into(),
+            success: "#73c936".into(),
+            danger: "#f43841".into(),
+            secondary: "#9e95c7".into(),
+        }
+    }
+}
+
+impl ThemeOverrides {
+    pub fn effective(&self) -> Result<Theme, String> {
+        let defaults = Theme::default();
+        Ok(Theme {
+            canvas: color("canvas", self.canvas.as_ref(), defaults.canvas)?,
+            surface: color("surface", self.surface.as_ref(), defaults.surface)?,
+            selection: color("selection", self.selection.as_ref(), defaults.selection)?,
+            text: color("text", self.text.as_ref(), defaults.text)?,
+            text_bright: color(
+                "text_bright",
+                self.text_bright.as_ref(),
+                defaults.text_bright,
+            )?,
+            text_muted: color("text_muted", self.text_muted.as_ref(), defaults.text_muted)?,
+            text_dim: color("text_dim", self.text_dim.as_ref(), defaults.text_dim)?,
+            accent: color("accent", self.accent.as_ref(), defaults.accent)?,
+            border: color("border", self.border.as_ref(), defaults.border)?,
+            success: color("success", self.success.as_ref(), defaults.success)?,
+            danger: color("danger", self.danger.as_ref(), defaults.danger)?,
+            secondary: color("secondary", self.secondary.as_ref(), defaults.secondary)?,
+        })
+    }
+}
+
+pub fn resolve_path() -> Result<PathBuf, String> {
+    resolve_path_from(
+        env::var_os("DASHBOARDD_CONFIG_FILE").map(PathBuf::from),
+        env::var_os("XDG_CONFIG_HOME").map(PathBuf::from),
+        env::var_os("HOME").map(PathBuf::from),
+    )
+}
+
+fn resolve_path_from(
+    configured: Option<PathBuf>,
+    xdg: Option<PathBuf>,
+    home: Option<PathBuf>,
+) -> Result<PathBuf, String> {
+    if let Some(path) = configured {
+        return Ok(path);
+    }
+    if let Some(path) = xdg {
+        return Ok(path.join("scufris/config.toml"));
+    }
+    let home =
+        home.ok_or("HOME must be set when DASHBOARDD_CONFIG_FILE and XDG_CONFIG_HOME are unset")?;
+    Ok(home.join(".config/scufris/config.toml"))
+}
+
+pub fn load(path: &Path) -> Result<UserConfiguration, String> {
+    let source = match fs::read_to_string(path) {
+        Ok(source) => source,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => return Err(format!("could not read {}: {error}", path.display())),
+    };
+    let configuration: UserConfiguration = toml::from_str(&source)
+        .map_err(|error| format!("invalid configuration {}: {error}", path.display()))?;
+    configuration.theme.effective()?;
+    Ok(configuration)
+}
+
+pub fn watch(
+    path: PathBuf,
+    themes: ThemeManager,
+    instances: InstanceManager,
+    mut shutdown: broadcast::Receiver<()>,
+) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        let (events_tx, mut events_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut watcher = match notify::recommended_watcher(move |event| {
+            let _ = events_tx.send(event);
+        }) {
+            Ok(watcher) => watcher,
+            Err(error) => {
+                publish_error(
+                    &instances,
+                    format!("could not watch configuration: {error}"),
+                );
+                return;
+            }
+        };
+        let mut watch_root = nearest_watch_root(&path);
+        if let Err(error) = watcher.watch(&watch_root, RecursiveMode::NonRecursive) {
+            publish_error(
+                &instances,
+                format!("could not watch configuration: {error}"),
+            );
+            return;
+        }
+        tracing::info!(path = %path.display(), root = %watch_root.display(), "watching user configuration");
+        let mut had_error = false;
+        loop {
+            tokio::select! {
+                _ = shutdown.recv() => break,
+                event = events_rx.recv() => {
+                    let Some(event) = event else { break };
+                    let event = match event {
+                        Ok(event) => event,
+                        Err(error) => {
+                            let message = format!("configuration watch failed: {error}");
+                            tracing::error!(%message);
+                            publish_error(&instances, message);
+                            had_error = true;
+                            continue;
+                        }
+                    };
+                    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+                    if !event.paths.iter().any(|changed| {
+                        changed == &path || parent.starts_with(changed)
+                    }) {
+                        continue;
+                    }
+                    tokio::time::sleep(Duration::from_millis(150)).await;
+                    while events_rx.try_recv().is_ok() {}
+                    let next_root = nearest_watch_root(&path);
+                    if next_root != watch_root {
+                        let _ = watcher.unwatch(&watch_root);
+                        if let Err(error) = watcher.watch(&next_root, RecursiveMode::NonRecursive) {
+                            let message = format!("could not watch configuration: {error}");
+                            tracing::error!(%message);
+                            publish_error(&instances, message);
+                            had_error = true;
+                            continue;
+                        }
+                        watch_root = next_root;
+                    }
+                    match load(&path)
+                        .and_then(|configuration| configuration.theme.effective())
+                    {
+                        Ok(theme) => {
+                            let changed = themes.current() != theme;
+                            themes.replace(theme.clone());
+                            if changed || had_error {
+                                tracing::info!(path = %path.display(), "reloaded user theme");
+                                instances.publish(DashboardEvent::ThemeUpdated { theme });
+                            }
+                            had_error = false;
+                        }
+                        Err(error) => {
+                            let message = format!("Configuration reload failed: {error}");
+                            tracing::error!(path = %path.display(), %error, "could not reload user configuration");
+                            publish_error(&instances, message);
+                            had_error = true;
+                        }
+                    }
+                }
+            }
+        }
+    })
+}
+
+fn nearest_watch_root(path: &Path) -> PathBuf {
+    path.ancestors()
+        .find(|candidate| candidate.is_dir())
+        .unwrap_or_else(|| Path::new("."))
+        .to_path_buf()
+}
+
+fn publish_error(instances: &InstanceManager, message: String) {
+    instances.publish(DashboardEvent::ConfigurationError {
+        error: DashboardError {
+            code: "invalid_configuration".into(),
+            message,
+        },
+    });
+}
+
+fn color(name: &str, override_value: Option<&String>, default: String) -> Result<String, String> {
+    let Some(value) = override_value else {
+        return Ok(default);
+    };
+    if value.len() == 7
+        && value.starts_with('#')
+        && value[1..].bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        Ok(value.to_ascii_lowercase())
+    } else {
+        Err(format!(
+            "theme.{name} must be a six-digit hexadecimal color"
+        ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn configuration_path_uses_documented_precedence() {
+        assert_eq!(
+            resolve_path_from(
+                Some("/override.toml".into()),
+                Some("/xdg".into()),
+                Some("/home".into()),
+            )
+            .unwrap(),
+            PathBuf::from("/override.toml")
+        );
+        assert_eq!(
+            resolve_path_from(None, Some("/xdg".into()), Some("/home".into())).unwrap(),
+            PathBuf::from("/xdg/scufris/config.toml")
+        );
+        assert_eq!(
+            resolve_path_from(None, None, Some("/home".into())).unwrap(),
+            PathBuf::from("/home/.config/scufris/config.toml")
+        );
+        assert!(resolve_path_from(None, None, None).is_err());
+    }
+
+    #[test]
+    fn missing_file_uses_defaults() {
+        let path = std::env::temp_dir().join(format!(
+            "scufris-missing-config-{}-{}.toml",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        let configuration = load(&path).unwrap();
+        assert_eq!(configuration.theme.effective().unwrap(), Theme::default());
+        assert!(configuration.dashboard.initial_widgets.is_empty());
+    }
+
+    #[test]
+    fn parses_theme_and_initial_widgets() {
+        let configuration: UserConfiguration = toml::from_str(
+            r##"
+[theme]
+accent = "#AABBCC"
+
+[[dashboard.initial_widgets]]
+widget = "cpu"
+variant = "full"
+position = [1, 2]
+
+[dashboard.initial_widgets.options]
+history_points = 40
+"##,
+        )
+        .unwrap();
+        assert_eq!(configuration.theme.effective().unwrap().accent, "#aabbcc");
+        assert_eq!(configuration.dashboard.initial_widgets[0].position, [1, 2]);
+        assert_eq!(
+            configuration.dashboard.initial_widgets[0].options["history_points"],
+            Value::from(40)
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_fields_and_invalid_colors() {
+        assert!(toml::from_str::<UserConfiguration>("unknown = true").is_err());
+        let configuration: UserConfiguration =
+            toml::from_str("[theme]\naccent = 'yellow'").unwrap();
+        assert!(configuration.theme.effective().is_err());
+    }
+}

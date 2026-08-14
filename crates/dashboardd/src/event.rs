@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use utoipa::ToSchema;
 
-use crate::instance::Instance;
+use crate::{configuration::Theme, instance::Instance};
 
 pub const EVENT_VERSION: u16 = 1;
 
@@ -43,6 +43,12 @@ pub enum DashboardEvent {
     WidgetUpdate {
         instance_id: InstanceId,
         payload: Value,
+    },
+    ThemeUpdated {
+        theme: Theme,
+    },
+    ConfigurationError {
+        error: DashboardError,
     },
 }
 

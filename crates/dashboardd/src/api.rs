@@ -22,6 +22,7 @@ use utoipa_swagger_ui::SwaggerUi;
 
 use crate::{
     AppState,
+    configuration::Theme,
     event::{self, DashboardError, DashboardEvent},
     instance::{DashboardLayout, Instance, InstanceError, InstanceLayout},
     widget::{WidgetDescriptor, WidgetVariant},
@@ -80,6 +81,7 @@ pub struct ErrorResponse {
     paths(
         health,
         get_layout,
+        get_theme,
         list_widgets,
         get_widget,
         list_instances,
@@ -97,6 +99,7 @@ pub struct ErrorResponse {
         DashboardEvent,
         DashboardLayout,
         ErrorResponse,
+        Theme,
         Instance,
         InstanceLayout,
         InstanceList,
@@ -120,6 +123,7 @@ pub fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/api/v1/layout", get(get_layout))
+        .route("/api/v1/theme", get(get_theme))
         .route("/api/v1/layout/swap", post(swap_instances))
         .route("/api/v1/widgets", get(list_widgets))
         .route("/api/v1/widgets/{widget_id}", get(get_widget))
@@ -164,6 +168,15 @@ async fn health() -> StatusCode {
 )]
 async fn get_layout(State(state): State<AppState>) -> Json<DashboardLayout> {
     Json(state.instances.layout())
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/theme",
+    responses((status = 200, description = "Effective public dashboard theme", body = Theme))
+)]
+async fn get_theme(State(state): State<AppState>) -> Json<Theme> {
+    Json(state.themes.current())
 }
 
 #[utoipa::path(
@@ -519,12 +532,17 @@ mod tests {
     use tower::ServiceExt;
 
     use super::*;
-    use crate::{instance::InstanceManager, widget::WidgetsManager};
+    use crate::{
+        configuration::{Theme, ThemeManager},
+        instance::InstanceManager,
+        widget::WidgetsManager,
+    };
 
     fn test_app() -> Router {
         build_router(AppState {
             widgets: WidgetsManager::default(),
             instances: InstanceManager::default(),
+            themes: ThemeManager::new(Theme::default()),
             shutdown: broadcast::channel(1).0,
         })
     }

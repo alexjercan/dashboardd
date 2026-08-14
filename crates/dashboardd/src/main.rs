@@ -1,6 +1,7 @@
 //! The dashboard daemon entry point.
 
 mod api;
+mod configuration;
 mod event;
 mod instance;
 mod state;
@@ -21,6 +22,7 @@ use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 use crate::{
+    configuration::ThemeManager,
     instance::{DashboardLayout, InstanceManager},
     state::StateStore,
     widget::WidgetsManager,
@@ -34,6 +36,7 @@ const DEFAULT_WIDGETS_DIR: &str = ".build/widgets";
 struct AppState {
     widgets: WidgetsManager,
     instances: InstanceManager,
+    themes: ThemeManager,
     shutdown: broadcast::Sender<()>,
 }
 
@@ -43,6 +46,7 @@ struct Config {
     port: Option<u16>,
     widgets_dir: PathBuf,
     state_file: PathBuf,
+    config_file: PathBuf,
 }
 
 impl Config {
@@ -61,12 +65,19 @@ impl Config {
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from(DEFAULT_WIDGETS_DIR));
         let state_file = resolve_state_file()?;
+        let config_file = configuration::resolve_path()?;
+        let config_file = if config_file.is_absolute() {
+            config_file
+        } else {
+            env::current_dir()?.join(config_file)
+        };
 
         Ok(Self {
             host,
             port,
             widgets_dir,
             state_file,
+            config_file,
         })
     }
 }
@@ -79,19 +90,27 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let config = Config::from_environment()?;
     let (shutdown, _) = broadcast::channel(1);
     let widgets = WidgetsManager::discover(&config.widgets_dir)?;
+    let user_configuration = configuration::load(&config.config_file)?;
+    let layout = DashboardLayout::default();
+    let themes = ThemeManager::new(user_configuration.theme.effective()?);
     let store = Arc::new(StateStore::new(config.state_file.clone()));
-    let instances =
-        InstanceManager::restore(DashboardLayout::default(), widgets.clone(), store.clone())
-            .await
-            .map_err(|error| {
-                format!(
-                    "failed to load dashboard state {}: {error}",
-                    store.path().display()
-                )
-            })?;
+    let instances = InstanceManager::restore(
+        layout,
+        widgets.clone(),
+        store.clone(),
+        &user_configuration.dashboard.initial_widgets,
+    )
+    .await
+    .map_err(|error| {
+        format!(
+            "failed to load dashboard state {}: {error}",
+            store.path().display()
+        )
+    })?;
     let state = AppState {
         widgets,
         instances,
+        themes,
         shutdown,
     };
     info!(
@@ -103,12 +122,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let listener = bind_listener(&config)?;
     let address = listener.local_addr()?;
     let app = api::build_router(state.clone());
+    let configuration_task = configuration::watch(
+        config.config_file,
+        state.themes.clone(),
+        state.instances.clone(),
+        state.shutdown.subscribe(),
+    );
 
     info!(%address, docs = %format!("http://{address}/docs"), "dashboardd listening");
     axum::serve(TokioTcpListener::from_std(listener)?, app)
         .with_graceful_shutdown(shutdown_signal(state.shutdown.clone()))
         .await?;
     state.instances.shutdown_all().await;
+    let _ = configuration_task.await;
 
     info!("dashboardd stopped");
     Ok(())

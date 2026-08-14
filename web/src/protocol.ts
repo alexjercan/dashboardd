@@ -2,6 +2,21 @@ export const EVENT_VERSION = 1;
 
 export type DashboardLayout = { columns: number };
 
+export type Theme = {
+  canvas: string;
+  surface: string;
+  selection: string;
+  text: string;
+  text_bright: string;
+  text_muted: string;
+  text_dim: string;
+  accent: string;
+  border: string;
+  success: string;
+  danger: string;
+  secondary: string;
+};
+
 export type WidgetVariant = {
   id: string;
   name: string;
@@ -78,13 +93,25 @@ type WidgetUpdateEvent = {
   kind: "widget_update";
   data: { instance_id: string; payload: unknown };
 };
+type ThemeUpdatedEvent = {
+  version: typeof EVENT_VERSION;
+  kind: "theme_updated";
+  data: { theme: Theme };
+};
+type ConfigurationErrorEvent = {
+  version: typeof EVENT_VERSION;
+  kind: "configuration_error";
+  data: { error: ErrorResponse["error"] };
+};
 
 export type DashboardEvent =
   | InstanceCreatedEvent
   | InstanceUpdatedEvent
   | InstanceDestroyedEvent
   | InstanceErrorEvent
-  | WidgetUpdateEvent;
+  | WidgetUpdateEvent
+  | ThemeUpdatedEvent
+  | ConfigurationErrorEvent;
 
 export function parseDashboardLayout(value: unknown): DashboardLayout {
   if (!isRecord(value) || !isPositiveInteger(value.columns))
@@ -130,6 +157,27 @@ export function parseInstance(value: unknown): Instance {
     },
     options: value.options,
   };
+}
+
+export function parseTheme(value: unknown): Theme {
+  if (!isRecord(value)) throw new Error("invalid theme");
+  const keys: (keyof Theme)[] = [
+    "canvas",
+    "surface",
+    "selection",
+    "text",
+    "text_bright",
+    "text_muted",
+    "text_dim",
+    "accent",
+    "border",
+    "success",
+    "danger",
+    "secondary",
+  ];
+  if (!keys.every((key) => typeof value[key] === "string"))
+    throw new Error("invalid theme");
+  return Object.fromEntries(keys.map((key) => [key, value[key]])) as Theme;
 }
 
 export function parseDashboardEvent(value: unknown): DashboardEvent {
@@ -180,6 +228,20 @@ export function parseDashboardEvent(value: unknown): DashboardEvent {
             instance_id: value.data.instance_id,
             payload: value.data.payload,
           },
+        };
+      break;
+    case "theme_updated":
+      return {
+        version: EVENT_VERSION,
+        kind: value.kind,
+        data: { theme: parseTheme(value.data.theme) },
+      };
+    case "configuration_error":
+      if (isError(value.data.error))
+        return {
+          version: EVENT_VERSION,
+          kind: value.kind,
+          data: { error: value.data.error },
         };
       break;
   }

@@ -5,6 +5,7 @@ import {
   mkdirSync,
   openSync,
   unlinkSync,
+  writeFileSync,
 } from "node:fs";
 import net from "node:net";
 import path from "node:path";
@@ -22,6 +23,8 @@ run("cargo", ["xtask", "widget", "prepare", "--all"]);
 const dashboardPort = await reservePort();
 const browserPort = await reservePort();
 const stateFile = path.join(artifacts, `dashboard-${process.pid}.json`);
+const configFile = path.join(artifacts, `config-${process.pid}.toml`);
+writeConfiguration("#123456");
 const dashboardUrl = `http://127.0.0.1:${dashboardPort}`;
 const baseUrl = `http://127.0.0.1:${browserPort}`;
 const logPath = path.join(artifacts, "dashboardd.log");
@@ -64,6 +67,58 @@ try {
     await page.locator(".dashboard-footer").isVisible(),
     true,
     "connection status is in footer",
+  );
+  assert.equal(
+    await page.evaluate(() =>
+      getComputedStyle(document.documentElement).getPropertyValue(
+        "--scufris-color-accent",
+      ),
+    ),
+    "#123456",
+  );
+  writeConfiguration("#abcdef");
+  await page.waitForFunction(
+    () =>
+      getComputedStyle(document.documentElement).getPropertyValue(
+        "--scufris-color-accent",
+      ) === "#abcdef",
+  );
+  writeConfiguration("yellow");
+  await page
+    .locator(
+      "#dashboard-error:text-is('Configuration reload failed: theme.accent must be a six-digit hexadecimal color')",
+    )
+    .waitFor();
+  assert.equal(
+    await page.evaluate(() =>
+      getComputedStyle(document.documentElement).getPropertyValue(
+        "--scufris-color-accent",
+      ),
+    ),
+    "#abcdef",
+    "invalid reload retains the last valid theme",
+  );
+  writeConfiguration("#fedcba");
+  await page.waitForFunction(
+    () =>
+      getComputedStyle(document.documentElement).getPropertyValue(
+        "--scufris-color-accent",
+      ) === "#fedcba",
+  );
+  assert.equal(await page.locator("#dashboard-error").isHidden(), true);
+  unlinkSync(configFile);
+  await page.waitForFunction(
+    () =>
+      getComputedStyle(document.documentElement).getPropertyValue(
+        "--scufris-color-accent",
+      ) === "#ffdd33",
+  );
+  writeConfiguration("#fedcba");
+  await page.waitForFunction(
+    () =>
+      getComputedStyle(document.documentElement).getPropertyValue(
+        "--scufris-color-accent",
+      ) === "#fedcba",
   );
 
   const catalogResponse = await page.request.get(`${baseUrl}/api/v1/widgets`);
@@ -119,7 +174,15 @@ try {
   );
 
   const cpuOne = await addWidget(page, "0", "0", "CPU", "Compact");
-  await waitForTelemetry(page.locator(`[data-instance-id="${cpuOne}"]`));
+  const cpuOneFrame = page.locator(`[data-instance-id="${cpuOne}"]`);
+  await waitForTelemetry(cpuOneFrame);
+  assert.equal(
+    await cpuOneFrame
+      .locator(".usage")
+      .evaluate((element) => getComputedStyle(element).color),
+    "rgb(254, 220, 186)",
+    "widget Shadow DOM inherits the live theme",
+  );
   assert.equal(
     await page.locator(".dashboard-slot").count(),
     53,
@@ -400,6 +463,54 @@ try {
   });
   await waitForTelemetry(page.locator(`[data-instance-id="${cpuOne}"]`));
   await requestGracefulStop(dashboardd);
+
+  unlinkSync(stateFile);
+  writeConfiguration(
+    "#fedcba",
+    `
+[[dashboard.initial_widgets]]
+widget = "cpu"
+variant = "full"
+position = [1, 1]
+
+[dashboard.initial_widgets.options]
+history_points = 20
+show_core_temperatures = false
+`,
+  );
+  dashboardd = startDashboardd();
+  await waitForHealth(dashboardUrl);
+  const bootstrapped = await page.request.get(`${baseUrl}/api/v1/instances`);
+  const bootstrappedInstances = (await bootstrapped.json()).instances;
+  assert.equal(bootstrappedInstances.length, 1);
+  assert.deepEqual(bootstrappedInstances[0].layout, {
+    column: 0,
+    row: 0,
+    width: 3,
+    height: 3,
+  });
+  assert.deepEqual(bootstrappedInstances[0].options, {
+    history_points: 20,
+    show_core_temperatures: false,
+  });
+  await requestGracefulStop(dashboardd);
+
+  writeConfiguration(
+    "#fedcba",
+    `
+[[dashboard.initial_widgets]]
+widget = "not-installed"
+variant = "unknown"
+position = [1, 1]
+`,
+  );
+  dashboardd = startDashboardd();
+  await waitForHealth(dashboardUrl);
+  const retained = await page.request.get(`${baseUrl}/api/v1/instances`);
+  const retainedInstances = (await retained.json()).instances;
+  assert.equal(retainedInstances.length, 1);
+  assert.equal(retainedInstances[0].widget_id, "cpu");
+  await requestGracefulStop(dashboardd);
   console.log("browser integration scenarios passed");
 } catch (error) {
   for (const [index, page] of pages.entries()) {
@@ -418,6 +529,7 @@ try {
   await stopRecordedProcess(dashboardd);
   closeSync(log);
   if (existsSync(stateFile)) unlinkSync(stateFile);
+  if (existsSync(configFile)) unlinkSync(configFile);
 }
 
 async function exerciseUsageCommands(page, widgetId) {
@@ -490,6 +602,10 @@ async function exerciseUsageCommands(page, widgetId) {
   }, widgetId);
 }
 
+function writeConfiguration(accent, dashboard = "") {
+  writeFileSync(configFile, `[theme]\naccent = "${accent}"\n${dashboard}`);
+}
+
 function startDashboardd() {
   return spawn(path.join(root, "target/debug/dashboardd"), [], {
     cwd: root,
@@ -498,6 +614,7 @@ function startDashboardd() {
       DASHBOARDD_PORT: String(dashboardPort),
       DASHBOARDD_WIDGETS_DIR: path.join(root, ".build/widgets"),
       DASHBOARDD_STATE_FILE: stateFile,
+      DASHBOARDD_CONFIG_FILE: configFile,
     },
     stdio: ["ignore", log, log],
   });

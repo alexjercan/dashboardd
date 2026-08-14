@@ -51,3 +51,36 @@ Dashboard composition persists in `$XDG_STATE_HOME/scufris/dashboard.json`, or
 `$HOME/.local/state/scufris/dashboard.json` when `XDG_STATE_HOME` is unset.
 `DASHBOARDD_STATE_FILE` overrides both paths. An invalid saved composition stops
 startup instead of discarding state.
+
+## User configuration
+
+Dashboardd reads configuration from `DASHBOARDD_CONFIG_FILE`, then
+`$XDG_CONFIG_HOME/scufris/config.toml`, then `$HOME/.config/scufris/config.toml`.
+The file is optional and dashboardd never writes it.
+
+Theme values are optional six-digit hexadecimal colors. Valid changes apply to
+open dashboards automatically. An invalid startup file stops dashboardd. An
+invalid live change preserves the last valid theme and shows an error.
+
+```toml
+[theme]
+canvas = "#181818"
+surface = "#282828"
+accent = "#ffdd33"
+text = "#e4e4ef"
+```
+
+Initial widgets apply and are validated only when `dashboard.json` does not
+exist. Positions are one-based. The normalized composition is then persisted
+and manual dashboard edits remain authoritative.
+
+```toml
+[[dashboard.initial_widgets]]
+widget = "cpu"
+variant = "full"
+position = [1, 1]
+
+[dashboard.initial_widgets.options]
+show_core_temperatures = true
+history_points = 40
+```

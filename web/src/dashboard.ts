@@ -2,10 +2,12 @@ import {
   parseDashboardEvent,
   parseDashboardLayout,
   parseInstanceList,
+  parseTheme,
   parseWidgetList,
   type DashboardLayout,
   type ErrorResponse,
   type Instance,
+  type Theme,
   type WidgetDescriptor,
 } from "./protocol";
 
@@ -14,6 +16,8 @@ export type ConnectionStatus =
 
 export type DashboardEvents = {
   onStatus(status: ConnectionStatus): void;
+  onTheme(theme: Theme): void;
+  onConfigurationError(message: string): void;
   onSnapshot(
     layout: DashboardLayout,
     widgets: WidgetDescriptor[],
@@ -70,6 +74,12 @@ export function connectDashboard(events: DashboardEvents): DashboardConnection {
         case "widget_update":
           events.onWidgetUpdate(event.data.instance_id, event.data.payload);
           break;
+        case "theme_updated":
+          events.onTheme(event.data.theme);
+          break;
+        case "configuration_error":
+          events.onConfigurationError(event.data.error.message);
+          break;
       }
     } catch (error) {
       events.onError(errorMessage(error));
@@ -103,11 +113,13 @@ export function connectDashboard(events: DashboardEvents): DashboardConnection {
 
 async function reconcile(events: DashboardEvents): Promise<void> {
   console.debug("Reconciling dashboard state");
-  const [layout, widgetList, instanceList] = await Promise.all([
+  const [layout, theme, widgetList, instanceList] = await Promise.all([
     requestJson("/api/v1/layout", parseDashboardLayout),
+    requestJson("/api/v1/theme", parseTheme),
     requestJson("/api/v1/widgets", parseWidgetList),
     requestJson("/api/v1/instances", parseInstanceList),
   ]);
+  events.onTheme(theme);
   events.onSnapshot(layout, widgetList.widgets, instanceList.instances);
 }
 

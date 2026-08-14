@@ -22,6 +22,7 @@ use tokio::{
 use utoipa::ToSchema;
 
 use crate::{
+    configuration::InitialWidget,
     event::{DashboardError, DashboardEvent},
     state::{DashboardStateFile, PersistedInstance, Position, StateStore},
     widget::{WidgetConfig, WidgetsManager},
@@ -130,10 +131,20 @@ impl InstanceManager {
         layout: DashboardLayout,
         widgets: WidgetsManager,
         store: Arc<StateStore>,
+        initial_widgets: &[InitialWidget],
     ) -> Result<Self, InstanceError> {
-        let saved = store.load().map_err(|error| {
+        let mut saved = store.load().map_err(|error| {
             InstanceError::InvalidState(format!("could not read state: {error}"))
         })?;
+        if saved.is_none() && !initial_widgets.is_empty() {
+            let initial = initial_state(layout, &widgets, initial_widgets)?;
+            store.save(&initial).map_err(|error| {
+                InstanceError::InvalidState(format!(
+                    "could not save initial dashboard composition: {error}"
+                ))
+            })?;
+            saved = Some(initial);
+        }
         let had_saved_state = saved.is_some();
         let (events, _) = broadcast::channel(256);
         let mut restored = Vec::new();
@@ -235,6 +246,10 @@ impl InstanceManager {
 
     pub fn subscribe(&self) -> broadcast::Receiver<DashboardEvent> {
         self.inner.events.subscribe()
+    }
+
+    pub fn publish(&self, event: DashboardEvent) {
+        let _ = self.inner.events.send(event);
     }
 
     pub async fn list(&self) -> Vec<Instance> {
@@ -546,6 +561,66 @@ impl From<&Instance> for PersistedInstance {
     }
 }
 
+fn initial_state(
+    dashboard: DashboardLayout,
+    widgets: &WidgetsManager,
+    initial_widgets: &[InitialWidget],
+) -> Result<DashboardStateFile, InstanceError> {
+    let mut layouts = Vec::new();
+    let mut instances = Vec::new();
+    for (index, initial) in initial_widgets.iter().enumerate() {
+        let config = widgets.get(&initial.widget).ok_or_else(|| {
+            InstanceError::InvalidState(format!(
+                "initial widget references unknown widget {:?}",
+                initial.widget
+            ))
+        })?;
+        let variant = config.variant(&initial.variant).ok_or_else(|| {
+            InstanceError::InvalidState(format!(
+                "initial widget {:?} references unknown variant {:?}",
+                initial.widget, initial.variant
+            ))
+        })?;
+        let options = config
+            .normalize_options(&initial.variant, &initial.options)
+            .map_err(|error| {
+                InstanceError::InvalidState(format!(
+                    "initial widget {:?} has invalid options: {error}",
+                    initial.widget
+                ))
+            })?;
+        let position = Position {
+            column: initial.position[0].checked_sub(1).ok_or_else(|| {
+                InstanceError::InvalidState("initial widget column must be positive".into())
+            })?,
+            row: initial.position[1].checked_sub(1).ok_or_else(|| {
+                InstanceError::InvalidState("initial widget row must be positive".into())
+            })?,
+        };
+        let layout = InstanceLayout {
+            column: position.column,
+            row: position.row,
+            width: variant.width,
+            height: variant.height,
+        };
+        validate_layout(dashboard, &layout, layouts.iter()).map_err(|error| {
+            InstanceError::InvalidState(format!(
+                "initial widget {:?} has invalid position: {error}",
+                initial.widget
+            ))
+        })?;
+        layouts.push(layout);
+        instances.push(PersistedInstance {
+            id: format!("{}-{}", initial.widget, index + 1),
+            widget_id: initial.widget.clone(),
+            variant_id: initial.variant.clone(),
+            position,
+            options,
+        });
+    }
+    Ok(DashboardStateFile::new(instances))
+}
+
 fn sequence_after(instance_id: &str) -> u64 {
     instance_id
         .rsplit_once('-')
@@ -787,6 +862,8 @@ fn handle_backend_message(
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use super::*;
 
     #[tokio::test]
@@ -808,6 +885,51 @@ mod tests {
             manager.swap("missing", "also-missing").await,
             Err(InstanceError::UnknownInstance)
         ));
+    }
+
+    #[test]
+    fn initial_widgets_are_normalized_and_collisions_are_rejected() {
+        let root = std::env::temp_dir().join(format!(
+            "scufris-initial-widgets-{}-{}",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        let cpu = root.join("cpu");
+        fs::create_dir_all(&cpu).unwrap();
+        fs::write(
+            cpu.join("widget.json"),
+            r#"{"schema_version":2,"id":"cpu","name":"CPU","description":"Processor usage","backend":"backend","variants":[{"id":"compact","name":"Compact","width":1,"height":1,"frontend":"compact.js"}],"options":[]}"#,
+        )
+        .unwrap();
+        fs::write(cpu.join("backend"), "backend").unwrap();
+        fs::write(cpu.join("compact.js"), "frontend").unwrap();
+        let widgets = WidgetsManager::discover(&root).unwrap();
+        let initial = InitialWidget {
+            widget: "cpu".into(),
+            variant: "compact".into(),
+            position: [1, 2],
+            options: BTreeMap::new(),
+        };
+
+        let state = initial_state(
+            DashboardLayout::default(),
+            &widgets,
+            std::slice::from_ref(&initial),
+        )
+        .unwrap();
+
+        assert_eq!(state.instances[0].id, "cpu-1");
+        assert_eq!(state.instances[0].position.column, 0);
+        assert_eq!(state.instances[0].position.row, 1);
+        assert!(
+            initial_state(
+                DashboardLayout::default(),
+                &widgets,
+                &[initial.clone(), initial],
+            )
+            .is_err()
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

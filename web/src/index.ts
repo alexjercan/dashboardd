@@ -9,6 +9,7 @@ import {
   parseInstance,
   type DashboardLayout,
   type Instance,
+  type Theme,
   type WidgetDescriptor,
   type WidgetOption,
   type WidgetVariant,
@@ -140,11 +141,28 @@ function renderStatus(status: ConnectionStatus): void {
 }
 
 function showError(message: string): void {
+  delete errorElement.dataset.source;
   errorElement.textContent = message;
   errorElement.hidden = false;
 }
 
+function showConfigurationError(message: string): void {
+  errorElement.dataset.source = "configuration";
+  errorElement.textContent = message;
+  errorElement.hidden = false;
+}
+
+function applyTheme(theme: Theme): void {
+  for (const [name, value] of Object.entries(theme))
+    document.documentElement.style.setProperty(
+      `--scufris-color-${name.replaceAll("_", "-")}`,
+      value,
+    );
+  if (errorElement.dataset.source === "configuration") clearError();
+}
+
 function clearError(): void {
+  delete errorElement.dataset.source;
   errorElement.hidden = true;
 }
 
@@ -785,6 +803,8 @@ function errorMessage(error: unknown): string {
 
 connection = connectDashboard({
   onStatus: renderStatus,
+  onTheme: applyTheme,
+  onConfigurationError: showConfigurationError,
   onSnapshot: applySnapshot,
   onInstanceCreated: upsertInstance,
   onInstanceUpdated: upsertInstance,
