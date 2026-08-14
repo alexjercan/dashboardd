@@ -70,8 +70,10 @@ refresh once per second and use IEC units.
 
 The Projects widget provides separate 3x3 List and Project variants. List scans
 immediate children of configured local roots and publishes page-local project
-selection. Repositories remain one row when they have multiple Git worktrees;
-a page-local selector replaces the row summary with the chosen checkout.
+selection. List supports page-local fuzzy name search, Name or Recent sorting,
+and Dirty or Active tasks filters without clearing hidden selections.
+Repositories remain one row when they have multiple Git worktrees; a
+page-local selector replaces the row summary with the chosen checkout.
 Project shows read-only Git and Tatr summaries for that checkout and supports
 Focus Overview, Changes, and Branches. Git inspection uses fixed bounded local
 commands without shell, remote, or write operations. Absolute paths, remote

@@ -768,6 +768,90 @@ try {
   });
   await page.locator("#finish-editing").click();
   await page.waitForURL(baseUrl + "/");
+
+  const projectSearch = projectsListFrame.locator(".search");
+  const projectSort = projectsListFrame.locator(".sort");
+  const projectRows = projectsListFrame.locator(".project-row");
+  assert.deepEqual(await projectRows.locator("strong").allTextContents(), [
+    "idle",
+    "scufris",
+    "tatr",
+  ]);
+  await projectSort.selectOption("recent");
+  assert.deepEqual(await projectRows.locator("strong").allTextContents(), [
+    "scufris",
+    "tatr",
+    "idle",
+  ]);
+  await projectSort.selectOption("name");
+  await projectSearch.fill("SCF RS");
+  assert.deepEqual(await projectRows.locator("strong").allTextContents(), [
+    "scufris",
+  ]);
+  assert.equal(
+    await projectsListFrame.locator(".summary").textContent(),
+    "1 of 3 projects",
+  );
+  await projectSearch.fill("i");
+  assert.deepEqual(await projectRows.locator("strong").allTextContents(), [
+    "idle",
+    "scufris",
+  ]);
+  await projectSearch.fill("[");
+  await projectsListFrame
+    .locator(".empty", { hasText: "No matching projects" })
+    .waitFor();
+  await projectSearch.fill("");
+
+  await projectsListFrame.locator(".filters summary").click();
+  const dirtyFilter = projectsListFrame.locator(
+    '.filter-menu input[value="dirty"]',
+  );
+  const activeTasksFilter = projectsListFrame.locator(
+    '.filter-menu input[value="active-tasks"]',
+  );
+  await dirtyFilter.check();
+  assert.deepEqual(await projectRows.locator("strong").allTextContents(), [
+    "scufris",
+  ]);
+  await activeTasksFilter.check();
+  assert.deepEqual(await projectRows.locator("strong").allTextContents(), [
+    "scufris",
+  ]);
+  await dirtyFilter.uncheck();
+  assert.deepEqual(await projectRows.locator("strong").allTextContents(), [
+    "scufris",
+    "tatr",
+  ]);
+  await activeTasksFilter.uncheck();
+  await projectsListFrame.locator(".filters summary").click();
+
+  await projectsListFrame
+    .locator(".project-row", { hasText: "scufris" })
+    .locator(".project-choice")
+    .click();
+  await projectFrame.locator('.identity:text-is("scufris")').waitFor();
+  await projectSearch.fill("tatr");
+  const hiddenProjectSelection = projectsListFrame.locator(".hidden-selection");
+  await hiddenProjectSelection
+    .locator("span", { hasText: "Selected: scufris" })
+    .waitFor();
+  assert.equal(
+    await projectFrame.locator(".identity").textContent(),
+    "scufris",
+    "search does not clear hidden selection",
+  );
+  await page.screenshot({
+    path: path.join(artifacts, "projects-list-filtered-narrow.png"),
+    fullPage: true,
+  });
+  await hiddenProjectSelection.locator("button", { hasText: "Clear" }).click();
+  await projectFrame
+    .locator(".state", { hasText: "Select a project" })
+    .waitFor();
+  await projectSearch.fill("");
+  await tatrFrame.locator(".task-row").nth(1).waitFor();
+
   assert.equal(await tatrFrame.locator(".task-row").count(), 2);
   assert.equal(
     await tatrFrame.locator(".task-id").first().textContent(),
@@ -1194,6 +1278,16 @@ try {
   }
   await page.reload();
   await tatrFrame.locator(".task-row").first().waitFor();
+  await projectsListFrame.locator(".project-row").nth(2).waitFor();
+  assert.equal(await projectsListFrame.locator(".search").inputValue(), "");
+  assert.equal(await projectsListFrame.locator(".sort").inputValue(), "name");
+  assert.equal(
+    await projectsListFrame
+      .locator('.filter-menu input[type="checkbox"]:checked')
+      .count(),
+    0,
+    "reload resets page-local project controls",
+  );
   await detailsFrame.locator(".state", { hasText: "Select a task" }).waitFor();
   assert.equal(
     await tatrFrame.locator(".task-row").count(),
@@ -1620,8 +1714,14 @@ function writeTatrArtifacts(project, id) {
 }
 
 function writeProjectRepositories() {
-  for (const project of ["scufris", "tatr"]) {
+  const commitDates = {
+    scufris: "2026-08-14T12:00:00Z",
+    tatr: "2026-08-13T12:00:00Z",
+    idle: "2026-08-12T12:00:00Z",
+  };
+  for (const project of ["scufris", "tatr", "idle"]) {
     const directory = path.join(tatrRoot, project);
+    mkdirSync(directory, { recursive: true });
     runGitFixture(directory, ["init", "-q", "-b", "main"]);
     runGitFixture(directory, ["config", "user.name", "Fixture"]);
     runGitFixture(directory, [
@@ -1631,7 +1731,10 @@ function writeProjectRepositories() {
     ]);
     writeFileSync(path.join(directory, "README.md"), `# ${project}\n`);
     runGitFixture(directory, ["add", "."]);
-    runGitFixture(directory, ["commit", "-q", "-m", `Initialize ${project}`]);
+    runGitFixture(directory, ["commit", "-q", "-m", `Initialize ${project}`], {
+      GIT_AUTHOR_DATE: commitDates[project],
+      GIT_COMMITTER_DATE: commitDates[project],
+    });
   }
   runGitFixture(path.join(tatrRoot, "scufris"), ["branch", "feature/projects"]);
   const worktree = path.join(tatrRoot, ".worktrees", "scufris-projects");
@@ -1666,12 +1769,14 @@ function writeProjectRepositories() {
   );
 }
 
-function runGitFixture(directory, args) {
+function runGitFixture(directory, args, environment = {}) {
   const result = spawnSync("git", args, {
     cwd: directory,
+    env: { ...process.env, ...environment },
     stdio: "pipe",
     encoding: "utf8",
   });
+  if (result.error) throw result.error;
   if (result.status !== 0)
     throw new Error(`git fixture failed: ${result.stderr || result.stdout}`);
 }

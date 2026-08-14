@@ -9,6 +9,14 @@ import {
 } from "./shared";
 
 type Snapshot = { view_id: string; projects: ProjectSummary[] };
+type ProjectSort = "name" | "recent";
+type ListControls = {
+  query: string;
+  sort: ProjectSort;
+  dirty: boolean;
+  activeTasks: boolean;
+};
+type RankedProject = { project: ProjectSummary; score: number };
 
 export function mount(
   container: HTMLElement,
@@ -19,6 +27,15 @@ export function mount(
     <style>${widgetReset}\n${styles}</style>
     <article>
       <header><h2>Projects</h2><span class="summary">Waiting...</span></header>
+      <div class="controls">
+        <input class="search" type="search" aria-label="Search projects" placeholder="Search projects">
+        <select class="sort" aria-label="Sort projects"><option value="name">Name</option><option value="recent">Recent</option></select>
+        <details class="filters"><summary>Filters</summary><div class="filter-menu">
+          <label><input type="checkbox" value="dirty"> Dirty</label>
+          <label><input type="checkbox" value="active-tasks"> Active tasks</label>
+        </div></details>
+      </div>
+      <div class="hidden-selection" hidden><span></span><button type="button">Clear</button></div>
       <div class="rows"><div class="empty">Waiting for projects...</div></div>
     </article>
   `;
@@ -27,11 +44,20 @@ export function mount(
     `Project list for ${context.instanceId}`,
   );
   const viewId = createViewId();
+  const controls: ListControls = {
+    query: "",
+    sort: "name",
+    dirty: false,
+    activeTasks: false,
+  };
   let projects: ProjectSummary[] = [];
   let selectedId: string | null = null;
 
   const publish = (project: ProjectSelection | null): void => {
     context.links.publish("selected_project", project);
+  };
+  const renderCurrent = (): void => {
+    render(shadow, projects, selectedId, controls, select, chooseWorktree);
   };
   const select = (project: ProjectSummary): void => {
     if (selectedId === project.project_id) {
@@ -41,7 +67,7 @@ export function mount(
       selectedId = project.project_id;
       publish(project);
     }
-    render(shadow, projects, selectedId, select, chooseWorktree);
+    renderCurrent();
   };
   const chooseWorktree = (projectId: string, worktreeId: string): void => {
     void context
@@ -53,6 +79,39 @@ export function mount(
       })
       .catch(() => {});
   };
+
+  required<HTMLInputElement>(shadow, ".search").addEventListener(
+    "input",
+    (event) => {
+      controls.query = (event.currentTarget as HTMLInputElement).value;
+      renderCurrent();
+    },
+  );
+  required<HTMLSelectElement>(shadow, ".sort").addEventListener(
+    "change",
+    (event) => {
+      const value = (event.currentTarget as HTMLSelectElement).value;
+      controls.sort = value === "recent" ? "recent" : "name";
+      renderCurrent();
+    },
+  );
+  shadow
+    .querySelectorAll<HTMLInputElement>('.filter-menu input[type="checkbox"]')
+    .forEach((checkbox) => {
+      checkbox.addEventListener("change", () => {
+        if (checkbox.value === "dirty") controls.dirty = checkbox.checked;
+        else controls.activeTasks = checkbox.checked;
+        renderCurrent();
+      });
+    });
+  required<HTMLButtonElement>(
+    shadow,
+    ".hidden-selection button",
+  ).addEventListener("click", () => {
+    selectedId = null;
+    publish(null);
+    renderCurrent();
+  });
 
   void context.send({ command: "open_view", view_id: viewId }).catch(() => {});
   return {
@@ -69,7 +128,7 @@ export function mount(
       } else if (selected) {
         publish(selected);
       }
-      render(shadow, projects, selectedId, select, chooseWorktree);
+      renderCurrent();
     },
     destroy(): void {
       publish(null);
@@ -85,21 +144,44 @@ function render(
   shadow: ShadowRoot,
   projects: ProjectSummary[],
   selectedId: string | null,
+  controls: ListControls,
   select: (project: ProjectSummary) => void,
   chooseWorktree: (projectId: string, worktreeId: string) => void,
 ): void {
-  required<HTMLElement>(shadow, ".summary").textContent =
-    `${projects.length} ${projects.length === 1 ? "project" : "projects"}`;
+  const visible = visibleProjects(projects, controls);
+  const filtering =
+    controls.query.trim() !== "" || controls.dirty || controls.activeTasks;
+  required<HTMLElement>(shadow, ".summary").textContent = filtering
+    ? `${visible.length} of ${projects.length} projects`
+    : `${projects.length} ${projects.length === 1 ? "project" : "projects"}`;
+  const activeFilterCount =
+    Number(controls.dirty) + Number(controls.activeTasks);
+  required<HTMLElement>(shadow, ".filters summary").textContent =
+    activeFilterCount === 0 ? "Filters" : `Filters (${activeFilterCount})`;
+
+  const hiddenSelection = required<HTMLElement>(shadow, ".hidden-selection");
+  const selected = selectedId
+    ? projects.find((project) => project.project_id === selectedId)
+    : undefined;
+  const selectedIsHidden =
+    selected !== undefined &&
+    !visible.some((project) => project.project_id === selected.project_id);
+  hiddenSelection.hidden = !selectedIsHidden;
+  required<HTMLElement>(hiddenSelection, "span").textContent = selected
+    ? `Selected: ${selected.project}`
+    : "";
+
   const rows = required<HTMLElement>(shadow, ".rows");
   rows.replaceChildren();
   if (projects.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "empty";
-    empty.textContent = "No projects";
-    rows.append(empty);
+    rows.append(emptyState("No projects"));
     return;
   }
-  for (const project of projects) {
+  if (visible.length === 0) {
+    rows.append(emptyState("No matching projects"));
+    return;
+  }
+  for (const project of visible) {
     const row = document.createElement("div");
     row.className = "project-row";
     row.classList.toggle("selected", project.project_id === selectedId);
@@ -153,6 +235,91 @@ function render(
     }
     rows.append(row);
   }
+}
+
+function visibleProjects(
+  projects: ProjectSummary[],
+  controls: ListControls,
+): ProjectSummary[] {
+  const query = controls.query.trim();
+  const ranked = projects
+    .filter(
+      (project) =>
+        (!controls.dirty || project.clean === false) &&
+        (!controls.activeTasks ||
+          project.open_tasks > 0 ||
+          project.in_progress_tasks > 0),
+    )
+    .map((project): RankedProject | null => {
+      const score = fuzzyScore(project.project, query);
+      return score === null ? null : { project, score };
+    })
+    .filter((value): value is RankedProject => value !== null);
+  ranked.sort((left, right) => {
+    if (query && left.score !== right.score) return right.score - left.score;
+    return compareProjects(left.project, right.project, controls.sort);
+  });
+  return ranked.map(({ project }) => project);
+}
+
+function compareProjects(
+  left: ProjectSummary,
+  right: ProjectSummary,
+  sort: ProjectSort,
+): number {
+  if (sort === "recent") {
+    const leftTime = left.latest_commit_unix;
+    const rightTime = right.latest_commit_unix;
+    if (leftTime !== rightTime) {
+      if (leftTime === null) return 1;
+      if (rightTime === null) return -1;
+      return rightTime - leftTime;
+    }
+  }
+  return (
+    left.project.localeCompare(right.project, undefined, {
+      sensitivity: "base",
+    }) || left.project_id.localeCompare(right.project_id)
+  );
+}
+
+function fuzzyScore(name: string, query: string): number | null {
+  if (!query) return 0;
+  const source = Array.from(name.toLocaleLowerCase());
+  const terms = query.toLocaleLowerCase().split(/\s+/).filter(Boolean);
+  let total = 0;
+  for (const term of terms) {
+    let cursor = 0;
+    let previous = -2;
+    for (const character of Array.from(term)) {
+      const index = source.indexOf(character, cursor);
+      if (index < 0) return null;
+      const boundary = index === 0 || !isNameCharacter(source[index - 1]);
+      if (boundary) total += 12;
+      else if (index === previous + 1) total += 8;
+      else total += Math.max(1, 5 - (index - previous));
+      previous = index;
+      cursor = index + 1;
+    }
+    total += Math.max(0, 12 - (source.length - term.length));
+  }
+  return total;
+}
+
+function isNameCharacter(value: string): boolean {
+  const code = value.codePointAt(0) ?? 0;
+  return (
+    (code >= 48 && code <= 57) ||
+    (code >= 65 && code <= 90) ||
+    (code >= 97 && code <= 122)
+  );
+}
+
+function emptyState(message: string): HTMLElement {
+  const empty = document.createElement("div");
+  empty.className = "empty";
+  empty.textContent = message;
+  return empty;
 }
 
 function parseSnapshot(value: unknown): Snapshot | null {
