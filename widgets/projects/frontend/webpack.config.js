@@ -1,7 +1,11 @@
 const path = require("path");
 
 module.exports = (_env, argv) => ({
-  entry: { list: "./src/list.ts", project: "./src/project.ts" },
+  entry: {
+    list: "./src/list.ts",
+    pinned: "./src/pinned.ts",
+    project: "./src/project.ts",
+  },
   output: {
     path: path.resolve(__dirname, "dist"),
     filename: "[name].js",

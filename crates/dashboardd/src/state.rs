@@ -45,6 +45,8 @@ pub struct DashboardStateFile {
     pub instances: Vec<PersistedInstance>,
     #[serde(default)]
     pub links: Vec<DashboardLink>,
+    #[serde(default)]
+    pub widget_state: BTreeMap<WidgetId, Value>,
 }
 
 impl DashboardStateFile {
@@ -53,7 +55,13 @@ impl DashboardStateFile {
             schema_version: SCHEMA_VERSION,
             instances,
             links,
+            widget_state: BTreeMap::new(),
         }
+    }
+
+    pub fn with_widget_state(mut self, widget_state: BTreeMap<WidgetId, Value>) -> Self {
+        self.widget_state = widget_state;
+        self
     }
 }
 
@@ -184,6 +192,17 @@ mod tests {
         store.save(&state).unwrap();
 
         assert_eq!(store.load().unwrap(), Some(state));
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn legacy_state_without_widget_state_loads_empty_state() {
+        let path = temporary_path("legacy");
+        fs::write(&path, r#"{"schema_version":1,"instances":[],"links":[]}"#).unwrap();
+
+        let state = StateStore::new(path.clone()).load().unwrap().unwrap();
+
+        assert!(state.widget_state.is_empty());
         fs::remove_file(path).unwrap();
     }
 

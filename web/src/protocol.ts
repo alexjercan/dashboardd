@@ -98,6 +98,11 @@ export type InstanceList = { instances: Instance[] };
 export type InstanceHealthList = { instances: InstanceHealth[] };
 export type LinkList = { links: DashboardLink[] };
 export type ErrorResponse = { error: { code: string; message: string } };
+export type WidgetStateResource = {
+  widget_id: string;
+  revision: number;
+  value: unknown;
+};
 
 type InstanceCreatedEvent = {
   version: typeof EVENT_VERSION;
@@ -142,6 +147,11 @@ type WidgetUpdateEvent = {
   kind: "widget_update";
   data: { instance_id: string; payload: unknown };
 };
+type WidgetStateUpdatedEvent = {
+  version: typeof EVENT_VERSION;
+  kind: "widget_state_updated";
+  data: WidgetStateResource;
+};
 type ThemeUpdatedEvent = {
   version: typeof EVENT_VERSION;
   kind: "theme_updated";
@@ -162,6 +172,7 @@ export type DashboardEvent =
   | InstanceErrorEvent
   | InstanceHealthUpdatedEvent
   | WidgetUpdateEvent
+  | WidgetStateUpdatedEvent
   | ThemeUpdatedEvent
   | ConfigurationErrorEvent;
 
@@ -236,6 +247,22 @@ export function parseInstance(value: unknown): Instance {
       height: value.layout.height,
     },
     options: value.options,
+  };
+}
+
+export function parseWidgetStateResource(value: unknown): WidgetStateResource {
+  if (
+    !isRecord(value) ||
+    typeof value.widget_id !== "string" ||
+    !Number.isSafeInteger(value.revision) ||
+    (value.revision as number) < 0 ||
+    !("value" in value)
+  )
+    throw new Error("invalid widget state");
+  return {
+    widget_id: value.widget_id,
+    revision: value.revision as number,
+    value: value.value,
   };
 }
 
@@ -344,6 +371,12 @@ export function parseDashboardEvent(value: unknown): DashboardEvent {
           },
         };
       break;
+    case "widget_state_updated":
+      return {
+        version: EVENT_VERSION,
+        kind: value.kind,
+        data: parseWidgetStateResource(value.data),
+      };
     case "theme_updated":
       return {
         version: EVENT_VERSION,

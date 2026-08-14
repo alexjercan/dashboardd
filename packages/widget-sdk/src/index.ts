@@ -6,12 +6,19 @@ export interface WidgetLinks {
   subscribe(input: string, handler: (payload: unknown) => void): () => void;
 }
 
+export interface WidgetSharedState {
+  get(): unknown;
+  subscribe(handler: (value: unknown) => void): () => void;
+  mutate(update: (current: unknown) => unknown): Promise<void>;
+}
+
 export interface WidgetContext {
   widgetId: string;
   variantId: string;
   instanceId: string;
   options: WidgetOptions;
   links: WidgetLinks;
+  sharedState: WidgetSharedState;
   send(payload: unknown): Promise<void>;
 }
 

@@ -14,6 +14,7 @@ import {
   type InstanceHealth,
   type Theme,
   type WidgetDescriptor,
+  type WidgetStateResource,
 } from "./protocol";
 
 export type ConnectionStatus =
@@ -37,6 +38,7 @@ export type DashboardEvents = {
   onLinkUpdated(link: DashboardLink): void;
   onLinkDestroyed(targetInstanceId: string, targetPort: string): void;
   onWidgetUpdate(instanceId: string, payload: unknown): void;
+  onWidgetStateUpdated(state: WidgetStateResource): void;
   onError(message: string): void;
 };
 
@@ -97,6 +99,9 @@ export function connectDashboard(events: DashboardEvents): DashboardConnection {
           break;
         case "widget_update":
           events.onWidgetUpdate(event.data.instance_id, event.data.payload);
+          break;
+        case "widget_state_updated":
+          events.onWidgetStateUpdated(event.data);
           break;
         case "theme_updated":
           events.onTheme(event.data.theme);

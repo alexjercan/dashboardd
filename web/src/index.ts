@@ -6,6 +6,7 @@ import {
   type DashboardConnection,
 } from "./dashboard";
 import { WidgetLinkBus } from "./links";
+import { WidgetStateBus } from "./state";
 import {
   parseInstance,
   type DashboardLayout,
@@ -152,6 +153,7 @@ const containers = new Map<string, HTMLElement>();
 const mounting = new Map<string, Promise<void>>();
 const pendingUpdates = new Map<string, unknown>();
 const linkBus = new WidgetLinkBus();
+const stateBus = new WidgetStateBus();
 let editing = window.location.pathname === "/edit";
 let focusedInstanceId = parseFocusRoute(window.location.pathname);
 let previousFocusedInstanceId: string | null = null;
@@ -282,6 +284,7 @@ function applySnapshot(
   );
   descriptors.clear();
   for (const descriptor of widgets) descriptors.set(descriptor.id, descriptor);
+  void stateBus.reconcile(widgets.map((widget) => widget.id));
   const currentIds = new Set(instances.map((instance) => instance.id));
   for (const instanceId of resources.keys()) {
     if (!currentIds.has(instanceId)) removeInstance(instanceId);
@@ -373,6 +376,7 @@ async function mountWidget(instance: Instance): Promise<void> {
       instanceId: instance.id,
       options: instance.options,
       links: linkBus.context(instance.id),
+      sharedState: stateBus.context(instance.widget_id),
       send: (payload) => connection.sendWidget(instance.id, payload),
     });
     if (!resources.has(instance.id)) {
@@ -1495,6 +1499,9 @@ connection = connectDashboard({
     const frontend = frontends.get(instanceId);
     if (frontend) frontend.update(payload);
     else pendingUpdates.set(instanceId, payload);
+  },
+  onWidgetStateUpdated(state) {
+    stateBus.update(state);
   },
   onError: showError,
 });

@@ -179,6 +179,29 @@ function parseBranch(value: unknown): Branch | null {
   return value as Branch;
 }
 
+export function fuzzyScore(name: string, query: string): number | null {
+  if (!query) return 0;
+  const source = Array.from(name.toLocaleLowerCase());
+  const terms = query.toLocaleLowerCase().split(/\s+/).filter(Boolean);
+  let total = 0;
+  for (const term of terms) {
+    let cursor = 0;
+    let previous = -2;
+    for (const character of Array.from(term)) {
+      const index = source.indexOf(character, cursor);
+      if (index < 0) return null;
+      const boundary = index === 0 || !isNameCharacter(source[index - 1]);
+      if (boundary) total += 12;
+      else if (index === previous + 1) total += 8;
+      else total += Math.max(1, 5 - (index - previous));
+      previous = index;
+      cursor = index + 1;
+    }
+    total += Math.max(0, 12 - (source.length - term.length));
+  }
+  return total;
+}
+
 export function relativeTime(timestamp: number | null): string {
   if (timestamp === null) return "No commits";
   const seconds = Math.max(0, Math.round(Date.now() / 1000 - timestamp));
@@ -204,6 +227,15 @@ export function createViewId(): string {
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function isNameCharacter(value: string): boolean {
+  const code = value.codePointAt(0) ?? 0;
+  return (
+    (code >= 48 && code <= 57) ||
+    (code >= 65 && code <= 90) ||
+    (code >= 97 && code <= 122)
+  );
 }
 
 function nonNegativeInteger(value: unknown): value is number {

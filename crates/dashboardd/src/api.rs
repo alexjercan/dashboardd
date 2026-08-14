@@ -99,6 +99,19 @@ pub struct ErrorResponse {
     pub error: DashboardError,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct WidgetStateResource {
+    pub widget_id: WidgetId,
+    pub revision: u64,
+    pub value: Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct SetWidgetState {
+    pub revision: u64,
+    pub value: Value,
+}
+
 #[derive(OpenApi)]
 #[openapi(
     paths(
@@ -120,6 +133,8 @@ pub struct ErrorResponse {
         swap_instances,
         delete_instance,
         send_widget_message,
+        get_widget_state,
+        set_widget_state,
         dashboard_events,
     ),
     components(schemas(
@@ -144,6 +159,8 @@ pub struct ErrorResponse {
         UpdateInstance,
         WidgetDescriptor,
         WidgetLinkPort,
+        WidgetStateResource,
+        SetWidgetState,
         WidgetList,
         WidgetVariant,
     )),
@@ -163,6 +180,10 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/layout/swap", post(swap_instances))
         .route("/api/v1/widgets", get(list_widgets))
         .route("/api/v1/widgets/{widget_id}", get(get_widget))
+        .route(
+            "/api/v1/widget-state/{widget_id}",
+            get(get_widget_state).put(set_widget_state),
+        )
         .route(
             "/api/v1/instances",
             get(list_instances).post(create_instance),
@@ -270,6 +291,63 @@ async fn get_widget(
         .get(&widget_id)
         .map(|config| Json(config.descriptor.clone()))
         .ok_or_else(ApiError::unknown_widget)
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/widget-state/{widget_id}",
+    tag = "widgets",
+    params(("widget_id" = String, Path, description = "Widget package ID")),
+    responses(
+        (status = 200, description = "Shared durable widget state", body = WidgetStateResource),
+        (status = 404, description = "Widget was not found", body = ErrorResponse)
+    )
+)]
+async fn get_widget_state(
+    AxumPath(widget_id): AxumPath<WidgetId>,
+    State(state): State<AppState>,
+) -> Result<Json<WidgetStateResource>, ApiError> {
+    if state.widgets.get(&widget_id).is_none() {
+        return Err(ApiError::unknown_widget());
+    }
+    let (revision, value) = state.instances.get_widget_state(&widget_id);
+    Ok(Json(WidgetStateResource {
+        widget_id,
+        revision,
+        value,
+    }))
+}
+
+#[utoipa::path(
+    put,
+    path = "/api/v1/widget-state/{widget_id}",
+    tag = "widgets",
+    params(("widget_id" = String, Path, description = "Widget package ID")),
+    request_body = SetWidgetState,
+    responses(
+        (status = 200, description = "Updated shared durable widget state", body = WidgetStateResource),
+        (status = 400, description = "Widget state exceeds its bound", body = ErrorResponse),
+        (status = 404, description = "Widget was not found", body = ErrorResponse),
+        (status = 409, description = "Widget state revision is stale", body = ErrorResponse)
+    )
+)]
+async fn set_widget_state(
+    AxumPath(widget_id): AxumPath<WidgetId>,
+    State(state): State<AppState>,
+    ApiJson(request): ApiJson<SetWidgetState>,
+) -> Result<Json<WidgetStateResource>, ApiError> {
+    if state.widgets.get(&widget_id).is_none() {
+        return Err(ApiError::unknown_widget());
+    }
+    let (revision, value) = state
+        .instances
+        .set_widget_state(&widget_id, request.revision, request.value)
+        .await?;
+    Ok(Json(WidgetStateResource {
+        widget_id,
+        revision,
+        value,
+    }))
 }
 
 #[utoipa::path(
@@ -674,6 +752,10 @@ impl From<InstanceError> for ApiError {
             InstanceError::PersistenceFailed => {
                 (StatusCode::INTERNAL_SERVER_ERROR, "persistence_failed")
             }
+            InstanceError::WidgetStateTooLarge => {
+                (StatusCode::BAD_REQUEST, "widget_state_too_large")
+            }
+            InstanceError::WidgetStateConflict => (StatusCode::CONFLICT, "widget_state_conflict"),
             InstanceError::InvalidState(_) => (StatusCode::INTERNAL_SERVER_ERROR, "invalid_state"),
         };
 
@@ -723,6 +805,94 @@ mod tests {
             themes: ThemeManager::new(Theme::default()),
             shutdown: broadcast::channel(1).0,
         })
+    }
+
+    fn test_app_with_projects() -> (Router, std::path::PathBuf) {
+        let root = std::env::temp_dir().join(format!(
+            "scufris-api-widget-state-{}-{}",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        let widget = root.join("projects");
+        std::fs::create_dir_all(&widget).unwrap();
+        std::fs::write(
+            widget.join("widget.json"),
+            r#"{"schema_version":2,"id":"projects","name":"Projects","description":"Projects","backend":"backend","variants":[{"id":"pinned","name":"Pinned","width":3,"height":1,"frontend":"pinned.js"}],"options":[]}"#,
+        )
+        .unwrap();
+        std::fs::write(widget.join("backend"), "backend").unwrap();
+        std::fs::write(widget.join("pinned.js"), "frontend").unwrap();
+        let widgets = WidgetsManager::discover(&root).unwrap();
+        (
+            build_router(AppState {
+                widgets,
+                instances: InstanceManager::default(),
+                themes: ThemeManager::new(Theme::default()),
+                shutdown: broadcast::channel(1).0,
+            }),
+            root,
+        )
+    }
+
+    #[tokio::test]
+    async fn reads_updates_and_conflict_checks_widget_state() {
+        let (app, root) = test_app_with_projects();
+        let response = app
+            .clone()
+            .oneshot(
+                Request::get("/api/v1/widget-state/projects")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Value>(&body).unwrap(),
+            serde_json::json!({"widget_id": "projects", "revision": 0, "value": {}})
+        );
+
+        let update = |revision, value: Value| {
+            Request::put("/api/v1/widget-state/projects")
+                .header(CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&serde_json::json!({
+                        "revision": revision,
+                        "value": value
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap()
+        };
+        let response = app
+            .clone()
+            .oneshot(update(0, serde_json::json!({"pins": []})))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let response = app
+            .clone()
+            .oneshot(update(0, serde_json::json!({})))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let response = app
+            .clone()
+            .oneshot(update(1, Value::String("x".repeat(64 * 1024 + 1))))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let response = app
+            .oneshot(
+                Request::get("/api/v1/widget-state/missing")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[tokio::test]
@@ -845,6 +1015,7 @@ mod tests {
         );
         assert!(document["paths"]["/api/v1/layout"].is_object());
         assert!(document["paths"]["/api/v1/instances"].is_object());
+        assert!(document["paths"]["/api/v1/widget-state/{widget_id}"].is_object());
         assert!(document["paths"]["/api/v1/events"].is_object());
     }
 }

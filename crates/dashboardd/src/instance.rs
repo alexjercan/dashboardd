@@ -87,6 +87,8 @@ struct Inner {
     events: broadcast::Sender<DashboardEvent>,
     next_id: AtomicU64,
     store: Option<Arc<StateStore>>,
+    widget_state: RwLock<BTreeMap<WidgetId, Value>>,
+    widget_state_revisions: RwLock<BTreeMap<WidgetId, u64>>,
 }
 
 struct ManagedInstance {
@@ -124,6 +126,10 @@ pub enum InstanceError {
     UnknownLink,
     #[error("could not save dashboard composition")]
     PersistenceFailed,
+    #[error("widget state exceeds 64 KiB")]
+    WidgetStateTooLarge,
+    #[error("widget state revision is stale")]
+    WidgetStateConflict,
     #[error("{0}")]
     InvalidState(String),
 }
@@ -139,6 +145,8 @@ impl InstanceManager {
                 events,
                 next_id: AtomicU64::new(1),
                 store: None,
+                widget_state: RwLock::new(BTreeMap::new()),
+                widget_state_revisions: RwLock::new(BTreeMap::new()),
             }),
         }
     }
@@ -165,9 +173,16 @@ impl InstanceManager {
         let (events, _) = broadcast::channel(256);
         let mut restored = Vec::new();
         let mut restored_links = Vec::new();
+        let mut restored_widget_state = BTreeMap::new();
         let mut next_id = 1;
         if let Some(saved) = saved {
             restored_links = saved.links;
+            restored_widget_state = saved.widget_state;
+            for value in restored_widget_state.values() {
+                validate_widget_state(value).map_err(|error| {
+                    InstanceError::InvalidState(format!("invalid widget state: {error}"))
+                })?;
+            }
             let mut layouts = Vec::new();
             let mut ids = std::collections::HashSet::new();
             for persisted in saved.instances {
@@ -257,7 +272,10 @@ impl InstanceManager {
             normalized.sort_by(|left, right| left.id.cmp(&right.id));
             sort_links(&mut restored_links);
             store
-                .save(&DashboardStateFile::new(normalized, restored_links.clone()))
+                .save(
+                    &DashboardStateFile::new(normalized, restored_links.clone())
+                        .with_widget_state(restored_widget_state.clone()),
+                )
                 .map_err(|error| {
                     InstanceError::InvalidState(format!("could not migrate state: {error}"))
                 })?;
@@ -270,6 +288,13 @@ impl InstanceManager {
                 events,
                 next_id: AtomicU64::new(next_id),
                 store: Some(store),
+                widget_state_revisions: RwLock::new(
+                    restored_widget_state
+                        .keys()
+                        .map(|widget_id| (widget_id.clone(), 0))
+                        .collect(),
+                ),
+                widget_state: RwLock::new(restored_widget_state),
             }),
         })
     }
@@ -664,6 +689,21 @@ impl InstanceManager {
         resources: impl Iterator<Item = &'a Instance>,
         links: &[DashboardLink],
     ) -> Result<(), InstanceError> {
+        let widget_state = self
+            .inner
+            .widget_state
+            .read()
+            .expect("widget state lock is poisoned")
+            .clone();
+        self.persist_dashboard(resources, links, widget_state)
+    }
+
+    fn persist_dashboard<'a>(
+        &self,
+        resources: impl Iterator<Item = &'a Instance>,
+        links: &[DashboardLink],
+        widget_state: BTreeMap<WidgetId, Value>,
+    ) -> Result<(), InstanceError> {
         let Some(store) = &self.inner.store else {
             return Ok(());
         };
@@ -672,11 +712,85 @@ impl InstanceManager {
         let mut links = links.to_vec();
         sort_links(&mut links);
         store
-            .save(&DashboardStateFile::new(instances, links))
+            .save(&DashboardStateFile::new(instances, links).with_widget_state(widget_state))
             .map_err(|error| {
                 tracing::error!(%error, path = %store.path().display(), "failed to persist dashboard composition");
                 InstanceError::PersistenceFailed
             })
+    }
+
+    pub fn get_widget_state(&self, widget_id: &str) -> (u64, Value) {
+        let revision = self
+            .inner
+            .widget_state_revisions
+            .read()
+            .expect("widget state revision lock is poisoned")
+            .get(widget_id)
+            .copied()
+            .unwrap_or(0);
+        let value = self
+            .inner
+            .widget_state
+            .read()
+            .expect("widget state lock is poisoned")
+            .get(widget_id)
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!({}));
+        (revision, value)
+    }
+
+    pub async fn set_widget_state(
+        &self,
+        widget_id: &str,
+        expected_revision: u64,
+        value: Value,
+    ) -> Result<(u64, Value), InstanceError> {
+        validate_widget_state(&value)?;
+        let instances = self.inner.instances.lock().await;
+        let links = self.inner.links.read().expect("links lock is poisoned");
+        let revisions = self
+            .inner
+            .widget_state_revisions
+            .read()
+            .expect("widget state revision lock is poisoned");
+        let current_revision = revisions.get(widget_id).copied().unwrap_or(0);
+        if expected_revision != current_revision {
+            return Err(InstanceError::WidgetStateConflict);
+        }
+        let revision = current_revision
+            .checked_add(1)
+            .ok_or(InstanceError::WidgetStateConflict)?;
+        let mut proposed = self
+            .inner
+            .widget_state
+            .read()
+            .expect("widget state lock is poisoned")
+            .clone();
+        proposed.insert(widget_id.into(), value.clone());
+        self.persist_dashboard(
+            instances.values().map(|instance| &instance.resource),
+            &links,
+            proposed,
+        )?;
+        self.inner
+            .widget_state
+            .write()
+            .expect("widget state lock is poisoned")
+            .insert(widget_id.into(), value.clone());
+        drop(revisions);
+        self.inner
+            .widget_state_revisions
+            .write()
+            .expect("widget state revision lock is poisoned")
+            .insert(widget_id.into(), revision);
+        drop(links);
+        drop(instances);
+        let _ = self.inner.events.send(DashboardEvent::WidgetStateUpdated {
+            widget_id: widget_id.into(),
+            revision,
+            value: value.clone(),
+        });
+        Ok((revision, value))
     }
 
     pub async fn send(&self, instance_id: &str, payload: Value) -> Result<(), InstanceError> {
@@ -802,6 +916,16 @@ fn initial_state(
         });
     }
     Ok(DashboardStateFile::new(instances, Vec::new()))
+}
+
+fn validate_widget_state(value: &Value) -> Result<(), InstanceError> {
+    let length = serde_json::to_vec(value)
+        .map_err(|_| InstanceError::WidgetStateTooLarge)?
+        .len();
+    if length > 64 * 1024 {
+        return Err(InstanceError::WidgetStateTooLarge);
+    }
+    Ok(())
 }
 
 fn sequence_after(instance_id: &str) -> u64 {
@@ -1237,6 +1361,76 @@ mod tests {
             manager.get("missing").await,
             Err(InstanceError::UnknownInstance)
         ));
+    }
+
+    #[tokio::test]
+    async fn persists_shared_widget_state_before_publishing_it() {
+        let root = std::env::temp_dir().join(format!(
+            "scufris-widget-state-{}-{}",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let state_path = root.join("dashboard.json");
+        let store = Arc::new(StateStore::new(state_path.clone()));
+        store
+            .save(
+                &DashboardStateFile::new(Vec::new(), Vec::new()).with_widget_state(BTreeMap::from(
+                    [("projects".into(), serde_json::json!({"pins": []}))],
+                )),
+            )
+            .unwrap();
+        let manager = InstanceManager::restore(
+            DashboardLayout::default(),
+            WidgetsManager::default(),
+            store.clone(),
+            &[],
+        )
+        .await
+        .unwrap();
+        let mut events = manager.subscribe();
+
+        let value = serde_json::json!({"pins": [{"project_id": "project-1", "project": "one"}]});
+        assert_eq!(
+            manager
+                .set_widget_state("projects", 0, value.clone())
+                .await
+                .unwrap(),
+            (1, value.clone())
+        );
+        assert_eq!(manager.get_widget_state("projects"), (1, value.clone()));
+        assert_eq!(
+            store.load().unwrap().unwrap().widget_state["projects"],
+            value
+        );
+        assert!(matches!(
+            events.recv().await.unwrap(),
+            DashboardEvent::WidgetStateUpdated { revision: 1, .. }
+        ));
+        assert!(matches!(
+            manager
+                .set_widget_state("projects", 0, serde_json::json!({}))
+                .await,
+            Err(InstanceError::WidgetStateConflict)
+        ));
+        assert!(matches!(
+            manager
+                .set_widget_state("projects", 1, Value::String("x".repeat(64 * 1024 + 1)))
+                .await,
+            Err(InstanceError::WidgetStateTooLarge)
+        ));
+
+        fs::remove_file(&state_path).unwrap();
+        fs::create_dir(&state_path).unwrap();
+        assert!(matches!(
+            manager
+                .set_widget_state("projects", 1, serde_json::json!({"pins": []}))
+                .await,
+            Err(InstanceError::PersistenceFailed)
+        ));
+        assert_eq!(manager.get_widget_state("projects"), (1, value));
+        assert!(events.try_recv().is_err());
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[tokio::test]

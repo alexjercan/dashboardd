@@ -3,10 +3,18 @@ import widgetReset from "@scufris/widget-sdk/widget.css";
 import styles from "./list.css";
 import {
   createViewId,
+  fuzzyScore,
   parseSummary,
   type ProjectSelection,
   type ProjectSummary,
 } from "./shared";
+import {
+  createPinButton,
+  MAX_PINS,
+  parsePins,
+  togglePin,
+  type ProjectPin,
+} from "./pins";
 
 type Snapshot = { view_id: string; projects: ProjectSummary[] };
 type ProjectSort = "name" | "recent";
@@ -51,13 +59,23 @@ export function mount(
     activeTasks: false,
   };
   let projects: ProjectSummary[] = [];
+  let pins: ProjectPin[] = parsePins(context.sharedState.get());
   let selectedId: string | null = null;
 
   const publish = (project: ProjectSelection | null): void => {
     context.links.publish("selected_project", project);
   };
   const renderCurrent = (): void => {
-    render(shadow, projects, selectedId, controls, select, chooseWorktree);
+    render(
+      shadow,
+      projects,
+      selectedId,
+      controls,
+      pins,
+      select,
+      chooseWorktree,
+      pinProject,
+    );
   };
   const select = (project: ProjectSummary): void => {
     if (selectedId === project.project_id) {
@@ -68,6 +86,9 @@ export function mount(
       publish(project);
     }
     renderCurrent();
+  };
+  const pinProject = (project: ProjectSummary): void => {
+    void togglePin(context.sharedState, project).catch(() => {});
   };
   const chooseWorktree = (projectId: string, worktreeId: string): void => {
     void context
@@ -113,6 +134,10 @@ export function mount(
     renderCurrent();
   });
 
+  const unsubscribeState = context.sharedState.subscribe((value) => {
+    pins = parsePins(value);
+    renderCurrent();
+  });
   void context.send({ command: "open_view", view_id: viewId }).catch(() => {});
   return {
     update(payload: unknown): void {
@@ -131,6 +156,7 @@ export function mount(
       renderCurrent();
     },
     destroy(): void {
+      unsubscribeState();
       publish(null);
       void context
         .send({ command: "release_view", view_id: viewId })
@@ -145,8 +171,10 @@ function render(
   projects: ProjectSummary[],
   selectedId: string | null,
   controls: ListControls,
+  pins: ProjectPin[],
   select: (project: ProjectSummary) => void,
   chooseWorktree: (projectId: string, worktreeId: string) => void,
+  pinProject: (project: ProjectSummary) => void,
 ): void {
   const visible = visibleProjects(projects, controls);
   const filtering =
@@ -217,6 +245,13 @@ function render(
     choice.addEventListener("click", () => select(project));
     row.append(choice);
 
+    const pinned = pins.some((pin) => pin.project_id === project.project_id);
+    row.append(
+      createPinButton(project, pinned, !pinned && pins.length >= MAX_PINS, () =>
+        pinProject(project),
+      ),
+    );
+
     if ((project.worktrees?.length ?? 0) > 1) {
       const worktree = document.createElement("select");
       worktree.className = "worktree";
@@ -280,38 +315,6 @@ function compareProjects(
     left.project.localeCompare(right.project, undefined, {
       sensitivity: "base",
     }) || left.project_id.localeCompare(right.project_id)
-  );
-}
-
-function fuzzyScore(name: string, query: string): number | null {
-  if (!query) return 0;
-  const source = Array.from(name.toLocaleLowerCase());
-  const terms = query.toLocaleLowerCase().split(/\s+/).filter(Boolean);
-  let total = 0;
-  for (const term of terms) {
-    let cursor = 0;
-    let previous = -2;
-    for (const character of Array.from(term)) {
-      const index = source.indexOf(character, cursor);
-      if (index < 0) return null;
-      const boundary = index === 0 || !isNameCharacter(source[index - 1]);
-      if (boundary) total += 12;
-      else if (index === previous + 1) total += 8;
-      else total += Math.max(1, 5 - (index - previous));
-      previous = index;
-      cursor = index + 1;
-    }
-    total += Math.max(0, 12 - (source.length - term.length));
-  }
-  return total;
-}
-
-function isNameCharacter(value: string): boolean {
-  const code = value.codePointAt(0) ?? 0;
-  return (
-    (code >= 48 && code <= 57) ||
-    (code >= 65 && code <= 90) ||
-    (code >= 97 && code <= 122)
   );
 }
 

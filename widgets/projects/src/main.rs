@@ -189,7 +189,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 Some(line) => match dashboard_protocol::parse::<ServerToWidget>(&line) {
                     Ok(ServerToWidget::Initialize { instance_id, widget_id, variant_id, options }) if widget_id == WIDGET_ID => {
                         match (Settings::from_options(&options), variant_id.as_str()) {
-                            (Ok(settings), "list") => runtime = Some(Runtime::List {
+                            (Ok(settings), "list" | "pinned") => runtime = Some(Runtime::List {
                                 instance_id,
                                 settings,
                                 discovery: DiscoveryCache::default(),

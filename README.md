@@ -30,6 +30,12 @@ persists links between compatible placed instances. Frontends use
 `WidgetContext.links.publish()` and `subscribe()` for page-local linked view
 state. Link payloads reset on reload and remain independent between tabs.
 
+Packaged frontends can use `WidgetContext.sharedState` for bounded package-wide
+JSON state. `get()` reads the current value, `subscribe()` receives synchronized
+updates, and `mutate()` retries revision conflicts. Dashboardd persists shared
+state in `dashboard.json` before publishing updates. Shared state is public
+widget data and must not contain credentials or filesystem paths.
+
 Useful commands:
 
 ```bash
@@ -68,7 +74,8 @@ paths or device names. The Network widget aggregates active non-loopback
 interfaces without exposing interface names, addresses, or MAC addresses. Both
 refresh once per second and use IEC units.
 
-The Projects widget provides separate 3x3 List and Project variants. List scans
+The Projects widget provides 3x3 List and Project variants plus a compact 3x1
+Pinned variant. List scans
 immediate children of configured local roots and publishes page-local project
 selection. List supports page-local fuzzy name search, Name or Recent sorting,
 and Dirty or Active tasks filters without clearing hidden selections.
@@ -79,7 +86,10 @@ Focus Overview, Changes, and Branches. Git inspection uses fixed bounded local
 commands without shell, remote, or write operations. Absolute paths, remote
 URLs, and author identities remain outside browser payloads. A linked Projects
 List can page-locally filter Tatr Tasks, and task and Artifact reads follow the
-selected worktree.
+selected worktree. List and Pinned share up to three durable ordered repository
+pins. Filled stars, the Pinned Manage dialog, reloads, and tabs synchronize
+through dashboard-owned shared state. Pinned can replace List as the compact
+project-selection source for Project or Tatr.
 
 The 6x3 Tatr Tasks widget reads `TASK.md` records directly without executing
 `tatr`. It defaults to recursive discovery under `~/personal`, filters to open

@@ -1,6 +1,6 @@
 //! Versioned events sent from dashboardd to browser event streams.
 
-use dashboard_protocol::InstanceId;
+use dashboard_protocol::{InstanceId, WidgetId};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use utoipa::ToSchema;
@@ -56,6 +56,11 @@ pub enum DashboardEvent {
         instance_id: InstanceId,
         payload: Value,
     },
+    WidgetStateUpdated {
+        widget_id: WidgetId,
+        revision: u64,
+        value: Value,
+    },
     ThemeUpdated {
         theme: Box<Theme>,
     },
@@ -83,6 +88,29 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn widget_state_update_serializes_as_a_versioned_event() {
+        let encoded = serialize(DashboardEvent::WidgetStateUpdated {
+            widget_id: "projects".into(),
+            revision: 3,
+            value: json!({"pins": []}),
+        })
+        .unwrap();
+
+        assert_eq!(
+            serde_json::from_str::<Value>(&encoded).unwrap(),
+            json!({
+                "version": 1,
+                "kind": "widget_state_updated",
+                "data": {
+                    "widget_id": "projects",
+                    "revision": 3,
+                    "value": {"pins": []}
+                }
+            })
+        );
+    }
 
     #[test]
     fn widget_update_serializes_as_a_versioned_event() {

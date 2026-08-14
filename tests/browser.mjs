@@ -240,6 +240,12 @@ try {
   );
   assert.deepEqual(
     catalog
+      .find((widget) => widget.id === "projects")
+      .outputs.map((port) => [port.id, port.type, port.variants]),
+    [["selected_project", "scufris.project-selection/v1", ["list", "pinned"]]],
+  );
+  assert.deepEqual(
+    catalog
       .find((widget) => widget.id === "cpu")
       .options.map((option) => [option.id, option.type, option.default]),
     [
@@ -301,6 +307,7 @@ try {
       ],
       projects: [
         ["list", 3, 3],
+        ["pinned", 3, 1],
         ["project", 3, 3],
       ],
       "tatr-tasks": [
@@ -727,6 +734,29 @@ try {
     .locator(".state", { hasText: "Select a project" })
     .waitFor();
 
+  await page.locator('.dashboard-slot[data-column="6"][data-row="6"]').click();
+  await page.locator('.widget-choice[data-widget-id="projects"]').click();
+  await page.locator(".variant-choice", { hasText: "Pinned" }).click();
+  await page.locator(".widget-option textarea").fill(tatrRoot);
+  const pinnedResponsePromise = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/v1/instances") &&
+      response.request().method() === "POST",
+  );
+  await page.locator("#confirm-add").click();
+  const pinnedResponse = await pinnedResponsePromise;
+  assert.equal(pinnedResponse.status(), 201);
+  const pinnedInstance = await pinnedResponse.json();
+  assert.deepEqual(pinnedInstance.layout, {
+    column: 6,
+    row: 6,
+    width: 3,
+    height: 1,
+  });
+  const pinnedFrame = page.locator(`[data-instance-id="${pinnedInstance.id}"]`);
+  await pinnedFrame.locator(".empty-card").first().waitFor();
+  assert.equal(await pinnedFrame.locator(".empty-card").count(), 3);
+
   const projectFilterBadge = tatrFrame.locator(".widget-link-badge.input");
   assert.equal(
     await projectFilterBadge.textContent(),
@@ -737,7 +767,9 @@ try {
     await page.locator("#link-input-name").textContent(),
     "Project filter",
   );
-  await page.locator("#link-source").selectOption({ index: 1 });
+  await page
+    .locator("#link-source")
+    .selectOption(`${projectsListInstance.id}\u0000selected_project`);
   const projectFilterResponse = page.waitForResponse(
     (response) =>
       response.url().includes(`/api/v1/links/${tatrInstance.id}/project`) &&
@@ -774,6 +806,7 @@ try {
   const projectRows = projectsListFrame.locator(".project-row");
   assert.deepEqual(await projectRows.locator("strong").allTextContents(), [
     "idle",
+    "other",
     "scufris",
     "tatr",
   ]);
@@ -782,6 +815,7 @@ try {
     "scufris",
     "tatr",
     "idle",
+    "other",
   ]);
   await projectSort.selectOption("name");
   await projectSearch.fill("SCF RS");
@@ -790,7 +824,7 @@ try {
   ]);
   assert.equal(
     await projectsListFrame.locator(".summary").textContent(),
-    "1 of 3 projects",
+    "1 of 4 projects",
   );
   await projectSearch.fill("i");
   assert.deepEqual(await projectRows.locator("strong").allTextContents(), [
@@ -851,6 +885,100 @@ try {
     .waitFor();
   await projectSearch.fill("");
   await tatrFrame.locator(".task-row").nth(1).waitFor();
+
+  const initialProjectState = await page.request.get(
+    `${baseUrl}/api/v1/widget-state/projects`,
+  );
+  assert.deepEqual(await initialProjectState.json(), {
+    widget_id: "projects",
+    revision: 0,
+    value: {},
+  });
+  const secondProjectsListFrame = secondPage.locator(
+    `[data-instance-id="${projectsListInstance.id}"]`,
+  );
+  await secondProjectsListFrame.locator(".project-row").nth(3).waitFor();
+  await Promise.all([
+    projectsListFrame
+      .locator(".project-row", { hasText: "scufris" })
+      .locator(".pin-button")
+      .click(),
+    secondProjectsListFrame
+      .locator(".project-row", { hasText: "tatr" })
+      .locator(".pin-button")
+      .click(),
+  ]);
+  await pinnedFrame.locator(".project-card", { hasText: "scufris" }).waitFor();
+  await pinnedFrame.locator(".project-card", { hasText: "tatr" }).waitFor();
+  await projectsListFrame
+    .locator(".project-row", { hasText: "idle" })
+    .locator(".pin-button")
+    .click();
+  await pinnedFrame.locator(".project-card", { hasText: "idle" }).waitFor();
+  assert.equal(await pinnedFrame.locator(".empty-card").count(), 0);
+  assert.equal(
+    await projectsListFrame.locator(".pin-button.pinned").count(),
+    3,
+  );
+  const otherPin = projectsListFrame
+    .locator(".project-row", { hasText: "other" })
+    .locator(".pin-button");
+  assert.equal(await otherPin.isDisabled(), true);
+  assert.equal(
+    await otherPin.getAttribute("title"),
+    "Pinned project limit reached",
+  );
+  await secondPage
+    .locator(`[data-instance-id="${pinnedInstance.id}"] .project-card`, {
+      hasText: "idle",
+    })
+    .waitFor();
+
+  await pinnedFrame.locator(".manage").click();
+  const pinManager = pinnedFrame.locator(".manager");
+  await pinManager.waitFor();
+  const cardsBeforeMove = await pinnedFrame
+    .locator(".cards .project-card strong")
+    .allTextContents();
+  await pinManager
+    .locator(".pinned-row")
+    .first()
+    .locator(".move-button", { hasText: "Later" })
+    .click();
+  await pinnedFrame
+    .locator(".cards .project-card strong")
+    .nth(1)
+    .filter({ hasText: cardsBeforeMove[0] })
+    .waitFor();
+  assert.deepEqual(
+    await pinnedFrame.locator(".cards .project-card strong").allTextContents(),
+    [cardsBeforeMove[1], cardsBeforeMove[0], cardsBeforeMove[2]],
+  );
+  await pinManager.locator(".search").fill("OTH");
+  const managerOtherPin = pinManager
+    .locator(".manage-row", { hasText: "other" })
+    .locator(".pin-button");
+  assert.equal(await managerOtherPin.isDisabled(), true);
+  await pinManager
+    .locator(".pinned-row", { hasText: "idle" })
+    .locator(".pin-button")
+    .click();
+  await managerOtherPin.click();
+  await pinnedFrame.locator(".project-card", { hasText: "other" }).waitFor();
+  await page.screenshot({
+    path: path.join(artifacts, "pinned-projects-manage-narrow.png"),
+  });
+  await pinManager.locator(".done").click();
+  await page.screenshot({
+    path: path.join(artifacts, "pinned-projects-narrow.png"),
+    fullPage: true,
+  });
+  const persistedPins = await page.request.get(
+    `${baseUrl}/api/v1/widget-state/projects`,
+  );
+  const persistedPinState = await persistedPins.json();
+  assert.equal(persistedPinState.value.pins.length, 3);
+  assert.ok(persistedPinState.revision >= 5);
 
   assert.equal(await tatrFrame.locator(".task-row").count(), 2);
   assert.equal(
@@ -1263,7 +1391,7 @@ try {
     false,
     "task rendering does not expose the absolute root",
   );
-  for (const frame of [projectsListFrame, projectFrame]) {
+  for (const frame of [projectsListFrame, pinnedFrame, projectFrame]) {
     assert.equal(
       await frame
         .locator(".dashboard-widget-mount")
@@ -1278,7 +1406,50 @@ try {
   }
   await page.reload();
   await tatrFrame.locator(".task-row").first().waitFor();
-  await projectsListFrame.locator(".project-row").nth(2).waitFor();
+  await projectsListFrame.locator(".project-row").nth(3).waitFor();
+  await pinnedFrame.locator(".project-card").nth(2).waitFor();
+  assert.equal(await pinnedFrame.locator(".empty-card").count(), 0);
+  assert.equal(
+    await projectsListFrame.locator(".pin-button.pinned").count(),
+    3,
+    "pins persist across browser reload",
+  );
+  const pinSnapshotResponse = await page.request.get(
+    `${baseUrl}/api/v1/widget-state/projects`,
+  );
+  const pinSnapshot = await pinSnapshotResponse.json();
+  const displacedPin = pinSnapshot.value.pins[2];
+  const unavailableState = await page.request.put(
+    `${baseUrl}/api/v1/widget-state/projects`,
+    {
+      data: {
+        revision: pinSnapshot.revision,
+        value: {
+          pins: [
+            ...pinSnapshot.value.pins.slice(0, 2),
+            { project_id: "project-unavailable", project: "missing-project" },
+          ],
+        },
+      },
+    },
+  );
+  assert.equal(unavailableState.status(), 200);
+  await pinnedFrame
+    .locator(".project-card.unavailable", { hasText: "missing-project" })
+    .waitFor();
+  await pinnedFrame.locator(".manage").click();
+  await pinnedFrame
+    .locator(".pinned-row", { hasText: "missing-project" })
+    .locator(".pin-button")
+    .click();
+  await pinnedFrame.locator(".done").click();
+  await projectsListFrame
+    .locator(".project-row", { hasText: displacedPin.project })
+    .locator(".pin-button")
+    .click();
+  await pinnedFrame
+    .locator(".project-card", { hasText: displacedPin.project })
+    .waitFor();
   assert.equal(await projectsListFrame.locator(".search").inputValue(), "");
   assert.equal(await projectsListFrame.locator(".sort").inputValue(), "name");
   assert.equal(
@@ -1343,7 +1514,9 @@ try {
     "Project filter: Not linked",
   );
   await projectFilterBadge.click();
-  await page.locator("#link-source").selectOption({ index: 1 });
+  await page
+    .locator("#link-source")
+    .selectOption(`${projectsListInstance.id}\u0000selected_project`);
   const restoreProjectFilter = page.waitForResponse(
     (response) =>
       response.url().includes(`/api/v1/links/${tatrInstance.id}/project`) &&
@@ -1354,6 +1527,57 @@ try {
   await tatrFrame
     .locator(".project-filter", { hasText: "Project: scufris" })
     .waitFor();
+
+  const projectInputBadge = projectFrame.locator(".widget-link-badge.input");
+  await projectInputBadge.click();
+  await page
+    .locator("#link-source")
+    .selectOption(`${pinnedInstance.id}\u0000selected_project`);
+  const projectFromPinned = page.waitForResponse(
+    (response) =>
+      response.url().includes(`/api/v1/links/${projectInstance.id}/project`) &&
+      response.request().method() === "PUT",
+  );
+  await page.locator("#confirm-link").click();
+  assert.equal((await projectFromPinned).status(), 200);
+  await projectFilterBadge.click();
+  await page
+    .locator("#link-source")
+    .selectOption(`${pinnedInstance.id}\u0000selected_project`);
+  const tatrFromPinned = page.waitForResponse(
+    (response) =>
+      response.url().includes(`/api/v1/links/${tatrInstance.id}/project`) &&
+      response.request().method() === "PUT",
+  );
+  await page.locator("#confirm-link").click();
+  assert.equal((await tatrFromPinned).status(), 200);
+  await page.locator("#finish-editing").click();
+  await pinnedFrame.locator(".project-card", { hasText: "scufris" }).click();
+  await projectFrame.locator('.identity:text-is("scufris")').waitFor();
+  await tatrFrame
+    .locator(".project-filter", { hasText: "Project: scufris" })
+    .waitFor();
+  assert.equal(
+    await pinnedFrame
+      .locator(".project-card", { hasText: "scufris" })
+      .evaluate((element) => element.classList.contains("selected")),
+    true,
+    "Pinned publishes the Primary project selection",
+  );
+
+  await page.locator("#edit-layout").click();
+  await projectInputBadge.click();
+  await page
+    .locator("#link-source")
+    .selectOption(`${projectsListInstance.id}\u0000selected_project`);
+  await page.locator("#confirm-link").click();
+  await projectFilterBadge.click();
+  await page
+    .locator("#link-source")
+    .selectOption(`${projectsListInstance.id}\u0000selected_project`);
+  await page.locator("#confirm-link").click();
+  await projectFrame.locator('.identity:text-is("scufris")').waitFor();
+
   const deleteProjectsList = await page.request.delete(
     `${baseUrl}/api/v1/instances/${projectsListInstance.id}`,
   );
@@ -1373,6 +1597,15 @@ try {
   );
   assert.equal(deleteProject.status(), 204);
   await projectFrame.waitFor({ state: "detached" });
+  const deletePinned = await page.request.delete(
+    `${baseUrl}/api/v1/instances/${pinnedInstance.id}`,
+  );
+  assert.equal(deletePinned.status(), 204);
+  await pinnedFrame.waitFor({ state: "detached" });
+  const retainedPins = await page.request.get(
+    `${baseUrl}/api/v1/widget-state/projects`,
+  );
+  assert.equal((await retainedPins.json()).value.pins.length, 3);
   const deleteTatr = await page.request.delete(
     `${baseUrl}/api/v1/instances/${tatrInstance.id}`,
   );
@@ -1477,7 +1710,7 @@ try {
     ["disk", ["full", "compact"]],
     ["memory", ["full", "compact"]],
     ["network", ["full", "compact"]],
-    ["projects", ["list", "project"]],
+    ["projects", ["list", "pinned", "project"]],
     ["claude-usage", ["full", "compact", "minimal"]],
     ["codex-usage", ["compact", "minimal"]],
     ["tatr-tasks", ["full", "details"]],
@@ -1502,6 +1735,12 @@ try {
 
   await requestGracefulStop(dashboardd);
   assert.equal(existsSync(stateFile), true, "composition is persisted");
+  assert.equal(
+    JSON.parse(readFileSync(stateFile, "utf8")).widget_state.projects.pins
+      .length,
+    3,
+    "shared widget state persists without Projects instances",
+  );
   dashboardd = startDashboardd();
   await waitForHealth(dashboardUrl);
   await page.locator(`[data-instance-id="${cpuOne}"]`).waitFor();
@@ -1718,8 +1957,9 @@ function writeProjectRepositories() {
     scufris: "2026-08-14T12:00:00Z",
     tatr: "2026-08-13T12:00:00Z",
     idle: "2026-08-12T12:00:00Z",
+    other: "2026-08-11T12:00:00Z",
   };
-  for (const project of ["scufris", "tatr", "idle"]) {
+  for (const project of ["scufris", "tatr", "idle", "other"]) {
     const directory = path.join(tatrRoot, project);
     mkdirSync(directory, { recursive: true });
     runGitFixture(directory, ["init", "-q", "-b", "main"]);
