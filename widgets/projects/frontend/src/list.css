@@ -1,0 +1,135 @@
+:host {
+  display: block;
+  height: 100%;
+}
+
+article {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+  padding: 13px 14px;
+  overflow: hidden;
+  background: var(--scufris-color-surface);
+}
+
+header {
+  display: flex;
+  flex: none;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid var(--scufris-color-selection);
+}
+
+h2 {
+  margin: 0;
+  color: var(--scufris-color-text-bright);
+  font-size: 15px;
+}
+
+.summary {
+  color: var(--scufris-color-text-muted);
+  font-size: 9px;
+}
+
+.rows {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  scrollbar-color: var(--scufris-color-selection) transparent;
+  scrollbar-width: thin;
+}
+
+.project-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--scufris-color-selection);
+}
+
+.project-row.selected {
+  background: var(--scufris-color-selection);
+  box-shadow: inset 2px 0 var(--scufris-color-accent);
+}
+
+.project-choice {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3px 9px;
+  padding: 8px 6px;
+  border: 0;
+  background: transparent;
+  color: var(--scufris-color-text);
+  cursor: pointer;
+  font-family: var(--scufris-font-mono);
+  text-align: left;
+}
+
+.project-choice:hover,
+.project-choice:focus-visible {
+  background: var(--scufris-color-selection);
+  outline: none;
+}
+
+.project-row strong {
+  overflow: hidden;
+  color: var(--scufris-color-text-bright);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.branch {
+  overflow: hidden;
+  color: var(--scufris-color-text-muted);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-state {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+  color: var(--scufris-color-text-muted);
+  font-size: 9px;
+}
+
+.git-state[data-state="clean"] {
+  color: var(--scufris-color-success);
+}
+
+.git-state[data-state="dirty"] {
+  color: var(--scufris-color-accent);
+}
+
+.worktree {
+  width: 78px;
+  min-width: 0;
+  margin-right: 5px;
+  padding: 2px 3px;
+  overflow: hidden;
+  border: 1px solid var(--scufris-color-border);
+  border-radius: 3px;
+  background: var(--scufris-color-surface);
+  color: var(--scufris-color-secondary);
+  font-family: var(--scufris-font-mono);
+  font-size: 8px;
+  text-overflow: ellipsis;
+}
+
+.worktree:focus-visible {
+  border-color: var(--scufris-color-accent);
+  outline: none;
+}
+
+.empty {
+  display: grid;
+  height: 100%;
+  place-items: center;
+  color: var(--scufris-color-text-muted);
+  font-size: 10px;
+}

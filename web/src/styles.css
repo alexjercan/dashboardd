@@ -792,6 +792,7 @@ button.widget-link-badge {
 
 .widget-option input[type="number"],
 .widget-option input[type="text"],
+.widget-option textarea,
 .widget-option select {
   width: 106px;
   padding: 6px;
@@ -822,9 +823,18 @@ button.widget-link-badge {
   grid-template-columns: 1fr;
 }
 
-.widget-option.text input {
+.widget-option.text input,
+.widget-option.text textarea {
   grid-row: 2;
   width: 100%;
+}
+
+.widget-option textarea {
+  min-height: 96px;
+  resize: vertical;
+  font-family: var(--scufris-font-mono);
+  font-size: 11px;
+  line-height: 1.4;
 }
 
 .confirm-modal p {

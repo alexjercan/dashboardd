@@ -9,6 +9,7 @@ use std::{
     fs,
     io::Read,
     path::{Component, Path, PathBuf},
+    process::Stdio,
     time::SystemTime,
 };
 
@@ -17,11 +18,16 @@ use dashboard_protocol::{ServerToWidget, WidgetToServer};
 use filter::Expr;
 use serde::Serialize;
 use serde_json::Value;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::time::{Duration, Instant, interval_at};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::process::Command;
+use tokio::time::{Duration, Instant, interval_at, timeout};
 
 const WIDGET_ID: &str = "tatr-tasks";
 const UPDATE_INTERVAL: Duration = Duration::from_secs(2);
+const GIT_TIMEOUT: Duration = Duration::from_secs(2);
+const MAX_GIT_OUTPUT: u64 = 1024 * 1024;
+const MAX_WORKTREES: usize = 16;
+const MAX_VIEWS: usize = 64;
 const MAX_TEXT_ARTIFACT_BYTES: u64 = 256 * 1024;
 const MAX_IMAGE_ARTIFACT_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_ARTIFACTS: usize = 200;
@@ -58,7 +64,10 @@ impl Status {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 struct Task {
     id: String,
+    project_id: String,
     project: String,
+    worktree_id: String,
+    worktree: String,
     title: String,
     status: Status,
     priority: u32,
@@ -97,8 +106,19 @@ struct CachedTask {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct TaskSelection {
+struct ProjectSelection {
+    project_id: String,
     project: String,
+    worktree_id: String,
+    worktree: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TaskSelection {
+    project_id: String,
+    project: String,
+    worktree_id: String,
+    worktree: String,
     task_id: String,
 }
 
@@ -119,7 +139,10 @@ struct ArtifactDescriptor {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 struct DetailsSnapshot {
+    project_id: String,
     project: String,
+    worktree_id: String,
+    worktree: String,
     task_id: String,
     artifact: String,
     artifacts: Vec<ArtifactDescriptor>,
@@ -133,7 +156,7 @@ enum Runtime {
         instance_id: String,
         settings: Settings,
         loader: Loader,
-        previous: Option<Result<Value, String>>,
+        views: HashMap<String, FullView>,
     },
     Details {
         instance_id: String,
@@ -142,8 +165,15 @@ enum Runtime {
     },
 }
 
+struct FullView {
+    selection: Option<ProjectSelection>,
+    project_path: Option<PathBuf>,
+    previous: Option<Result<Value, String>>,
+}
+
 struct DetailView {
     selection: TaskSelection,
+    project_path: PathBuf,
     artifact: String,
     previous: Option<Result<Value, String>>,
 }
@@ -182,7 +212,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 instance_id,
                                 settings,
                                 loader: Loader::default(),
-                                previous: None,
+                                views: HashMap::new(),
                             }),
                             (Ok(settings), "details") => runtime = Some(Runtime::Details {
                                 instance_id,
@@ -271,15 +301,26 @@ impl Settings {
 }
 
 impl Loader {
-    fn load(&mut self, settings: &Settings) -> Result<Snapshot, String> {
+    fn load(
+        &mut self,
+        settings: &Settings,
+        selected: Option<(&ProjectSelection, &Path)>,
+    ) -> Result<Snapshot, String> {
         if !settings.root.is_dir() {
             return Err("Tatr root is unavailable".into());
         }
-        let projects = discover_projects(&settings.root, settings.recursive)?;
+        let projects = selected
+            .map(|(_, path)| vec![path.to_path_buf()])
+            .map_or_else(|| discover_projects(&settings.root, settings.recursive), Ok)?;
         let mut seen = HashSet::new();
         let mut tasks = Vec::new();
         for project in projects {
-            let project_name = project_name(&settings.root, &project);
+            let project_name = selected
+                .map(|(selection, _)| selection.project.clone())
+                .unwrap_or_else(|| project_name(&settings.root, &project));
+            let identity = selected
+                .map(|(selection, _)| selection.clone())
+                .unwrap_or_else(|| default_project_selection(&project_name, &project));
             let entries = sorted_entries(&project.join("tasks"))
                 .map_err(|_| format!("Could not read tasks for project {project_name:?}"))?;
             for entry in entries {
@@ -293,20 +334,22 @@ impl Loader {
                 })?;
                 seen.insert(path.clone());
                 let modified = metadata.modified().ok();
-                let task = if let Some(cached) = self
-                    .cache
-                    .get(&path)
-                    .filter(|cached| cached.length == metadata.len() && cached.modified == modified)
-                {
+                let task = if let Some(cached) = self.cache.get(&path).filter(|cached| {
+                    cached.length == metadata.len()
+                        && cached.modified == modified
+                        && cached.task.project_id == identity.project_id
+                        && cached.task.project == identity.project
+                        && cached.task.worktree_id == identity.worktree_id
+                        && cached.task.worktree == identity.worktree
+                }) {
                     cached.task.clone()
                 } else {
                     let source = fs::read_to_string(&path).map_err(|_| {
                         format!("Task {id:?} in project {project_name:?} is unreadable")
                     })?;
-                    let task =
-                        parse_task(&source, id.clone(), project_name.clone()).map_err(|error| {
-                            format!("Invalid task {id:?} in project {project_name:?}: {error}")
-                        })?;
+                    let task = parse_task(&source, id.clone(), &identity).map_err(|error| {
+                        format!("Invalid task {id:?} in project {project_name:?}: {error}")
+                    })?;
                     self.cache.insert(
                         path,
                         CachedTask {
@@ -397,6 +440,98 @@ fn project_name(root: &Path, project: &Path) -> String {
         .unwrap_or_else(|| "project".into())
 }
 
+fn default_project_selection(project: &str, path: &Path) -> ProjectSelection {
+    ProjectSelection {
+        project_id: opaque_id("project", path),
+        project: project.into(),
+        worktree_id: opaque_id("worktree", path),
+        worktree: "Primary".into(),
+    }
+}
+
+async fn resolve_selected_project(
+    settings: &Settings,
+    selection: &ProjectSelection,
+) -> Result<PathBuf, String> {
+    for candidate in discover_projects(&settings.root, settings.recursive)? {
+        let candidate_name = project_name(&settings.root, &candidate);
+        let canonical = match candidate.canonicalize() {
+            Ok(path) => path,
+            Err(_) => continue,
+        };
+        let git = canonical.join(".git").is_dir() || canonical.join(".git").is_file();
+        if !git {
+            let fallback = default_project_selection(&candidate_name, &canonical);
+            if fallback == *selection {
+                return Ok(canonical);
+            }
+            continue;
+        }
+        let common = run_git(
+            &canonical,
+            &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+        )
+        .await
+        .ok()
+        .and_then(|output| {
+            PathBuf::from(String::from_utf8_lossy(&output).trim())
+                .canonicalize()
+                .ok()
+        });
+        let listing = run_git(&canonical, &["worktree", "list", "--porcelain", "-z"])
+            .await
+            .ok();
+        let (Some(common), Some(listing)) = (common, listing) else {
+            continue;
+        };
+        let common_id = opaque_id("project", &common);
+        let fallback_id = opaque_id("project", &canonical);
+        if selection.project_id != common_id && selection.project_id != fallback_id {
+            continue;
+        }
+        for path in parse_worktree_paths(&listing)
+            .into_iter()
+            .take(MAX_WORKTREES)
+        {
+            let Ok(path) = path.canonicalize() else {
+                continue;
+            };
+            if opaque_id("worktree", &path) == selection.worktree_id && path.join("tasks").is_dir()
+            {
+                return Ok(path);
+            }
+        }
+    }
+    Err("Selected project worktree is unavailable".into())
+}
+
+fn parse_worktree_paths(output: &[u8]) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    let mut path = None;
+    let mut prunable = false;
+    for field in output.split(|byte| *byte == 0) {
+        if field.is_empty() {
+            if !prunable && let Some(path) = path.take() {
+                paths.push(path);
+            }
+            path = None;
+            prunable = false;
+        } else if let Some(value) = field.strip_prefix(b"worktree ") {
+            path = Some(PathBuf::from(String::from_utf8_lossy(value).as_ref()));
+        } else if field.starts_with(b"prunable") {
+            prunable = true;
+        }
+    }
+    paths
+}
+
+fn opaque_id(kind: &str, path: &Path) -> String {
+    format!(
+        "{kind}-{}",
+        &blake3::hash(path.as_os_str().as_encoded_bytes()).to_hex()[..20]
+    )
+}
+
 fn valid_task_id(value: &str) -> bool {
     value.len() == 15
         && value.as_bytes()[8] == b'-'
@@ -406,7 +541,7 @@ fn valid_task_id(value: &str) -> bool {
             .all(|(index, byte)| index == 8 || byte.is_ascii_digit())
 }
 
-fn parse_task(source: &str, id: String, project: String) -> Result<Task, String> {
+fn parse_task(source: &str, id: String, selection: &ProjectSelection) -> Result<Task, String> {
     let (title_line, rest) = source
         .split_once('\n')
         .ok_or("title must end with a newline")?;
@@ -438,7 +573,10 @@ fn parse_task(source: &str, id: String, project: String) -> Result<Task, String>
         .collect();
     Ok(Task {
         id,
-        project,
+        project_id: selection.project_id.clone(),
+        project: selection.project.clone(),
+        worktree_id: selection.worktree_id.clone(),
+        worktree: selection.worktree.clone(),
         title,
         status,
         priority,
@@ -460,24 +598,46 @@ fn sort_tasks(tasks: &mut [Task], sort: Sort) {
     });
 }
 
-fn parse_selection(payload: &Value) -> Option<TaskSelection> {
+fn parse_project_selection(payload: &Value) -> Option<ProjectSelection> {
+    let project_id = payload.get("project_id")?.as_str()?;
     let project = payload.get("project")?.as_str()?;
+    let worktree_id = payload.get("worktree_id")?.as_str()?;
+    let worktree = payload.get("worktree")?.as_str()?;
+    if [project_id, project, worktree_id, worktree]
+        .iter()
+        .any(|value| value.is_empty() || value.len() > 256)
+    {
+        return None;
+    }
+    Some(ProjectSelection {
+        project_id: project_id.into(),
+        project: project.into(),
+        worktree_id: worktree_id.into(),
+        worktree: worktree.into(),
+    })
+}
+
+fn parse_selection(payload: &Value) -> Option<TaskSelection> {
+    let selection = parse_project_selection(payload)?;
     let task_id = payload.get("task_id")?.as_str()?;
-    if project.is_empty() || !valid_task_id(task_id) {
+    if !valid_task_id(task_id) {
         return None;
     }
     Some(TaskSelection {
-        project: project.into(),
+        project_id: selection.project_id,
+        project: selection.project,
+        worktree_id: selection.worktree_id,
+        worktree: selection.worktree,
         task_id: task_id.into(),
     })
 }
 
 fn load_details(
-    settings: &Settings,
+    project: &Path,
     selection: &TaskSelection,
     selected_artifact: &str,
 ) -> Result<DetailsSnapshot, String> {
-    let task_directory = resolve_task_directory(settings, selection)?;
+    let task_directory = resolve_task_directory(project, selection)?;
     let artifacts = list_artifacts(&task_directory)?;
     let descriptor = artifacts
         .iter()
@@ -509,7 +669,12 @@ fn load_details(
                 parse_task(
                     &content,
                     selection.task_id.clone(),
-                    selection.project.clone(),
+                    &ProjectSelection {
+                        project_id: selection.project_id.clone(),
+                        project: selection.project.clone(),
+                        worktree_id: selection.worktree_id.clone(),
+                        worktree: selection.worktree.clone(),
+                    },
                 )
                 .map_err(|error| format!("Selected TASK.md is invalid: {error}"))?;
             }
@@ -517,7 +682,10 @@ fn load_details(
         }
     };
     Ok(DetailsSnapshot {
+        project_id: selection.project_id.clone(),
         project: selection.project.clone(),
+        worktree_id: selection.worktree_id.clone(),
+        worktree: selection.worktree.clone(),
         task_id: selection.task_id.clone(),
         artifact: descriptor.path.clone(),
         artifacts,
@@ -527,32 +695,9 @@ fn load_details(
     })
 }
 
-fn resolve_task_directory(
-    settings: &Settings,
-    selection: &TaskSelection,
-) -> Result<PathBuf, String> {
-    let relative = Path::new(&selection.project);
-    if relative
-        .components()
-        .any(|component| !matches!(component, Component::Normal(_)))
-    {
-        return Err("Selected task project is invalid".into());
-    }
-    let root_name = settings.root.file_name().map(|name| name.to_string_lossy());
-    let project = if root_name.as_deref() == Some(selection.project.as_str())
-        && settings.root.join("tasks").is_dir()
-    {
-        settings.root.clone()
-    } else {
-        settings.root.join(relative)
-    };
-    let canonical_root =
-        fs::canonicalize(&settings.root).map_err(|_| "Tatr root is unavailable".to_string())?;
+fn resolve_task_directory(project: &Path, selection: &TaskSelection) -> Result<PathBuf, String> {
     let project = fs::canonicalize(project)
         .map_err(|_| "Selected task project is unavailable".to_string())?;
-    if !project.starts_with(&canonical_root) {
-        return Err("Selected task project escapes the configured root".into());
-    }
     let tasks = fs::canonicalize(project.join("tasks"))
         .map_err(|_| "Selected task project has no tasks directory".to_string())?;
     let task = project.join("tasks").join(&selection.task_id);
@@ -714,11 +859,60 @@ async fn handle_command(
     payload: &Value,
 ) -> Result<bool, Box<dyn Error>> {
     match runtime {
-        Runtime::Full { .. }
-            if payload.get("command").and_then(Value::as_str) == Some("refresh") =>
-        {
-            publish_runtime(stdout, runtime, true).await?;
-            Ok(true)
+        Runtime::Full {
+            settings, views, ..
+        } => {
+            let Some(view_id) = parse_view_id(payload) else {
+                return Ok(false);
+            };
+            match payload.get("command").and_then(Value::as_str) {
+                Some("open_view") => {
+                    limit_views(views, &view_id);
+                    views.entry(view_id).or_insert(FullView {
+                        selection: None,
+                        project_path: None,
+                        previous: None,
+                    });
+                    publish_runtime(stdout, runtime, true).await?;
+                    Ok(true)
+                }
+                Some("select_project") => {
+                    let Some(selection) = parse_project_selection(payload) else {
+                        return Ok(false);
+                    };
+                    let project_path = resolve_selected_project(settings, &selection).await.ok();
+                    limit_views(views, &view_id);
+                    let view = views.entry(view_id).or_insert(FullView {
+                        selection: None,
+                        project_path: None,
+                        previous: None,
+                    });
+                    view.selection = Some(selection);
+                    view.project_path = project_path;
+                    view.previous = None;
+                    publish_runtime(stdout, runtime, true).await?;
+                    Ok(true)
+                }
+                Some("clear_project") => {
+                    limit_views(views, &view_id);
+                    let view = views.entry(view_id).or_insert(FullView {
+                        selection: None,
+                        project_path: None,
+                        previous: None,
+                    });
+                    view.selection = None;
+                    view.project_path = None;
+                    view.previous = None;
+                    publish_runtime(stdout, runtime, true).await?;
+                    Ok(true)
+                }
+                Some("refresh") => {
+                    publish_runtime(stdout, runtime, true).await?;
+                    Ok(true)
+                }
+                Some("release_view") => Ok(views.remove(&view_id).is_some()),
+                _ => Ok(false),
+            }
         }
         Runtime::Details {
             instance_id,
@@ -731,21 +925,32 @@ async fn handle_command(
             let Some(selection) = parse_selection(payload) else {
                 return Ok(false);
             };
+            let project_path = resolve_selected_project(
+                settings,
+                &ProjectSelection {
+                    project_id: selection.project_id.clone(),
+                    project: selection.project.clone(),
+                    worktree_id: selection.worktree_id.clone(),
+                    worktree: selection.worktree.clone(),
+                },
+            )
+            .await
+            .unwrap_or_default();
+            limit_views(views, &view_id);
             views.insert(
                 view_id.clone(),
                 DetailView {
                     selection,
+                    project_path,
                     artifact: "TASK.md".into(),
                     previous: None,
                 },
             );
-            publish_detail(stdout, instance_id, settings, &view_id, views, true).await?;
+            publish_detail(stdout, instance_id, &view_id, views, true).await?;
             Ok(true)
         }
         Runtime::Details {
-            instance_id,
-            settings,
-            views,
+            instance_id, views, ..
         } if payload.get("command").and_then(Value::as_str) == Some("select_artifact") => {
             let Some(view_id) = parse_view_id(payload) else {
                 return Ok(false);
@@ -764,7 +969,7 @@ async fn handle_command(
             }
             view.artifact = artifact;
             view.previous = None;
-            publish_detail(stdout, instance_id, settings, &view_id, views, true).await?;
+            publish_detail(stdout, instance_id, &view_id, views, true).await?;
             Ok(true)
         }
         Runtime::Details { views, .. }
@@ -790,44 +995,51 @@ async fn publish_runtime(
             instance_id,
             settings,
             loader,
-            previous,
-        } => {
-            let current = loader.load(settings).and_then(|snapshot| {
-                serde_json::to_value(snapshot).map_err(|error| error.to_string())
-            });
-            if force || previous.as_ref() != Some(&current) {
-                match &current {
-                    Ok(payload) => {
-                        write_message(
-                            stdout,
-                            WidgetToServer::Update {
-                                instance_id: instance_id.clone(),
-                                payload: payload.clone(),
-                            },
-                        )
-                        .await?
-                    }
-                    Err(message) => {
-                        write_error(
-                            stdout,
-                            Some(instance_id.clone()),
-                            "tasks_unavailable",
-                            message.clone(),
-                        )
-                        .await?
-                    }
-                }
-                *previous = Some(current);
-            }
-        }
-        Runtime::Details {
-            instance_id,
-            settings,
             views,
         } => {
             let view_ids = views.keys().cloned().collect::<Vec<_>>();
             for view_id in view_ids {
-                publish_detail(stdout, instance_id, settings, &view_id, views, force).await?;
+                let Some(view) = views.get_mut(&view_id) else {
+                    continue;
+                };
+                let selected = view.selection.as_ref().zip(view.project_path.as_deref());
+                let current = if view.selection.is_some() && selected.is_none() {
+                    Err("Selected project worktree is unavailable".into())
+                } else {
+                    loader.load(settings, selected).and_then(|snapshot| {
+                        serde_json::to_value(snapshot).map_err(|error| error.to_string())
+                    })
+                };
+                if force || view.previous.as_ref() != Some(&current) {
+                    let payload = match &current {
+                        Ok(payload) => {
+                            let mut payload = payload.clone();
+                            payload["view_id"] = Value::String(view_id.clone());
+                            payload
+                        }
+                        Err(message) => serde_json::json!({
+                            "view_id": view_id,
+                            "error": {"code": "tasks_unavailable", "message": message}
+                        }),
+                    };
+                    write_message(
+                        stdout,
+                        WidgetToServer::Update {
+                            instance_id: instance_id.clone(),
+                            payload,
+                        },
+                    )
+                    .await?;
+                    view.previous = Some(current);
+                }
+            }
+        }
+        Runtime::Details {
+            instance_id, views, ..
+        } => {
+            let view_ids = views.keys().cloned().collect::<Vec<_>>();
+            for view_id in view_ids {
+                publish_detail(stdout, instance_id, &view_id, views, force).await?;
             }
         }
     }
@@ -837,7 +1049,6 @@ async fn publish_runtime(
 async fn publish_detail(
     stdout: &mut tokio::io::Stdout,
     instance_id: &str,
-    settings: &Settings,
     view_id: &str,
     views: &mut HashMap<String, DetailView>,
     force: bool,
@@ -845,7 +1056,7 @@ async fn publish_detail(
     let Some(view) = views.get_mut(view_id) else {
         return Ok(());
     };
-    let current = load_details(settings, &view.selection, &view.artifact)
+    let current = load_details(&view.project_path, &view.selection, &view.artifact)
         .and_then(|snapshot| serde_json::to_value(snapshot).map_err(|error| error.to_string()));
     if force || view.previous.as_ref() != Some(&current) {
         let payload = match &current {
@@ -872,9 +1083,77 @@ async fn publish_detail(
     Ok(())
 }
 
+fn limit_views<T>(views: &mut HashMap<String, T>, view_id: &str) {
+    if !views.contains_key(view_id)
+        && views.len() >= MAX_VIEWS
+        && let Some(expired) = views.keys().next().cloned()
+    {
+        views.remove(&expired);
+    }
+}
+
 fn parse_view_id(payload: &Value) -> Option<String> {
     let view_id = payload.get("view_id")?.as_str()?;
     (!view_id.is_empty() && view_id.len() <= 64 && view_id.is_ascii()).then(|| view_id.into())
+}
+
+async fn run_git(directory: &Path, arguments: &[&str]) -> Result<Vec<u8>, String> {
+    let mut command = Command::new("git");
+    command
+        .args([
+            "-c",
+            "core.fsmonitor=false",
+            "-c",
+            "core.untrackedCache=false",
+            "-c",
+            "diff.external=",
+            "-c",
+            "core.pager=cat",
+        ])
+        .args(arguments)
+        .current_dir(directory)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .env("LC_ALL", "C")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    let mut child = command.spawn().map_err(|_| "Git is unavailable")?;
+    let stdout = child.stdout.take().ok_or("Git stdout is unavailable")?;
+    let stderr = child.stderr.take().ok_or("Git stderr is unavailable")?;
+    let result = timeout(GIT_TIMEOUT, async {
+        let stdout_read = async {
+            let mut output = Vec::new();
+            stdout
+                .take(MAX_GIT_OUTPUT + 1)
+                .read_to_end(&mut output)
+                .await
+                .map(|_| output)
+        };
+        let stderr_read = async {
+            let mut output = Vec::new();
+            stderr
+                .take(16 * 1024 + 1)
+                .read_to_end(&mut output)
+                .await
+                .map(|_| output)
+        };
+        let (stdout, stderr, status) = tokio::join!(stdout_read, stderr_read, child.wait());
+        (stdout, stderr, status)
+    })
+    .await
+    .map_err(|_| "Git inspection timed out")?;
+    let (stdout, _stderr, status) = result;
+    let stdout = stdout.map_err(|_| "Could not read Git output")?;
+    let status = status.map_err(|_| "Could not wait for Git")?;
+    if !status.success() {
+        return Err("Git inspection failed".into());
+    }
+    if stdout.len() as u64 > MAX_GIT_OUTPUT {
+        return Err("Git output exceeded the limit".into());
+    }
+    Ok(stdout)
 }
 
 async fn write_error(
@@ -912,12 +1191,22 @@ async fn write_message(
 mod tests {
     use super::*;
 
+    fn project_selection(project: &str, path: &Path) -> ProjectSelection {
+        default_project_selection(project, path)
+    }
+
     #[test]
     fn parses_strict_task_metadata_without_the_body() {
+        let selection = ProjectSelection {
+            project_id: "project-test".into(),
+            project: "scufris".into(),
+            worktree_id: "worktree-test".into(),
+            worktree: "Primary".into(),
+        };
         let task = parse_task(
             "# Add widget\n\n- STATUS: IN_PROGRESS\n- PRIORITY: 100\n- TAGS: widget, rust\n\nSecret body\n",
             "20260814-120000".into(),
-            "scufris".into(),
+            &selection,
         )
         .unwrap();
 
@@ -925,7 +1214,7 @@ mod tests {
         assert_eq!(task.status, Status::InProgress);
         assert_eq!(task.tags, ["widget", "rust"]);
         assert!(!serde_json::to_string(&task).unwrap().contains("Secret"));
-        assert!(parse_task("# Bad\n- STATUS: MAYBE\n", "id".into(), "p".into()).is_err());
+        assert!(parse_task("# Bad\n- STATUS: MAYBE\n", "id".into(), &selection).is_err());
     }
 
     #[test]
@@ -968,18 +1257,17 @@ mod tests {
             .unwrap();
         #[cfg(unix)]
         std::os::unix::fs::symlink("/etc/passwd", task.join("linked.txt")).unwrap();
-        let settings = Settings {
-            root: root.clone(),
-            recursive: true,
-            filter: None,
-            sort: Sort::Priority,
-        };
+        let identity = project_selection("scufris", &root.join("scufris"));
         let selection = TaskSelection {
-            project: "scufris".into(),
+            project_id: identity.project_id,
+            project: identity.project,
+            worktree_id: identity.worktree_id,
+            worktree: identity.worktree,
             task_id: "20260814-150000".into(),
         };
+        let project = root.join("scufris");
 
-        let details = load_details(&settings, &selection, "TASK.md").unwrap();
+        let details = load_details(&project, &selection, "TASK.md").unwrap();
         assert_eq!(details.artifact, "TASK.md");
         assert_eq!(details.kind, ArtifactKind::Markdown);
         assert!(details.content.contains("# Linked details"));
@@ -1002,24 +1290,91 @@ mod tests {
                 .unwrap()
                 .contains(root.to_string_lossy().as_ref())
         );
-        let text = load_details(&settings, &selection, "summary.txt").unwrap();
+        let text = load_details(&project, &selection, "summary.txt").unwrap();
         assert_eq!(text.kind, ArtifactKind::Text);
         assert_eq!(text.content, "plain text");
-        let image = load_details(&settings, &selection, "result.png").unwrap();
+        let image = load_details(&project, &selection, "result.png").unwrap();
         assert_eq!(image.kind, ArtifactKind::Image);
         assert_eq!(image.media_type.as_deref(), Some("image/png"));
         assert_eq!(
             BASE64.decode(image.content).unwrap(),
             b"\x89PNG\r\n\x1a\nfixture"
         );
-        assert!(load_details(&settings, &selection, "../TASK.md").is_err());
-        let invalid = TaskSelection {
-            project: "../outside".into(),
-            task_id: selection.task_id,
+        assert!(load_details(&project, &selection, "../TASK.md").is_err());
+        assert!(load_details(&root.join("missing"), &selection, "TASK.md").is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn resolves_linked_worktree_tasks_by_opaque_identity() {
+        let root = env::temp_dir().join(format!("scufris-tatr-worktree-{}", std::process::id()));
+        let project = root.join("sample");
+        write_task(&project, "20260814-170000", "Primary task", "OPEN", 1);
+        let run = |directory: &Path, arguments: &[&str]| {
+            let status = std::process::Command::new("git")
+                .args(arguments)
+                .current_dir(directory)
+                .status()
+                .unwrap();
+            assert!(status.success());
         };
-        assert_eq!(
-            load_details(&settings, &invalid, "TASK.md").unwrap_err(),
-            "Selected task project is invalid"
+        run(&project, &["init", "-q", "-b", "main"]);
+        run(&project, &["config", "user.name", "Fixture"]);
+        run(
+            &project,
+            &["config", "user.email", "fixture@example.invalid"],
+        );
+        run(&project, &["add", "."]);
+        run(&project, &["commit", "-q", "-m", "Initial"]);
+        let worktree = root.join(".worktrees/feature");
+        fs::create_dir_all(worktree.parent().unwrap()).unwrap();
+        let worktree_arg = worktree.to_string_lossy();
+        run(
+            &project,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                "feature/tasks",
+                worktree_arg.as_ref(),
+            ],
+        );
+        write_task(
+            &worktree,
+            "20260814-170000",
+            "Worktree task",
+            "IN_PROGRESS",
+            2,
+        );
+        let common = project.join(".git").canonicalize().unwrap();
+        let worktree = worktree.canonicalize().unwrap();
+        let selection = ProjectSelection {
+            project_id: opaque_id("project", &common),
+            project: "sample".into(),
+            worktree_id: opaque_id("worktree", &worktree),
+            worktree: "feature/tasks".into(),
+        };
+        let settings = Settings {
+            root: root.clone(),
+            recursive: true,
+            filter: None,
+            sort: Sort::Priority,
+        };
+
+        let resolved = resolve_selected_project(&settings, &selection)
+            .await
+            .unwrap();
+        assert_eq!(resolved, worktree);
+        let snapshot = Loader::default()
+            .load(&settings, Some((&selection, &resolved)))
+            .unwrap();
+        assert_eq!(snapshot.tasks[0].title, "Worktree task");
+        assert_eq!(snapshot.tasks[0].worktree_id, selection.worktree_id);
+        assert!(
+            !serde_json::to_string(&snapshot)
+                .unwrap()
+                .contains(root.to_string_lossy().as_ref())
         );
         fs::remove_dir_all(root).unwrap();
     }
@@ -1066,7 +1421,7 @@ mod tests {
             sort: Sort::Priority,
         };
 
-        let snapshot = Loader::default().load(&settings).unwrap();
+        let snapshot = Loader::default().load(&settings, None).unwrap();
 
         assert_eq!(snapshot.tasks.len(), 2);
         assert_eq!(snapshot.tasks[0].title, "Second");

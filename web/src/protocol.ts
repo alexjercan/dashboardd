@@ -36,7 +36,7 @@ export type WidgetOption = {
   default: boolean | number | string;
 } & (
   | { type: "boolean" }
-  | { type: "text" }
+  | { type: "text"; multiline: boolean }
   | { type: "integer"; minimum: number; maximum: number; step: number }
   | { type: "select"; choices: WidgetOptionChoice[] }
 );
@@ -462,8 +462,17 @@ function parseOption(value: unknown): WidgetOption {
   };
   if (value.type === "boolean" && typeof value.default === "boolean")
     return { ...common, default: value.default, type: "boolean" };
-  if (value.type === "text" && typeof value.default === "string")
-    return { ...common, default: value.default, type: "text" };
+  if (
+    value.type === "text" &&
+    typeof value.default === "string" &&
+    typeof value.multiline === "boolean"
+  )
+    return {
+      ...common,
+      default: value.default,
+      type: "text",
+      multiline: value.multiline,
+    };
   if (
     value.type === "integer" &&
     Number.isInteger(value.default) &&

@@ -16,34 +16,70 @@ export class WidgetLinkBus {
   }
 
   replace(links: DashboardLink[]): void {
+    for (const previous of this.links)
+      if (
+        !links.some(
+          (link) =>
+            link.source_instance_id === previous.source_instance_id &&
+            link.source_port === previous.source_port &&
+            link.target_instance_id === previous.target_instance_id &&
+            link.target_port === previous.target_port,
+        )
+      )
+        this.deliver(previous.target_instance_id, previous.target_port, null);
     this.links = [...links];
     for (const link of links) this.replay(link);
   }
 
   update(link: DashboardLink): void {
+    const previous = this.links.find(
+      (existing) =>
+        existing.target_instance_id === link.target_instance_id &&
+        existing.target_port === link.target_port,
+    );
     this.links = this.links.filter(
       (existing) =>
         existing.target_instance_id !== link.target_instance_id ||
         existing.target_port !== link.target_port,
     );
     this.links.push(link);
+    if (
+      previous &&
+      (previous.source_instance_id !== link.source_instance_id ||
+        previous.source_port !== link.source_port)
+    )
+      this.deliver(link.target_instance_id, link.target_port, null);
     this.replay(link);
   }
 
   delete(targetInstanceId: string, targetPort: string): void {
+    const linked = this.links.some(
+      (link) =>
+        link.target_instance_id === targetInstanceId &&
+        link.target_port === targetPort,
+    );
     this.links = this.links.filter(
       (link) =>
         link.target_instance_id !== targetInstanceId ||
         link.target_port !== targetPort,
     );
+    if (linked) this.deliver(targetInstanceId, targetPort, null);
   }
 
   removeInstance(instanceId: string): void {
+    const removed = this.links.filter(
+      (link) =>
+        link.source_instance_id === instanceId ||
+        link.target_instance_id === instanceId,
+    );
     this.links = this.links.filter(
       (link) =>
         link.source_instance_id !== instanceId &&
         link.target_instance_id !== instanceId,
     );
+    for (const link of removed)
+      if (link.source_instance_id === instanceId)
+        this.deliver(link.target_instance_id, link.target_port, null);
     for (const key of this.latest.keys())
       if (key.startsWith(`${instanceId}\u0000`)) this.latest.delete(key);
     for (const key of this.subscribers.keys())

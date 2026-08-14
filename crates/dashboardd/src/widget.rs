@@ -59,7 +59,10 @@ pub struct WidgetOption {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum WidgetOptionKind {
     Boolean,
-    Text,
+    Text {
+        #[serde(default)]
+        multiline: bool,
+    },
     Integer {
         minimum: i64,
         maximum: i64,
@@ -154,7 +157,7 @@ impl WidgetOption {
     fn validate_value(&self, value: &Value) -> Result<(), String> {
         let valid = match &self.kind {
             WidgetOptionKind::Boolean => value.is_boolean(),
-            WidgetOptionKind::Text => value.is_string(),
+            WidgetOptionKind::Text { .. } => value.is_string(),
             WidgetOptionKind::Integer {
                 minimum,
                 maximum,
@@ -469,6 +472,10 @@ mod tests {
             "/widgets/cpu/variants/full/frontend.js"
         );
         assert_eq!(config.frontend("full"), Some(cpu.join("full.js").as_path()));
+        assert!(matches!(
+            config.descriptor.options[0].kind,
+            WidgetOptionKind::Text { multiline: false }
+        ));
         assert_eq!(config.input("full", "task").unwrap().link_type, "task/v1");
         assert!(config.input("missing", "task").is_none());
         assert_eq!(

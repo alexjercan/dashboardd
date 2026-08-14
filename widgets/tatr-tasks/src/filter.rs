@@ -320,7 +320,10 @@ mod tests {
     fn task() -> Task {
         Task {
             id: "20260814-120000".into(),
+            project_id: "project-test".into(),
             project: "scufris".into(),
+            worktree_id: "worktree-test".into(),
+            worktree: "Primary".into(),
             title: "Add task widget".into(),
             status: Status::InProgress,
             priority: 100,

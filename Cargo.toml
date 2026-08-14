@@ -8,6 +8,7 @@ members = [
   "widgets/cpu",
   "widgets/memory",
   "widgets/network",
+  "widgets/projects",
   "widgets/tatr-tasks",
   "xtask",
 ]

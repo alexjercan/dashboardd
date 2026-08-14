@@ -43,6 +43,7 @@ writeTatrTask("tatr", "20260814-100000", "Old task", "CLOSED", 200, [
   "archive",
 ]);
 writeTatrArtifacts("scufris", "20260814-120000");
+writeProjectRepositories();
 writeConfiguration("#123456");
 const dashboardUrl = `http://127.0.0.1:${dashboardPort}`;
 const baseUrl = `http://127.0.0.1:${browserPort}`;
@@ -221,7 +222,20 @@ try {
       disk: "Disk",
       memory: "RAM",
       network: "Network",
+      projects: "Projects",
       "tatr-tasks": "Tatr Tasks",
+    },
+  );
+  assert.deepEqual(
+    catalog.find((widget) => widget.id === "projects").options[0],
+    {
+      id: "roots",
+      name: "Roots",
+      description: "One absolute or ~/ project root per line",
+      variants: [],
+      default: "~/personal\n~/personal/_tests\n~/work\n~/third-party",
+      type: "text",
+      multiline: true,
     },
   );
   assert.deepEqual(
@@ -243,7 +257,10 @@ try {
     catalog
       .find((widget) => widget.id === "tatr-tasks")
       .inputs.map((port) => [port.id, port.type, port.variants, port.required]),
-    [["task", "tatr.task-selection/v1", ["details"], true]],
+    [
+      ["project", "scufris.project-selection/v1", ["full"], false],
+      ["task", "tatr.task-selection/v1", ["details"], true],
+    ],
   );
   assert.deepEqual(
     Object.fromEntries(
@@ -281,6 +298,10 @@ try {
       network: [
         ["full", 3, 2],
         ["compact", 1, 1],
+      ],
+      projects: [
+        ["list", 3, 3],
+        ["project", 3, 3],
       ],
       "tatr-tasks": [
         ["full", 6, 3],
@@ -506,7 +527,7 @@ try {
   assert.equal(invalidOptions.status(), 400);
 
   await page.locator('.dashboard-slot[data-column="3"][data-row="0"]').click();
-  assert.equal(await page.locator(".widget-choice").count(), 7);
+  assert.equal(await page.locator(".widget-choice").count(), 8);
   await page.locator(".widget-choice", { hasText: "CPU" }).click();
   await page.locator(".variant-choice", { hasText: "Full" }).click();
   await page.locator('.widget-option input[type="number"]').fill("20");
@@ -656,18 +677,86 @@ try {
   await page.locator(".widget-link-badge.output").waitFor();
   assert.match(
     await detailsFrame.locator(".widget-link-badge.input").textContent(),
-    /Linked to Tatr Tasks at column 1, row 4/,
+    /Linked task list: Tatr Tasks at column 1, row 4/,
   );
+
+  await page.locator('.dashboard-slot[data-column="0"][data-row="6"]').click();
+  await page.locator('.widget-choice[data-widget-id="projects"]').click();
+  const rootsControl = page.locator(".widget-option textarea");
+  assert.equal(
+    await rootsControl.isVisible(),
+    true,
+    "roots use a multiline editor",
+  );
+  await rootsControl.fill(tatrRoot);
+  const projectsListResponsePromise = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/v1/instances") &&
+      response.request().method() === "POST",
+  );
+  await page.locator("#confirm-add").click();
+  const projectsListResponse = await projectsListResponsePromise;
+  assert.equal(projectsListResponse.status(), 201);
+  const projectsListInstance = await projectsListResponse.json();
+  const projectsListFrame = page.locator(
+    `[data-instance-id="${projectsListInstance.id}"]`,
+  );
+  await projectsListFrame.locator(".project-row").first().waitFor();
+
+  await page.locator('.dashboard-slot[data-column="3"][data-row="6"]').click();
+  await page.locator('.widget-choice[data-widget-id="projects"]').click();
+  await page.locator(".variant-choice", { hasText: "Project" }).click();
+  await page.locator(".widget-option textarea").fill(tatrRoot);
+  assert.match(
+    await page.locator("#widget-links select option").textContent(),
+    /Projects at column 1, row 7/,
+  );
+  const projectResponsePromise = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/v1/instances") &&
+      response.request().method() === "POST",
+  );
+  await page.locator("#confirm-add").click();
+  const projectResponse = await projectResponsePromise;
+  assert.equal(projectResponse.status(), 201);
+  const projectInstance = await projectResponse.json();
+  const projectFrame = page.locator(
+    `[data-instance-id="${projectInstance.id}"]`,
+  );
+  await projectFrame
+    .locator(".state", { hasText: "Select a project" })
+    .waitFor();
+
+  const projectFilterBadge = tatrFrame.locator(".widget-link-badge.input");
+  assert.equal(
+    await projectFilterBadge.textContent(),
+    "Project filter: Not linked",
+  );
+  await projectFilterBadge.click();
+  assert.equal(
+    await page.locator("#link-input-name").textContent(),
+    "Project filter",
+  );
+  await page.locator("#link-source").selectOption({ index: 1 });
+  const projectFilterResponse = page.waitForResponse(
+    (response) =>
+      response.url().includes(`/api/v1/links/${tatrInstance.id}/project`) &&
+      response.request().method() === "PUT",
+  );
+  await page.locator("#confirm-link").click();
+  assert.equal((await projectFilterResponse).status(), 200);
+  assert.match(
+    await projectFilterBadge.textContent(),
+    /^Project filter: Projects at/,
+  );
+  assert.equal(
+    await projectsListFrame.locator(".widget-link-badge.output").textContent(),
+    "Selected project -> 2 widgets",
+  );
+
   const linkList = await page.request.get(`${baseUrl}/api/v1/links`);
   assert.equal(linkList.status(), 200);
-  assert.deepEqual((await linkList.json()).links, [
-    {
-      source_instance_id: tatrInstance.id,
-      source_port: "selected_task",
-      target_instance_id: detailsInstance.id,
-      target_port: "task",
-    },
-  ]);
+  assert.equal((await linkList.json()).links.length, 3);
   assert.equal(
     await detailsFrame.locator(".widget-focus-button").isHidden(),
     true,
@@ -703,6 +792,37 @@ try {
   await tatrFrame.locator(".tags button", { hasText: "widget" }).click();
   assert.equal(await tatrFrame.locator(".task-row").count(), 1);
   await tatrFrame.locator(".clear").click();
+  await projectsListFrame
+    .locator(".project-row", { hasText: "scufris" })
+    .click();
+  await tatrFrame
+    .locator(".project-filter", { hasText: "Project: scufris" })
+    .waitFor();
+  assert.equal(await tatrFrame.locator(".task-row").count(), 1);
+  await projectFrame.locator(".identity", { hasText: "scufris" }).waitFor();
+  await projectFrame
+    .locator(".recent-changes code", { hasText: "README.md" })
+    .waitFor();
+  await secondPage
+    .locator(`[data-instance-id="${projectInstance.id}"] .state`, {
+      hasText: "Select a project",
+    })
+    .waitFor();
+  await projectsListFrame
+    .locator(".project-row", { hasText: "scufris" })
+    .click();
+  await tatrFrame.locator(".task-row").nth(1).waitFor();
+  assert.equal(await tatrFrame.locator(".task-row").count(), 2);
+  assert.equal(
+    await projectFrame.locator(".state").textContent(),
+    "Select a project",
+  );
+  await projectsListFrame
+    .locator(".project-row", { hasText: "scufris" })
+    .click();
+  await tatrFrame
+    .locator(".project-filter", { hasText: "Project: scufris" })
+    .waitFor();
   await tatrFrame.locator(".title", { hasText: "Add Tatr widget" }).click();
   await detailsFrame
     .locator(".markdown h1", { hasText: "Add Tatr widget" })
@@ -724,6 +844,72 @@ try {
       .getAttribute("rel"),
     "noopener noreferrer",
   );
+
+  const scufrisProjectRow = projectsListFrame.locator(".project-row", {
+    hasText: "scufris",
+  });
+  assert.deepEqual(
+    await scufrisProjectRow.locator(".worktree option").allTextContents(),
+    ["Primary", "feature/projects"],
+  );
+  await scufrisProjectRow
+    .locator(".worktree")
+    .selectOption({ label: "feature/projects" });
+  await tatrFrame
+    .locator(".project-filter", {
+      hasText: "Project: scufris // feature/projects",
+    })
+    .waitFor();
+  await tatrFrame
+    .locator(".title", { hasText: "Worktree Tatr widget" })
+    .waitFor();
+  await detailsFrame.locator(".state", { hasText: "Select a task" }).waitFor();
+  await projectFrame
+    .locator(".identity", { hasText: "scufris // feature/projects" })
+    .waitFor();
+  await projectFrame
+    .locator(".recent-changes code", { hasText: "worktree-notes.txt" })
+    .waitFor();
+  assert.equal(
+    await secondPage
+      .locator(`[data-instance-id="${projectsListInstance.id}"] .project-row`, {
+        hasText: "scufris",
+      })
+      .locator(".worktree")
+      .inputValue(),
+    await secondPage
+      .locator(`[data-instance-id="${projectsListInstance.id}"] .project-row`, {
+        hasText: "scufris",
+      })
+      .locator('.worktree option:text-is("Primary")')
+      .getAttribute("value"),
+    "worktree choice remains page-local",
+  );
+  await tatrFrame
+    .locator(".title", { hasText: "Worktree Tatr widget" })
+    .click();
+  await detailsFrame
+    .locator(".markdown h1", { hasText: "Worktree Tatr widget" })
+    .waitFor();
+  assert.equal(
+    await detailsFrame.locator(".identity").textContent(),
+    "scufris // feature/projects // 20260814-120000/TASK.md",
+  );
+  await page.screenshot({
+    path: path.join(artifacts, "projects-worktree-narrow.png"),
+    fullPage: true,
+  });
+  await scufrisProjectRow
+    .locator(".worktree")
+    .selectOption({ label: "Primary" });
+  await detailsFrame.locator(".state", { hasText: "Select a task" }).waitFor();
+  await tatrFrame.locator(".title", { hasText: "Add Tatr widget" }).waitFor();
+  await projectFrame.locator('.identity:text-is("scufris")').waitFor();
+  await tatrFrame.locator(".title", { hasText: "Add Tatr widget" }).click();
+  await detailsFrame
+    .locator(".markdown h1", { hasText: "Add Tatr widget" })
+    .waitFor();
+
   await detailsFrame.locator(".identity").click();
   assert.deepEqual(
     await detailsFrame.locator(".artifact-menu button").allTextContents(),
@@ -826,6 +1012,9 @@ try {
   await detailsFrame
     .locator(".markdown h1", { hasText: "Add Tatr widget" })
     .waitFor();
+  await projectsListFrame
+    .locator(".project-row", { hasText: "scufris" })
+    .click();
   await tatrFrame.locator(".title", { hasText: "Document filters" }).click();
   await detailsFrame
     .locator(".markdown h1", { hasText: "Document filters" })
@@ -835,6 +1024,10 @@ try {
     "tatr // 20260814-110000/TASK.md",
     "a new task resets artifact selection to TASK.md",
   );
+  await projectsListFrame
+    .locator(".project-row", { hasText: "scufris" })
+    .click();
+  await detailsFrame.locator(".state", { hasText: "Select a task" }).waitFor();
   await tatrFrame.locator(".title", { hasText: "Add Tatr widget" }).click();
   await detailsFrame
     .locator(".markdown h1", { hasText: "Add Tatr widget" })
@@ -924,6 +1117,26 @@ try {
     path: path.join(artifacts, "tatr-tasks-narrow.png"),
     fullPage: true,
   });
+  await projectFrame.locator(".widget-focus-button").click();
+  await page.waitForURL(`${baseUrl}/focus/${projectInstance.id}`);
+  await projectFrame.locator(".overview-grid").waitFor();
+  await page.screenshot({
+    path: path.join(artifacts, "project-focus-overview-narrow.png"),
+  });
+  await projectFrame.locator('[data-tab="changes"]').click();
+  await projectFrame
+    .locator(".changes-list code", { hasText: "README.md" })
+    .waitFor();
+  await projectFrame
+    .locator('.search[aria-label="Search changes"]')
+    .fill("project-notes");
+  assert.equal(await projectFrame.locator(".changes-list > div").count(), 1);
+  await projectFrame.locator('[data-tab="branches"]').click();
+  await projectFrame
+    .locator(".branches-list strong", { hasText: "feature/projects" })
+    .waitFor();
+  await page.locator("#close-focus").click();
+  await page.waitForURL(baseUrl + "/");
   await page.setViewportSize({ width: 1440, height: 1000 });
   await detailsFrame.locator(".widget-focus-button").click();
   await page.waitForURL(`${baseUrl}/focus/${detailsInstance.id}`);
@@ -943,6 +1156,18 @@ try {
     path: path.join(artifacts, "tatr-linked-wide.png"),
     fullPage: true,
   });
+  await projectFrame.locator(".widget-focus-button").click();
+  await page.waitForURL(`${baseUrl}/focus/${projectInstance.id}`);
+  await projectFrame.locator('[data-tab="overview"]').click();
+  await page.screenshot({
+    path: path.join(artifacts, "project-focus-overview-wide.png"),
+  });
+  await projectFrame.locator('[data-tab="changes"]').click();
+  await page.screenshot({
+    path: path.join(artifacts, "project-focus-changes-wide.png"),
+  });
+  await page.locator("#close-focus").click();
+  await page.waitForURL(baseUrl + "/");
   assert.equal(
     await tatrFrame
       .locator(".dashboard-widget-mount")
@@ -954,6 +1179,19 @@ try {
     false,
     "task rendering does not expose the absolute root",
   );
+  for (const frame of [projectsListFrame, projectFrame]) {
+    assert.equal(
+      await frame
+        .locator(".dashboard-widget-mount")
+        .evaluate(
+          (element, rootPath) =>
+            element.shadowRoot?.textContent?.includes(rootPath) ?? false,
+          tatrRoot,
+        ),
+      false,
+      "project rendering does not expose configured roots",
+    );
+  }
   await page.reload();
   await tatrFrame.locator(".task-row").first().waitFor();
   await detailsFrame.locator(".state", { hasText: "Select a task" }).waitFor();
@@ -966,6 +1204,23 @@ try {
     await tatrFrame.locator(".task-id").first().textContent(),
     "20260814-120000",
   );
+  assert.equal(
+    await projectsListFrame
+      .locator(".project-row", { hasText: "scufris" })
+      .locator(".worktree")
+      .inputValue(),
+    await projectsListFrame
+      .locator(".project-row", { hasText: "scufris" })
+      .locator('.worktree option:text-is("Primary")')
+      .getAttribute("value"),
+    "reload resets worktree choice to Primary",
+  );
+  await projectsListFrame
+    .locator(".project-row", { hasText: "scufris" })
+    .click();
+  await tatrFrame
+    .locator(".project-filter", { hasText: "Project: scufris" })
+    .waitFor();
   await tatrFrame.locator(".title", { hasText: "Add Tatr widget" }).click();
   await detailsFrame.locator(".markdown").waitFor();
   await page.locator("#edit-layout").click();
@@ -978,6 +1233,52 @@ try {
   );
   await page.locator("#confirm-link").click();
   assert.equal((await relinkResponse).status(), 200);
+  await projectFilterBadge.click();
+  await page.locator("#link-source").selectOption("");
+  const unlinkProjectFilter = page.waitForResponse(
+    (response) =>
+      response.url().includes(`/api/v1/links/${tatrInstance.id}/project`) &&
+      response.request().method() === "DELETE",
+  );
+  await page.locator("#confirm-link").click();
+  assert.equal((await unlinkProjectFilter).status(), 204);
+  await tatrFrame.locator(".task-row").nth(1).waitFor();
+  assert.equal(await tatrFrame.locator(".task-row").count(), 2);
+  assert.equal(
+    await projectFilterBadge.textContent(),
+    "Project filter: Not linked",
+  );
+  await projectFilterBadge.click();
+  await page.locator("#link-source").selectOption({ index: 1 });
+  const restoreProjectFilter = page.waitForResponse(
+    (response) =>
+      response.url().includes(`/api/v1/links/${tatrInstance.id}/project`) &&
+      response.request().method() === "PUT",
+  );
+  await page.locator("#confirm-link").click();
+  assert.equal((await restoreProjectFilter).status(), 200);
+  await tatrFrame
+    .locator(".project-filter", { hasText: "Project: scufris" })
+    .waitFor();
+  const deleteProjectsList = await page.request.delete(
+    `${baseUrl}/api/v1/instances/${projectsListInstance.id}`,
+  );
+  assert.equal(deleteProjectsList.status(), 204);
+  await projectsListFrame.waitFor({ state: "detached" });
+  await projectFrame
+    .locator(".state", { hasText: "Select a project" })
+    .waitFor();
+  await tatrFrame.locator(".task-row").nth(1).waitFor();
+  assert.equal(
+    await tatrFrame.locator(".task-row").count(),
+    2,
+    "deleting the project source clears the page-local Tatr filter",
+  );
+  const deleteProject = await page.request.delete(
+    `${baseUrl}/api/v1/instances/${projectInstance.id}`,
+  );
+  assert.equal(deleteProject.status(), 204);
+  await projectFrame.waitFor({ state: "detached" });
   const deleteTatr = await page.request.delete(
     `${baseUrl}/api/v1/instances/${tatrInstance.id}`,
   );
@@ -1082,6 +1383,7 @@ try {
     ["disk", ["full", "compact"]],
     ["memory", ["full", "compact"]],
     ["network", ["full", "compact"]],
+    ["projects", ["list", "project"]],
     ["claude-usage", ["full", "compact", "minimal"]],
     ["codex-usage", ["compact", "minimal"]],
     ["tatr-tasks", ["full", "details"]],
@@ -1276,7 +1578,18 @@ async function exerciseUsageCommands(page, widgetId) {
 }
 
 function writeTatrTask(project, id, title, status, priority, tags) {
-  const directory = path.join(tatrRoot, project, "tasks", id);
+  writeTatrTaskAt(
+    path.join(tatrRoot, project),
+    id,
+    title,
+    status,
+    priority,
+    tags,
+  );
+}
+
+function writeTatrTaskAt(project, id, title, status, priority, tags) {
+  const directory = path.join(project, "tasks", id);
   mkdirSync(directory, { recursive: true });
   writeFileSync(
     path.join(directory, "TASK.md"),
@@ -1304,6 +1617,63 @@ function writeTatrArtifacts(project, id) {
     ),
   );
   writeFileSync(path.join(directory, ".secret.txt"), "hidden");
+}
+
+function writeProjectRepositories() {
+  for (const project of ["scufris", "tatr"]) {
+    const directory = path.join(tatrRoot, project);
+    runGitFixture(directory, ["init", "-q", "-b", "main"]);
+    runGitFixture(directory, ["config", "user.name", "Fixture"]);
+    runGitFixture(directory, [
+      "config",
+      "user.email",
+      "fixture@example.invalid",
+    ]);
+    writeFileSync(path.join(directory, "README.md"), `# ${project}\n`);
+    runGitFixture(directory, ["add", "."]);
+    runGitFixture(directory, ["commit", "-q", "-m", `Initialize ${project}`]);
+  }
+  runGitFixture(path.join(tatrRoot, "scufris"), ["branch", "feature/projects"]);
+  const worktree = path.join(tatrRoot, ".worktrees", "scufris-projects");
+  mkdirSync(path.dirname(worktree), { recursive: true });
+  runGitFixture(path.join(tatrRoot, "scufris"), [
+    "worktree",
+    "add",
+    "-q",
+    worktree,
+    "feature/projects",
+  ]);
+  writeTatrTaskAt(
+    worktree,
+    "20260814-120000",
+    "Worktree Tatr widget",
+    "OPEN",
+    120,
+    ["widget", "worktree"],
+  );
+  writeFileSync(
+    path.join(worktree, "README.md"),
+    "# scufris\n\nWorktree fixture change.\n",
+  );
+  writeFileSync(path.join(worktree, "worktree-notes.txt"), "Linked checkout\n");
+  writeFileSync(
+    path.join(tatrRoot, "scufris", "README.md"),
+    "# scufris\n\nProjects fixture change.\n",
+  );
+  writeFileSync(
+    path.join(tatrRoot, "scufris", "project-notes.txt"),
+    "Untracked project notes\n",
+  );
+}
+
+function runGitFixture(directory, args) {
+  const result = spawnSync("git", args, {
+    cwd: directory,
+    stdio: "pipe",
+    encoding: "utf8",
+  });
+  if (result.status !== 0)
+    throw new Error(`git fixture failed: ${result.stderr || result.stdout}`);
 }
 
 function writeConfiguration(accent, dashboard = "", font = "Iosevka") {
@@ -1503,6 +1873,7 @@ async function verifyBackendHealthProbes() {
     "disk",
     "memory",
     "network",
+    "projects",
     "tatr-tasks",
   ]) {
     const directory = path.join(root, ".build/widgets", widgetId);

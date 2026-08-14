@@ -69,7 +69,7 @@ app.innerHTML = `
   <dialog id="link-widget" class="modal confirm-modal">
     <form method="dialog">
       <header><h2>Link widget</h2><button class="icon-button" value="cancel" aria-label="Close">x</button></header>
-      <label class="relink-control"><span>Linked task list</span><select id="link-source"></select></label>
+      <label class="relink-control"><span id="link-input-name">Widget source</span><select id="link-source"></select></label>
       <footer><button class="button" value="cancel">Cancel</button><button id="confirm-link" class="button primary" type="button">Save link</button></footer>
     </form>
   </dialog>
@@ -125,6 +125,7 @@ const optionsElement = required<HTMLElement>("#widget-options");
 const linksFieldset = required<HTMLElement>("#widget-links-fieldset");
 const linksElement = required<HTMLElement>("#widget-links");
 const linkSourceElement = required<HTMLSelectElement>("#link-source");
+const linkInputName = required<HTMLElement>("#link-input-name");
 const confirmLinkButton = required<HTMLButtonElement>("#confirm-link");
 const backToWidgetsButton = required<HTMLButtonElement>("#back-to-widgets");
 const addPositionElement = required<HTMLElement>("#add-position");
@@ -169,7 +170,11 @@ let selectedWidget: {
 } | null = null;
 let removeInstanceId: string | null = null;
 let healthInstanceId: string | null = null;
-let relinkTarget: { instanceId: string; input: string } | null = null;
+let relinkTarget: {
+  instanceId: string;
+  input: string;
+  required: boolean;
+} | null = null;
 let drag: DragState | null = null;
 let connection: DashboardConnection;
 
@@ -662,14 +667,22 @@ function renderLinkControls(instanceId: string, frame: HTMLElement): void {
   const instance = resources.get(instanceId);
   const descriptor = instance && descriptors.get(instance.widget_id);
   if (!instance || !descriptor) return;
-  const outgoing = linkBus
-    .list()
-    .filter((link) => link.source_instance_id === instanceId);
-  if (outgoing.length > 0) {
+  for (const output of descriptor.outputs.filter(
+    (port) =>
+      port.variants.length === 0 || port.variants.includes(instance.variant_id),
+  )) {
+    const outgoing = linkBus
+      .list()
+      .filter(
+        (link) =>
+          link.source_instance_id === instanceId &&
+          link.source_port === output.id,
+      );
+    if (outgoing.length === 0) continue;
     const badge = document.createElement("span");
     badge.className = "widget-link-badge output";
     badge.tabIndex = 0;
-    badge.textContent = `Selected task -> ${outgoing.length} ${outgoing.length === 1 ? "widget" : "widgets"}`;
+    badge.textContent = `${output.name} -> ${outgoing.length} ${outgoing.length === 1 ? "widget" : "widgets"}`;
     bindLinkHighlight(badge, [
       instanceId,
       ...outgoing.map((link) => link.target_instance_id),
@@ -692,8 +705,8 @@ function renderLinkControls(instanceId: string, frame: HTMLElement): void {
     badge.className = "widget-link-badge input";
     const source = link && resources.get(link.source_instance_id);
     badge.textContent = source
-      ? `Linked to ${instanceLabel(source)}`
-      : "Not linked";
+      ? `${input.name}: ${instanceLabel(source)}`
+      : `${input.name}: Not linked`;
     badge.addEventListener("click", () => openLinkDialog(instanceId, input.id));
     bindLinkHighlight(
       badge,
@@ -725,7 +738,12 @@ function openLinkDialog(instanceId: string, inputId: string): void {
         port.variants.includes(instance.variant_id)),
   );
   if (!input) return;
-  relinkTarget = { instanceId, input: inputId };
+  relinkTarget = {
+    instanceId,
+    input: inputId,
+    required: input.required,
+  };
+  linkInputName.textContent = input.name;
   linkSourceElement.replaceChildren();
   const current = linkBus
     .list()
@@ -733,6 +751,13 @@ function openLinkDialog(instanceId: string, inputId: string): void {
       (link) =>
         link.target_instance_id === instanceId && link.target_port === inputId,
     );
+  if (!input.required) {
+    const none = document.createElement("option");
+    none.value = "";
+    none.textContent = "Not linked";
+    none.selected = !current;
+    linkSourceElement.append(none);
+  }
   for (const source of compatibleOutputs(input.type).filter(
     (source) => source.instance.id !== instanceId,
   )) {
@@ -744,30 +769,49 @@ function openLinkDialog(instanceId: string, inputId: string): void {
       current.source_port === source.port;
     linkSourceElement.append(option);
   }
-  confirmLinkButton.disabled = linkSourceElement.options.length === 0;
+  confirmLinkButton.disabled =
+    input.required && linkSourceElement.options.length === 0;
   linkDialog.showModal();
 }
 
 async function saveLink(): Promise<void> {
-  if (!relinkTarget || !linkSourceElement.value) return;
-  const [sourceInstanceId, sourcePort] =
-    linkSourceElement.value.split("\u0000");
+  const target = relinkTarget;
+  if (!target || (target.required && !linkSourceElement.value)) return;
   confirmLinkButton.disabled = true;
   try {
-    const response = await fetch(
-      `/api/v1/links/${encodeURIComponent(relinkTarget.instanceId)}/${encodeURIComponent(relinkTarget.input)}`,
-      {
+    const url = `/api/v1/links/${encodeURIComponent(target.instanceId)}/${encodeURIComponent(target.input)}`;
+    if (!linkSourceElement.value) {
+      const linked = linkBus
+        .list()
+        .some(
+          (link) =>
+            link.target_instance_id === target.instanceId &&
+            link.target_port === target.input,
+        );
+      if (!linked) {
+        linkDialog.close();
+        renderCanvas();
+        return;
+      }
+      const response = await fetch(url, { method: "DELETE" });
+      if (!response.ok)
+        throw new Error(`${response.status} ${response.statusText}`);
+      linkBus.delete(target.instanceId, target.input);
+    } else {
+      const [sourceInstanceId, sourcePort] =
+        linkSourceElement.value.split("\u0000");
+      const response = await fetch(url, {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           source_instance_id: sourceInstanceId,
           source_port: sourcePort,
         }),
-      },
-    );
-    if (!response.ok)
-      throw new Error(`${response.status} ${response.statusText}`);
-    linkBus.update((await response.json()) as DashboardLink);
+      });
+      if (!response.ok)
+        throw new Error(`${response.status} ${response.statusText}`);
+      linkBus.update((await response.json()) as DashboardLink);
+    }
     linkDialog.close();
     renderCanvas();
   } catch (error) {
@@ -1196,7 +1240,7 @@ function instanceLabel(instance: Instance): string {
 
 function optionControl(
   option: WidgetOption,
-): HTMLInputElement | HTMLSelectElement {
+): HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement {
   if (option.type === "select") {
     const select = document.createElement("select");
     for (const choice of option.choices) {
@@ -1207,6 +1251,12 @@ function optionControl(
       select.append(item);
     }
     return select;
+  }
+  if (option.type === "text" && option.multiline) {
+    const textarea = document.createElement("textarea");
+    textarea.rows = 5;
+    textarea.value = String(option.default);
+    return textarea;
   }
   const input = document.createElement("input");
   if (option.type === "boolean") {
@@ -1227,7 +1277,7 @@ function optionControl(
 
 function optionValue(
   option: WidgetOption,
-  control: HTMLInputElement | HTMLSelectElement,
+  control: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement,
 ): boolean | number | string {
   if (option.type === "boolean") return (control as HTMLInputElement).checked;
   if (option.type === "integer") return Number(control.value);

@@ -84,8 +84,7 @@ enum OptionKindSource {
         _boolean: EmptyTable,
     },
     Text {
-        #[serde(rename = "text")]
-        _text: EmptyTable,
+        text: TextOptionSource,
     },
     Integer {
         integer: IntegerOptionSource,
@@ -97,6 +96,12 @@ enum OptionKindSource {
 
 #[derive(Debug, Deserialize)]
 struct EmptyTable {}
+
+#[derive(Debug, Default, Deserialize)]
+struct TextOptionSource {
+    #[serde(default)]
+    multiline: bool,
+}
 
 #[derive(Debug, Deserialize)]
 struct IntegerOptionSource {
@@ -154,7 +159,9 @@ struct RuntimeOption<'a> {
 #[serde(tag = "type", rename_all = "snake_case")]
 enum RuntimeOptionKind<'a> {
     Boolean,
-    Text,
+    Text {
+        multiline: bool,
+    },
     Integer {
         minimum: i64,
         maximum: i64,
@@ -277,7 +284,9 @@ fn prepare(
             default: &option.default,
             kind: match &option.kind {
                 OptionKindSource::Boolean { .. } => RuntimeOptionKind::Boolean,
-                OptionKindSource::Text { .. } => RuntimeOptionKind::Text,
+                OptionKindSource::Text { text } => RuntimeOptionKind::Text {
+                    multiline: text.multiline,
+                },
                 OptionKindSource::Integer { integer } => RuntimeOptionKind::Integer {
                     minimum: integer.minimum,
                     maximum: integer.maximum,

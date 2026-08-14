@@ -1,0 +1,45 @@
+schema_version = 1
+id = "projects"
+name = "Projects"
+description = "Local project selection and read-only Git status"
+
+[backend]
+package = "projects"
+
+[frontend]
+workspace = "@scufris/projects-widget"
+
+[[frontend.variants]]
+id = "list"
+name = "List"
+size = [3, 3]
+entry = "src/list.ts"
+
+[[frontend.variants]]
+id = "project"
+name = "Project"
+size = [3, 3]
+entry = "src/project.ts"
+focus = true
+
+[[links.outputs]]
+id = "selected_project"
+name = "Selected project"
+type = "scufris.project-selection/v1"
+variants = ["list"]
+
+[[links.inputs]]
+id = "project"
+name = "Project list"
+type = "scufris.project-selection/v1"
+variants = ["project"]
+required = true
+
+[[options]]
+id = "roots"
+name = "Roots"
+description = "One absolute or ~/ project root per line"
+default = "~/personal\n~/personal/_tests\n~/work\n~/third-party"
+
+[options.text]
+multiline = true

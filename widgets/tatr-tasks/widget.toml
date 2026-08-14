@@ -29,6 +29,13 @@ type = "tatr.task-selection/v1"
 variants = ["full"]
 
 [[links.inputs]]
+id = "project"
+name = "Project filter"
+type = "scufris.project-selection/v1"
+variants = ["full"]
+required = false
+
+[[links.inputs]]
 id = "task"
 name = "Linked task list"
 type = "tatr.task-selection/v1"
