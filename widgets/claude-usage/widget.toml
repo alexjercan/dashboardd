@@ -1,0 +1,28 @@
+schema_version = 1
+id = "claude-usage"
+name = "Claude Usage"
+description = "Weekly Claude subscription limits"
+
+[backend]
+package = "claude-usage"
+
+[frontend]
+workspace = "@scufris/claude-usage-widget"
+
+[[frontend.variants]]
+id = "full"
+name = "Full"
+size = [3, 2]
+entry = "src/full.ts"
+
+[[frontend.variants]]
+id = "compact"
+name = "Compact"
+size = [3, 1]
+entry = "src/compact.ts"
+
+[[frontend.variants]]
+id = "minimal"
+name = "Minimal"
+size = [1, 1]
+entry = "src/minimal.ts"

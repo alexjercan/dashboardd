@@ -1,6 +1,7 @@
 schema_version = 1
 id = "memory"
 name = "Memory"
+description = "RAM and swap usage"
 
 [backend]
 package = "memory"

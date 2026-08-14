@@ -2,6 +2,8 @@
 members = [
   "crates/dashboard-protocol",
   "crates/dashboardd",
+  "widgets/claude-usage",
+  "widgets/codex-usage",
   "widgets/cpu",
   "widgets/memory",
   "xtask",

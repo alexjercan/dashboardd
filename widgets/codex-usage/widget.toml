@@ -1,0 +1,22 @@
+schema_version = 1
+id = "codex-usage"
+name = "Codex Usage"
+description = "Weekly Codex subscription limit"
+
+[backend]
+package = "codex-usage"
+
+[frontend]
+workspace = "@scufris/codex-usage-widget"
+
+[[frontend.variants]]
+id = "compact"
+name = "Compact"
+size = [3, 1]
+entry = "src/compact.ts"
+
+[[frontend.variants]]
+id = "minimal"
+name = "Minimal"
+size = [1, 1]
+entry = "src/minimal.ts"

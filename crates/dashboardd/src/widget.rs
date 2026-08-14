@@ -23,6 +23,7 @@ pub struct WidgetVariant {
 pub struct WidgetDescriptor {
     pub id: WidgetId,
     pub name: String,
+    pub description: String,
     pub variants: Vec<WidgetVariant>,
 }
 
@@ -60,6 +61,7 @@ struct ManifestFile {
     schema_version: u32,
     id: String,
     name: String,
+    description: String,
     backend: PathBuf,
     variants: Vec<VariantFile>,
 }
@@ -125,10 +127,14 @@ fn read_config(widget_directory: &Path) -> io::Result<WidgetConfig> {
             "unsupported schema_version",
         ));
     }
-    if manifest.id.is_empty() || manifest.name.is_empty() || manifest.variants.is_empty() {
+    if manifest.id.is_empty()
+        || manifest.name.is_empty()
+        || manifest.description.is_empty()
+        || manifest.variants.is_empty()
+    {
         return Err(invalid_manifest(
             &manifest_path,
-            "id, name, and variants must not be empty",
+            "id, name, description, and variants must not be empty",
         ));
     }
     validate_path(&manifest_path, "backend", &manifest.backend)?;
@@ -180,6 +186,7 @@ fn read_config(widget_directory: &Path) -> io::Result<WidgetConfig> {
         descriptor: WidgetDescriptor {
             id: manifest.id,
             name: manifest.name,
+            description: manifest.description,
             variants,
         },
         backend,
@@ -219,7 +226,7 @@ mod tests {
         fs::create_dir_all(&cpu).unwrap();
         fs::write(
             cpu.join("widget.json"),
-            r#"{"schema_version":2,"id":"cpu","name":"CPU","backend":"backend","variants":[{"id":"full","name":"Full","width":3,"height":3,"frontend":"full.js"}]}"#,
+            r#"{"schema_version":2,"id":"cpu","name":"CPU","description":"Processor usage","backend":"backend","variants":[{"id":"full","name":"Full","width":3,"height":3,"frontend":"full.js"}]}"#,
         )
         .unwrap();
         fs::write(cpu.join("backend"), "executable").unwrap();

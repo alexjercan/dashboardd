@@ -14,6 +14,7 @@ struct SourceManifest {
     schema_version: u32,
     id: String,
     name: String,
+    description: String,
     backend: BackendSource,
     frontend: FrontendSource,
 }
@@ -42,6 +43,7 @@ struct RuntimeManifest<'a> {
     schema_version: u32,
     id: &'a str,
     name: &'a str,
+    description: &'a str,
     backend: String,
     variants: Vec<RuntimeVariant<'a>>,
 }
@@ -121,8 +123,10 @@ fn prepare(
     )?;
 
     let profile = if release { "release" } else { "debug" };
-    let backend_name = manifest.backend.package.replace('-', "_");
-    let backend = root.join("target").join(profile).join(backend_name);
+    let backend = root
+        .join("target")
+        .join(profile)
+        .join(&manifest.backend.package);
     require_file(
         &backend,
         "backend build did not produce the declared package",
@@ -157,6 +161,7 @@ fn prepare(
         schema_version: 2,
         id: &manifest.id,
         name: &manifest.name,
+        description: &manifest.description,
         backend: format!("bin/{}", manifest.id),
         variants,
     };
@@ -189,7 +194,10 @@ fn validate_manifest(
     if widget_directory.file_name().and_then(|name| name.to_str()) != Some(&manifest.id) {
         return Err("widget id must match its source directory".into());
     }
-    if manifest.name.trim().is_empty() || !valid_name(&manifest.backend.package) {
+    if manifest.name.trim().is_empty()
+        || manifest.description.trim().is_empty()
+        || !valid_name(&manifest.backend.package)
+    {
         return Err("widget name and backend package must be valid".into());
     }
     if !manifest.frontend.workspace.starts_with("@scufris/") {

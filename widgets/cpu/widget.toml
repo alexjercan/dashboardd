@@ -1,6 +1,7 @@
 schema_version = 1
 id = "cpu"
 name = "CPU"
+description = "Processor usage and temperatures"
 
 [backend]
 package = "cpu"

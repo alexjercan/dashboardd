@@ -15,7 +15,7 @@ const root = path.resolve(import.meta.dirname, "..");
 const artifacts = path.join(root, "tests/artifacts");
 mkdirSync(artifacts, { recursive: true });
 
-run("cargo", ["build", "-p", "dashboardd", "-p", "cpu", "-p", "memory"]);
+run("cargo", ["build", "--workspace"]);
 run("npm", ["run", "build"]);
 run("cargo", ["xtask", "widget", "prepare", "--all"]);
 
@@ -64,6 +64,40 @@ try {
     await page.locator(".dashboard-footer").isVisible(),
     true,
     "connection status is in footer",
+  );
+
+  const catalogResponse = await page.request.get(`${baseUrl}/api/v1/widgets`);
+  const catalog = (await catalogResponse.json()).widgets;
+  assert.deepEqual(
+    Object.fromEntries(
+      catalog.map((widget) => [
+        widget.id,
+        widget.variants.map((variant) => [
+          variant.id,
+          variant.width,
+          variant.height,
+        ]),
+      ]),
+    ),
+    {
+      "claude-usage": [
+        ["full", 3, 2],
+        ["compact", 3, 1],
+        ["minimal", 1, 1],
+      ],
+      "codex-usage": [
+        ["compact", 3, 1],
+        ["minimal", 1, 1],
+      ],
+      cpu: [
+        ["full", 3, 3],
+        ["compact", 1, 1],
+      ],
+      memory: [
+        ["full", 3, 3],
+        ["compact", 1, 1],
+      ],
+    },
   );
 
   const cpuOne = await addWidget(page, "0", "0", "CPU", "Compact");
@@ -264,14 +298,28 @@ try {
     "reconnect retains composition",
   );
 
-  for (const widgetId of ["cpu", "memory"]) {
-    for (const variantId of ["full", "compact"]) {
+  for (const [widgetId, variants] of [
+    ["cpu", ["full", "compact"]],
+    ["memory", ["full", "compact"]],
+    ["claude-usage", ["full", "compact", "minimal"]],
+    ["codex-usage", ["compact", "minimal"]],
+  ]) {
+    for (const variantId of variants) {
       const response = await page.request.get(
         `${baseUrl}/widgets/${widgetId}/variants/${variantId}/frontend.js`,
       );
       assert.equal(response.status(), 200);
       assert.equal(response.headers()["cache-control"], "no-cache");
     }
+  }
+
+  for (const widgetId of ["claude-usage", "codex-usage"]) {
+    const commandResult = await exerciseUsageCommands(page, widgetId);
+    assert.deepEqual(commandResult.commands, [
+      { command: "refresh", force: false },
+      { command: "refresh", force: true },
+    ]);
+    assert.equal(commandResult.minimalHasRefresh, false);
   }
 
   await requestGracefulStop(dashboardd);
@@ -304,6 +352,71 @@ try {
   await stopRecordedProcess(dashboardd);
   closeSync(log);
   if (existsSync(stateFile)) unlinkSync(stateFile);
+}
+
+async function exerciseUsageCommands(page, widgetId) {
+  return page.evaluate(async (id) => {
+    const module = await import(
+      `/widgets/${id}/variants/compact/frontend.js?command-test`
+    );
+    const container = document.createElement("div");
+    document.body.append(container);
+    const commands = [];
+    const frontend = module.mount(container, {
+      widgetId: id,
+      variantId: "compact",
+      instanceId: `${id}-command-test`,
+      async send(payload) {
+        commands.push(payload);
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve));
+    frontend.update({
+      status: "ok",
+      subscription_type: "test",
+      updated_at: Math.floor(Date.now() / 1000),
+      stale: false,
+      important: {
+        label: "Weekly",
+        remaining_percent: 50,
+        resets_at: Math.floor(Date.now() / 1000) + 3600,
+      },
+    });
+    container.shadowRoot.querySelector(".refresh").click();
+    await new Promise((resolve) => setTimeout(resolve));
+    if (!container.shadowRoot.querySelector(".refresh").disabled)
+      throw new Error("Refresh button was not disabled");
+    frontend.destroy();
+    container.remove();
+
+    const minimalModule = await import(
+      `/widgets/${id}/variants/minimal/frontend.js?command-test`
+    );
+    const minimal = document.createElement("div");
+    document.body.append(minimal);
+    const minimalFrontend = minimalModule.mount(minimal, {
+      widgetId: id,
+      variantId: "minimal",
+      instanceId: `${id}-minimal-command-test`,
+      async send() {},
+    });
+    minimalFrontend.update({
+      status: "ok",
+      subscription_type: "test",
+      updated_at: Math.floor(Date.now() / 1000),
+      stale: false,
+      important: {
+        label: "Weekly",
+        remaining_percent: 50,
+        resets_at: Math.floor(Date.now() / 1000) + 3600,
+      },
+    });
+    const minimalHasRefresh =
+      minimal.shadowRoot.querySelector(".refresh") !== null;
+    minimalFrontend.destroy();
+    minimal.remove();
+    return { commands, minimalHasRefresh };
+  }, widgetId);
 }
 
 function startDashboardd() {

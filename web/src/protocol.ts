@@ -13,6 +13,7 @@ export type WidgetVariant = {
 export type WidgetDescriptor = {
   id: string;
   name: string;
+  description: string;
   variants: WidgetVariant[];
 };
 
@@ -173,12 +174,14 @@ function parseWidget(value: unknown): WidgetDescriptor {
     !isRecord(value) ||
     typeof value.id !== "string" ||
     typeof value.name !== "string" ||
+    typeof value.description !== "string" ||
     !Array.isArray(value.variants)
   )
     throw new Error("invalid widget descriptor");
   return {
     id: value.id,
     name: value.name,
+    description: value.description,
     variants: value.variants.map(parseVariant),
   };
 }

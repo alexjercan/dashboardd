@@ -546,7 +546,7 @@ function openAddDialog(column: number, row: number): void {
       choice.type = "button";
       choice.dataset.widgetId = descriptor.id;
       choice.dataset.variantId = variant.id;
-      choice.innerHTML = `<strong>${descriptor.name} - ${variant.name}</strong><span>${variant.width}x${variant.height} - ${widgetDescription(descriptor.id)}</span>`;
+      choice.innerHTML = `<strong>${descriptor.name} - ${variant.name}</strong><span>${variant.width}x${variant.height} - ${descriptor.description}</span>`;
       choice.addEventListener("click", () => {
         selectedWidget = { widgetId: descriptor.id, variantId: variant.id };
         for (const item of catalogElement.children)
@@ -648,12 +648,6 @@ function variantFor(
   if (!variant)
     throw new Error(`unknown widget variant: ${instance.variant_id}`);
   return variant;
-}
-
-function widgetDescription(widgetId: string): string {
-  if (widgetId === "cpu") return "Processor usage and temperatures";
-  if (widgetId === "memory") return "RAM and swap usage";
-  return "Dashboard widget";
 }
 
 function required<T extends Element>(selector: string): T {
