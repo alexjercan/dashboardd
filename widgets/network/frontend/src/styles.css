@@ -1,0 +1,117 @@
+:host {
+  display: block;
+  height: 100%;
+}
+header {
+  display: flex;
+  height: 45px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--scufris-color-border);
+  background: var(--scufris-color-surface);
+}
+header div {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+h2 {
+  margin: 0;
+  color: var(--scufris-color-text-bright);
+  font-size: 14px;
+}
+.eyebrow,
+.interfaces,
+.graph-heading,
+.rates,
+.metrics {
+  font-family: var(--scufris-font-mono);
+}
+.eyebrow {
+  color: var(--scufris-color-text-dim);
+  font-size: 7px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.interfaces {
+  color: var(--scufris-color-text-muted);
+  font-size: 8px;
+}
+.body {
+  padding: 8px 14px 10px;
+  background: var(--scufris-color-surface);
+  color: var(--scufris-color-text);
+}
+.graph-heading {
+  display: flex;
+  justify-content: space-between;
+  color: var(--scufris-color-text-dim);
+  font-size: 7px;
+  text-transform: uppercase;
+}
+svg {
+  display: block;
+  width: 100%;
+  height: 73px;
+  margin-top: 3px;
+}
+.grid {
+  stroke: color-mix(in srgb, var(--scufris-color-border) 60%, transparent);
+  stroke-width: 1;
+}
+.line {
+  fill: none;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+.line.down {
+  stroke: var(--scufris-color-accent);
+}
+.line.up {
+  stroke: var(--scufris-color-secondary);
+}
+.rates {
+  display: flex;
+  gap: 22px;
+  margin-top: 2px;
+  color: var(--scufris-color-text-muted);
+  font-size: 8px;
+}
+.rates span::before {
+  display: inline-block;
+  width: 7px;
+  height: 2px;
+  margin-right: 5px;
+  vertical-align: middle;
+  content: "";
+}
+.down-key::before {
+  background: var(--scufris-color-accent);
+}
+.up-key::before {
+  background: var(--scufris-color-secondary);
+}
+.rates b,
+.metrics b {
+  color: var(--scufris-color-text-bright);
+  font-weight: 400;
+}
+.metrics {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 13px;
+  color: var(--scufris-color-text-muted);
+  font-size: 8px;
+}
+.metrics span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.errors.active,
+.errors.active b {
+  color: var(--scufris-color-danger);
+}

@@ -277,6 +277,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "disk"
+version = "0.1.0"
+dependencies = [
+ "dashboard-protocol",
+ "serde",
+ "serde_json",
+ "sysinfo",
+ "tokio",
+]
+
+[[package]]
 name = "dispatch2"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -827,6 +838,17 @@ dependencies = [
  "log",
  "wasi",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "network"
+version = "0.1.0"
+dependencies = [
+ "dashboard-protocol",
+ "serde",
+ "serde_json",
+ "sysinfo",
+ "tokio",
 ]
 
 [[package]]

@@ -217,7 +217,9 @@ try {
       "claude-usage": "Claude Usage",
       "codex-usage": "Codex Usage",
       cpu: "CPU",
+      disk: "Disk",
       memory: "RAM",
+      network: "Network",
       "tatr-tasks": "Tatr Tasks",
     },
   );
@@ -267,8 +269,16 @@ try {
         ["full", 3, 3],
         ["compact", 1, 1],
       ],
+      disk: [
+        ["full", 3, 2],
+        ["compact", 1, 1],
+      ],
       memory: [
         ["full", 3, 3],
+        ["compact", 1, 1],
+      ],
+      network: [
+        ["full", 3, 2],
         ["compact", 1, 1],
       ],
       "tatr-tasks": [
@@ -495,7 +505,7 @@ try {
   assert.equal(invalidOptions.status(), 400);
 
   await page.locator('.dashboard-slot[data-column="3"][data-row="0"]').click();
-  assert.equal(await page.locator(".widget-choice").count(), 5);
+  assert.equal(await page.locator(".widget-choice").count(), 7);
   await page.locator(".widget-choice", { hasText: "CPU" }).click();
   await page.locator(".variant-choice", { hasText: "Full" }).click();
   await page.locator('.widget-option input[type="number"]').fill("20");
@@ -773,6 +783,67 @@ try {
   assert.equal(deleteDetails.status(), 204);
   await detailsFrame.waitFor({ state: "detached" });
 
+  const diskFull = await addWidget(page, "0", "3", "Disk", "Full");
+  const networkFull = await addWidget(page, "3", "3", "Network", "Full");
+  const diskCompact = await addWidget(page, "6", "3", "Disk", "Compact");
+  const networkCompact = await addWidget(page, "7", "3", "Network", "Compact");
+  const diskFullFrame = page.locator(`[data-instance-id="${diskFull}"]`);
+  const networkFullFrame = page.locator(`[data-instance-id="${networkFull}"]`);
+  await waitForRenderedValue(diskFullFrame.locator(".usage"));
+  await waitForRenderedValue(networkFullFrame.locator(".down-rate"));
+  await waitForRenderedValue(
+    page.locator(`[data-instance-id="${diskCompact}"] .usage`),
+  );
+  await waitForRenderedValue(
+    page.locator(`[data-instance-id="${networkCompact}"] .down strong`),
+  );
+  assert.equal((await diskFullFrame.boundingBox()).height, 230);
+  assert.equal((await networkFullFrame.boundingBox()).height, 230);
+  await waitForInstanceHealth(page, baseUrl, diskFull, "healthy");
+  await waitForInstanceHealth(page, baseUrl, networkFull, "healthy");
+  assert.doesNotMatch(
+    await diskFullFrame.locator(".filesystem").textContent(),
+    /\//,
+    "disk telemetry does not expose a mount path",
+  );
+  await page.screenshot({
+    path: path.join(artifacts, "disk-network-edit-wide.png"),
+    fullPage: true,
+  });
+  await page.locator("#finish-editing").click();
+  await page.screenshot({
+    path: path.join(artifacts, "disk-network-wide.png"),
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 420, height: 900 });
+  assert.equal(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+    true,
+    "disk and network widgets do not cause mobile overflow",
+  );
+  await page.screenshot({
+    path: path.join(artifacts, "disk-network-narrow.png"),
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.locator("#edit-layout").click();
+  for (const instanceId of [
+    diskFull,
+    networkFull,
+    diskCompact,
+    networkCompact,
+  ]) {
+    const response = await page.request.delete(
+      `${baseUrl}/api/v1/instances/${instanceId}`,
+    );
+    assert.equal(response.status(), 204);
+    await page
+      .locator(`[data-instance-id="${instanceId}"]`)
+      .waitFor({ state: "detached" });
+  }
+
   await proxy.stop();
   await page
     .locator('#connection-indicator[data-status="disconnected"]')
@@ -789,7 +860,9 @@ try {
 
   for (const [widgetId, variants] of [
     ["cpu", ["full", "compact"]],
+    ["disk", ["full", "compact"]],
     ["memory", ["full", "compact"]],
+    ["network", ["full", "compact"]],
     ["claude-usage", ["full", "compact", "minimal"]],
     ["codex-usage", ["compact", "minimal"]],
     ["tatr-tasks", ["full", "details"]],
@@ -1186,7 +1259,9 @@ async function verifyBackendHealthProbes() {
     "claude-usage",
     "codex-usage",
     "cpu",
+    "disk",
     "memory",
+    "network",
     "tatr-tasks",
   ]) {
     const directory = path.join(root, ".build/widgets", widgetId);
@@ -1287,6 +1362,27 @@ async function waitForInstanceHealth(
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   assert.deepEqual(actual, [status, restartCount]);
+}
+
+async function waitForRenderedValue(locator) {
+  await locator.waitFor();
+  await locator.evaluate(
+    (element) =>
+      new Promise((resolve, reject) => {
+        if (!element.textContent?.startsWith("--")) return resolve();
+        const observer = new MutationObserver(() => {
+          if (!element.textContent?.startsWith("--")) {
+            observer.disconnect();
+            resolve();
+          }
+        });
+        observer.observe(element, { childList: true, characterData: true });
+        setTimeout(() => {
+          observer.disconnect();
+          reject(new Error("widget value did not render"));
+        }, 5_000);
+      }),
+  );
 }
 
 async function waitForTelemetry(widget) {

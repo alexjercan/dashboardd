@@ -1,0 +1,41 @@
+:host {
+  display: block;
+  height: 100%;
+}
+article {
+  display: grid;
+  height: 100%;
+  align-content: center;
+  gap: 7px;
+  padding: 12px;
+  background: var(--scufris-color-surface);
+  color: var(--scufris-color-text);
+}
+h2 {
+  margin: 0 0 2px;
+  color: var(--scufris-color-text-bright);
+  font-size: 12px;
+}
+.rate {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: baseline;
+  gap: 4px;
+  font-family: var(--scufris-font-mono);
+}
+.rate span {
+  color: var(--scufris-color-text-dim);
+  font-size: 7px;
+  text-transform: uppercase;
+}
+.rate strong {
+  overflow: hidden;
+  color: var(--scufris-color-accent);
+  font-size: 13px;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rate.up strong {
+  color: var(--scufris-color-secondary);
+}

@@ -36,6 +36,8 @@ Useful commands:
 npm run build -w @scufris/cpu-widget
 npm run watch -w @scufris/cpu-widget
 npm run watch -w @scufris/memory-widget
+npm run watch -w @scufris/disk-widget
+npm run watch -w @scufris/network-widget
 DASHBOARDD_WIDGETS_DIR=.build/widgets cargo run -p dashboardd
 DASHBOARDD_STATE_FILE=/tmp/scufris-dashboard.json cargo run -p dashboardd
 RUST_LOG=dashboardd=debug,tower_http=debug cargo run -p dashboardd
@@ -57,6 +59,11 @@ Dashboardd probes backends every 10 seconds and marks them stale after 30 second
 without protocol activity. Zen mode does not show health controls. The fixed Zen
 controls keep connection status and Edit available without scrolling. Open the
 Swagger API documentation at the logged `/docs` URL.
+
+The Disk widget reports root-filesystem capacity and I/O without exposing mount
+paths or device names. The Network widget aggregates active non-loopback
+interfaces without exposing interface names, addresses, or MAC addresses. Both
+refresh once per second and use IEC units.
 
 The 6x3 Tatr Tasks widget reads `TASK.md` records directly without executing
 `tatr`. It defaults to recursive discovery under `~/personal`, filters to open

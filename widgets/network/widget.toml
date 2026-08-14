@@ -1,0 +1,22 @@
+schema_version = 1
+id = "network"
+name = "Network"
+description = "Aggregate network throughput"
+
+[backend]
+package = "network"
+
+[frontend]
+workspace = "@scufris/network-widget"
+
+[[frontend.variants]]
+id = "full"
+name = "Full"
+size = [3, 2]
+entry = "src/full.ts"
+
+[[frontend.variants]]
+id = "compact"
+name = "Compact"
+size = [1, 1]
+entry = "src/compact.ts"

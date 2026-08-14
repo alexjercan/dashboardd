@@ -1,0 +1,22 @@
+schema_version = 1
+id = "disk"
+name = "Disk"
+description = "Root filesystem capacity and I/O"
+
+[backend]
+package = "disk"
+
+[frontend]
+workspace = "@scufris/disk-widget"
+
+[[frontend.variants]]
+id = "full"
+name = "Full"
+size = [3, 2]
+entry = "src/full.ts"
+
+[[frontend.variants]]
+id = "compact"
+name = "Compact"
+size = [1, 1]
+entry = "src/compact.ts"

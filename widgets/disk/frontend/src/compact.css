@@ -1,0 +1,61 @@
+:host {
+  display: block;
+  height: 100%;
+}
+
+article {
+  display: grid;
+  height: 100%;
+  align-content: center;
+  gap: 7px;
+  padding: 12px;
+  background: var(--scufris-color-surface);
+  color: var(--scufris-color-text);
+}
+
+h2 {
+  margin: 0;
+  color: var(--scufris-color-text-bright);
+  font-size: 12px;
+}
+
+.usage {
+  color: var(--scufris-color-accent);
+  font-family: var(--scufris-font-mono);
+  font-size: clamp(23px, 3vw, 31px);
+  line-height: 0.9;
+}
+
+.bar {
+  height: 5px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: color-mix(
+    in srgb,
+    var(--scufris-color-text-dim) 35%,
+    transparent
+  );
+}
+
+.fill {
+  width: var(--usage, 0%);
+  height: 100%;
+  background: var(--scufris-color-success);
+}
+
+.fill.warm {
+  background: var(--scufris-color-accent);
+}
+
+.fill.hot {
+  background: var(--scufris-color-danger);
+}
+
+.amount {
+  overflow: hidden;
+  color: var(--scufris-color-text-muted);
+  font-family: var(--scufris-font-mono);
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
