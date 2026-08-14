@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use utoipa::ToSchema;
 
-use crate::{configuration::Theme, instance::Instance};
+use crate::{configuration::Theme, instance::Instance, state::DashboardLink};
 
 pub const EVENT_VERSION: u16 = 1;
 
@@ -35,6 +35,13 @@ pub enum DashboardEvent {
     },
     InstanceDestroyed {
         instance_id: InstanceId,
+    },
+    LinkUpdated {
+        link: DashboardLink,
+    },
+    LinkDestroyed {
+        target_instance_id: InstanceId,
+        target_port: String,
     },
     InstanceError {
         instance_id: Option<InstanceId>,

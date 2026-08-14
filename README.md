@@ -25,6 +25,11 @@ provides active values to the backend initialization message and frontend
 `WidgetContext.options`. Option values are public instance configuration. Do
 not use them for credentials or other secrets.
 
+Variants can declare typed input and output ports. Dashboardd validates and
+persists links between compatible placed instances. Frontends use
+`WidgetContext.links.publish()` and `subscribe()` for page-local linked view
+state. Link payloads reset on reload and remain independent between tabs.
+
 Useful commands:
 
 ```bash
@@ -53,7 +58,8 @@ The 6x3 Tatr Tasks widget reads `TASK.md` records directly without executing
 `tatr`. It defaults to recursive discovery under `~/personal`, filters to open
 and in-progress tasks, and sorts by priority. Rows include the complete Task ID.
 Its root accepts absolute paths and `~/...`. Status and tag controls apply
-temporary browser-local filters.
+temporary browser-local filters. The linked 3x3 Details variant safely renders
+the selected task's `TASK.md`; raw HTML and embedded images are ignored.
 
 Dashboard composition persists in `$XDG_STATE_HOME/scufris/dashboard.json`, or
 `$HOME/.local/state/scufris/dashboard.json` when `XDG_STATE_HOME` is unset.

@@ -51,7 +51,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         tokio::select! {
             line = lines.next_line() => match line? {
                 Some(line) => match dashboard_protocol::parse::<ServerToWidget>(&line) {
-                    Ok(ServerToWidget::Initialize { instance_id: id, widget_id, options: _ }) if widget_id == WIDGET_ID => {
+                    Ok(ServerToWidget::Initialize { instance_id: id, widget_id, variant_id: _, options: _ }) if widget_id == WIDGET_ID => {
                         instance_id = Some(id);
                     }
                     Ok(ServerToWidget::Shutdown {}) => break,

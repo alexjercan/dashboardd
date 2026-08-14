@@ -223,6 +223,18 @@ try {
     ],
   );
   assert.deepEqual(
+    catalog
+      .find((widget) => widget.id === "tatr-tasks")
+      .outputs.map((port) => [port.id, port.type, port.variants]),
+    [["selected_task", "tatr.task-selection/v1", ["full"]]],
+  );
+  assert.deepEqual(
+    catalog
+      .find((widget) => widget.id === "tatr-tasks")
+      .inputs.map((port) => [port.id, port.type, port.variants, port.required]),
+    [["task", "tatr.task-selection/v1", ["details"], true]],
+  );
+  assert.deepEqual(
     Object.fromEntries(
       catalog.map((widget) => [
         widget.id,
@@ -251,7 +263,10 @@ try {
         ["full", 3, 3],
         ["compact", 1, 1],
       ],
-      "tatr-tasks": [["full", 6, 3]],
+      "tatr-tasks": [
+        ["full", 6, 3],
+        ["details", 3, 3],
+      ],
     },
   );
 
@@ -504,6 +519,24 @@ try {
     fullPage: true,
   });
 
+  const unlinkedDetails = await page.request.post(
+    `${baseUrl}/api/v1/instances`,
+    {
+      data: {
+        widget_id: "tatr-tasks",
+        variant_id: "details",
+        position: { column: 6, row: 3 },
+        options: { root: tatrRoot, recursive: true },
+        links: [],
+      },
+    },
+  );
+  assert.equal(
+    unlinkedDetails.status(),
+    400,
+    "server requires the declared Details input during creation",
+  );
+
   await page.locator('.dashboard-slot[data-column="0"][data-row="3"]').click();
   await page.locator(".widget-choice", { hasText: "Tatr Tasks" }).click();
   const textOptions = page.locator('.widget-option input[type="text"]');
@@ -527,6 +560,54 @@ try {
   assert.equal(tatrInstance.options.root, tatrRoot);
   const tatrFrame = page.locator(`[data-instance-id="${tatrInstance.id}"]`);
   await tatrFrame.locator(".task-row").first().waitFor();
+
+  await page.locator('.dashboard-slot[data-column="6"][data-row="3"]').click();
+  await page.locator(".widget-choice", { hasText: "Tatr Tasks" }).click();
+  await page.locator(".variant-choice", { hasText: "Details" }).click();
+  await page.locator('.widget-option input[type="text"]').fill(tatrRoot);
+  assert.equal(await page.locator("#widget-links-fieldset").isVisible(), true);
+  assert.match(
+    await page.locator("#widget-links select option").textContent(),
+    /Tatr Tasks at column 1, row 4/,
+  );
+  const detailsResponsePromise = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/v1/instances") &&
+      response.request().method() === "POST",
+  );
+  await page.locator("#confirm-add").click();
+  const detailsResponse = await detailsResponsePromise;
+  assert.equal(detailsResponse.status(), 201);
+  const detailsInstance = await detailsResponse.json();
+  assert.deepEqual(detailsInstance.layout, {
+    column: 6,
+    row: 3,
+    width: 3,
+    height: 3,
+  });
+  const detailsFrame = page.locator(
+    `[data-instance-id="${detailsInstance.id}"]`,
+  );
+  await detailsFrame.locator(".state", { hasText: "Select a task" }).waitFor();
+  await page.locator(".widget-link-badge.output").waitFor();
+  assert.match(
+    await detailsFrame.locator(".widget-link-badge.input").textContent(),
+    /Linked to Tatr Tasks at column 1, row 4/,
+  );
+  const linkList = await page.request.get(`${baseUrl}/api/v1/links`);
+  assert.equal(linkList.status(), 200);
+  assert.deepEqual((await linkList.json()).links, [
+    {
+      source_instance_id: tatrInstance.id,
+      source_port: "selected_task",
+      target_instance_id: detailsInstance.id,
+      target_port: "task",
+    },
+  ]);
+  await page.screenshot({
+    path: path.join(artifacts, "tatr-linked-edit-narrow.png"),
+    fullPage: true,
+  });
   await page.locator("#finish-editing").click();
   await page.waitForURL(baseUrl + "/");
   assert.equal(await tatrFrame.locator(".task-row").count(), 2);
@@ -553,6 +634,27 @@ try {
   await tatrFrame.locator(".tags button", { hasText: "widget" }).click();
   assert.equal(await tatrFrame.locator(".task-row").count(), 1);
   await tatrFrame.locator(".clear").click();
+  await tatrFrame.locator(".title", { hasText: "Add Tatr widget" }).click();
+  await detailsFrame
+    .locator(".markdown h1", { hasText: "Add Tatr widget" })
+    .waitFor();
+  await secondPage
+    .locator(`[data-instance-id="${detailsInstance.id}"] .state`, {
+      hasText: "Select a task",
+    })
+    .waitFor();
+  assert.match(
+    await detailsFrame.locator(".identity").textContent(),
+    /scufris \/ 20260814-120000/,
+  );
+  assert.equal(await detailsFrame.locator(".markdown script").count(), 0);
+  assert.equal(await detailsFrame.locator(".markdown img").count(), 0);
+  assert.equal(
+    await detailsFrame
+      .locator('.markdown a[href="https://example.com"]')
+      .getAttribute("rel"),
+    "noopener noreferrer",
+  );
   await page.screenshot({
     path: path.join(artifacts, "tatr-tasks-narrow.png"),
     fullPage: true,
@@ -566,7 +668,7 @@ try {
     "Add Tatr widget",
   );
   await page.screenshot({
-    path: path.join(artifacts, "tatr-tasks-wide.png"),
+    path: path.join(artifacts, "tatr-linked-wide.png"),
     fullPage: true,
   });
   assert.equal(
@@ -582,6 +684,7 @@ try {
   );
   await page.reload();
   await tatrFrame.locator(".task-row").first().waitFor();
+  await detailsFrame.locator(".state", { hasText: "Select a task" }).waitFor();
   assert.equal(
     await tatrFrame.locator(".task-row").count(),
     2,
@@ -591,11 +694,31 @@ try {
     await tatrFrame.locator(".task-id").first().textContent(),
     "20260814-120000",
   );
+  await tatrFrame.locator(".title", { hasText: "Add Tatr widget" }).click();
+  await detailsFrame.locator(".markdown").waitFor();
+  await page.locator("#edit-layout").click();
+  await detailsFrame.locator(".widget-link-badge.input").click();
+  assert.equal(await page.locator("#link-widget").isVisible(), true);
+  const relinkResponse = page.waitForResponse(
+    (response) =>
+      response.url().includes(`/api/v1/links/${detailsInstance.id}/task`) &&
+      response.request().method() === "PUT",
+  );
+  await page.locator("#confirm-link").click();
+  assert.equal((await relinkResponse).status(), 200);
   const deleteTatr = await page.request.delete(
     `${baseUrl}/api/v1/instances/${tatrInstance.id}`,
   );
   assert.equal(deleteTatr.status(), 204);
   await tatrFrame.waitFor({ state: "detached" });
+  await detailsFrame
+    .locator(".widget-link-badge.input", { hasText: "Not linked" })
+    .waitFor();
+  const deleteDetails = await page.request.delete(
+    `${baseUrl}/api/v1/instances/${detailsInstance.id}`,
+  );
+  assert.equal(deleteDetails.status(), 204);
+  await detailsFrame.waitFor({ state: "detached" });
 
   await proxy.stop();
   await page
@@ -616,7 +739,7 @@ try {
     ["memory", ["full", "compact"]],
     ["claude-usage", ["full", "compact", "minimal"]],
     ["codex-usage", ["compact", "minimal"]],
-    ["tatr-tasks", ["full"]],
+    ["tatr-tasks", ["full", "details"]],
   ]) {
     for (const variantId of variants) {
       const response = await page.request.get(
@@ -739,6 +862,12 @@ async function exerciseUsageCommands(page, widgetId) {
       variantId: variant,
       instanceId: `${id}-command-test`,
       options: { display_mode: "usage" },
+      links: {
+        publish() {},
+        subscribe() {
+          return () => {};
+        },
+      },
       async send(payload) {
         commands.push(payload);
       },
@@ -774,6 +903,12 @@ async function exerciseUsageCommands(page, widgetId) {
       variantId: "minimal",
       instanceId: `${id}-minimal-command-test`,
       options: {},
+      links: {
+        publish() {},
+        subscribe() {
+          return () => {};
+        },
+      },
       async send() {},
     });
     minimalFrontend.update({
@@ -800,7 +935,7 @@ function writeTatrTask(project, id, title, status, priority, tags) {
   mkdirSync(directory, { recursive: true });
   writeFileSync(
     path.join(directory, "TASK.md"),
-    `# ${title}\n\n- STATUS: ${status}\n- PRIORITY: ${priority}\n- TAGS: ${tags.join(", ")}\n\nFixture body\n`,
+    `# ${title}\n\n- STATUS: ${status}\n- PRIORITY: ${priority}\n- TAGS: ${tags.join(", ")}\n\n## Notes\n\n**Fixture markdown** with [Example](https://example.com).\n\n<script>unsafe()</script>\n\n![Ignored image](secret.png)\n`,
   );
 }
 

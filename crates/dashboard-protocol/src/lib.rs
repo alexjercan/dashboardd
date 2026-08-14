@@ -110,6 +110,8 @@ pub enum ServerToWidget {
         instance_id: InstanceId,
         /// Widget manifest identifier.
         widget_id: WidgetId,
+        /// Selected widget variant identifier.
+        variant_id: String,
         /// Validated effective options active for the selected variant.
         #[serde(default)]
         options: BTreeMap<String, Value>,
@@ -192,7 +194,7 @@ mod tests {
     #[test]
     fn parse_returns_message_data_and_validates_version() {
         let parsed = parse::<ServerToWidget>(
-            r#"{"version":1,"kind":"initialize","data":{"instance_id":"cpu-1","widget_id":"cpu","options":{"history_points":40}}}"#,
+            r#"{"version":1,"kind":"initialize","data":{"instance_id":"cpu-1","widget_id":"cpu","variant_id":"full","options":{"history_points":40}}}"#,
         )
         .unwrap();
 
@@ -201,6 +203,7 @@ mod tests {
             ServerToWidget::Initialize {
                 instance_id: "cpu-1".into(),
                 widget_id: "cpu".into(),
+                variant_id: "full".into(),
                 options: BTreeMap::from([("history_points".into(), json!(40))]),
             }
         );

@@ -40,12 +40,22 @@ export type WidgetOption = {
   | { type: "select"; choices: WidgetOptionChoice[] }
 );
 
+export type WidgetLinkPort = {
+  id: string;
+  name: string;
+  type: string;
+  variants: string[];
+  required: boolean;
+};
+
 export type WidgetDescriptor = {
   id: string;
   name: string;
   description: string;
   variants: WidgetVariant[];
   options: WidgetOption[];
+  inputs: WidgetLinkPort[];
+  outputs: WidgetLinkPort[];
 };
 
 export type InstanceLayout = {
@@ -53,6 +63,13 @@ export type InstanceLayout = {
   row: number;
   width: number;
   height: number;
+};
+
+export type DashboardLink = {
+  source_instance_id: string;
+  source_port: string;
+  target_instance_id: string;
+  target_port: string;
 };
 
 export type Instance = {
@@ -65,6 +82,7 @@ export type Instance = {
 
 export type WidgetList = { widgets: WidgetDescriptor[] };
 export type InstanceList = { instances: Instance[] };
+export type LinkList = { links: DashboardLink[] };
 export type ErrorResponse = { error: { code: string; message: string } };
 
 type InstanceCreatedEvent = {
@@ -81,6 +99,16 @@ type InstanceDestroyedEvent = {
   version: typeof EVENT_VERSION;
   kind: "instance_destroyed";
   data: { instance_id: string };
+};
+type LinkUpdatedEvent = {
+  version: typeof EVENT_VERSION;
+  kind: "link_updated";
+  data: { link: DashboardLink };
+};
+type LinkDestroyedEvent = {
+  version: typeof EVENT_VERSION;
+  kind: "link_destroyed";
+  data: { target_instance_id: string; target_port: string };
 };
 type InstanceErrorEvent = {
   version: typeof EVENT_VERSION;
@@ -110,6 +138,8 @@ export type DashboardEvent =
   | InstanceCreatedEvent
   | InstanceUpdatedEvent
   | InstanceDestroyedEvent
+  | LinkUpdatedEvent
+  | LinkDestroyedEvent
   | InstanceErrorEvent
   | WidgetUpdateEvent
   | ThemeUpdatedEvent
@@ -131,6 +161,12 @@ export function parseInstanceList(value: unknown): InstanceList {
   if (!isRecord(value) || !Array.isArray(value.instances))
     throw new Error("invalid instance list");
   return { instances: value.instances.map(parseInstance) };
+}
+
+export function parseLinkList(value: unknown): LinkList {
+  if (!isRecord(value) || !Array.isArray(value.links))
+    throw new Error("invalid link list");
+  return { links: value.links.map(parseLink) };
 }
 
 export function parseInstance(value: unknown): Instance {
@@ -214,6 +250,26 @@ export function parseDashboardEvent(value: unknown): DashboardEvent {
           data: { instance_id: value.data.instance_id },
         };
       break;
+    case "link_updated":
+      return {
+        version: EVENT_VERSION,
+        kind: value.kind,
+        data: { link: parseLink(value.data.link) },
+      };
+    case "link_destroyed":
+      if (
+        typeof value.data.target_instance_id === "string" &&
+        typeof value.data.target_port === "string"
+      )
+        return {
+          version: EVENT_VERSION,
+          kind: value.kind,
+          data: {
+            target_instance_id: value.data.target_instance_id,
+            target_port: value.data.target_port,
+          },
+        };
+      break;
     case "instance_error":
       if (
         (value.data.instance_id === null ||
@@ -258,6 +314,23 @@ export function parseDashboardEvent(value: unknown): DashboardEvent {
   throw new Error("unknown dashboard event");
 }
 
+function parseLink(value: unknown): DashboardLink {
+  if (
+    !isRecord(value) ||
+    typeof value.source_instance_id !== "string" ||
+    typeof value.source_port !== "string" ||
+    typeof value.target_instance_id !== "string" ||
+    typeof value.target_port !== "string"
+  )
+    throw new Error("invalid dashboard link");
+  return {
+    source_instance_id: value.source_instance_id,
+    source_port: value.source_port,
+    target_instance_id: value.target_instance_id,
+    target_port: value.target_port,
+  };
+}
+
 function parseWidget(value: unknown): WidgetDescriptor {
   if (
     !isRecord(value) ||
@@ -265,7 +338,9 @@ function parseWidget(value: unknown): WidgetDescriptor {
     typeof value.name !== "string" ||
     typeof value.description !== "string" ||
     !Array.isArray(value.variants) ||
-    !Array.isArray(value.options)
+    !Array.isArray(value.options) ||
+    !Array.isArray(value.inputs) ||
+    !Array.isArray(value.outputs)
   )
     throw new Error("invalid widget descriptor");
   return {
@@ -274,6 +349,28 @@ function parseWidget(value: unknown): WidgetDescriptor {
     description: value.description,
     variants: value.variants.map(parseVariant),
     options: value.options.map(parseOption),
+    inputs: value.inputs.map(parseLinkPort),
+    outputs: value.outputs.map(parseLinkPort),
+  };
+}
+
+function parseLinkPort(value: unknown): WidgetLinkPort {
+  if (
+    !isRecord(value) ||
+    typeof value.id !== "string" ||
+    typeof value.name !== "string" ||
+    typeof value.type !== "string" ||
+    !Array.isArray(value.variants) ||
+    !value.variants.every((variant) => typeof variant === "string") ||
+    typeof value.required !== "boolean"
+  )
+    throw new Error("invalid widget link port");
+  return {
+    id: value.id,
+    name: value.name,
+    type: value.type,
+    variants: value.variants,
+    required: value.required,
   };
 }
 

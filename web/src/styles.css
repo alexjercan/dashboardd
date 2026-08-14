@@ -172,6 +172,12 @@ h1 {
 }
 
 .drag-handle,
+.remove-widget,
+.widget-link-controls {
+  display: none;
+}
+
+.drag-handle,
 .remove-widget {
   display: none;
   position: absolute;
@@ -260,6 +266,66 @@ h1 {
 .editing .drag-handle,
 .editing .remove-widget {
   display: block;
+}
+
+.editing .widget-link-controls {
+  position: absolute;
+  z-index: 2;
+  right: 8px;
+  bottom: 8px;
+  left: 8px;
+  display: flex;
+  justify-content: center;
+  gap: 5px;
+  pointer-events: auto;
+}
+
+.widget-link-badge {
+  max-width: 48%;
+  min-height: 22px;
+  padding: 3px 6px;
+  overflow: hidden;
+  border: 1px solid var(--scufris-color-border);
+  border-radius: 3px;
+  background: var(--scufris-color-canvas);
+  color: var(--scufris-color-text-muted);
+  font-family: var(--scufris-font-mono);
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+button.widget-link-badge {
+  cursor: pointer;
+}
+
+.widget-link-badge:hover,
+.widget-link-badge:focus-visible {
+  border-color: var(--scufris-color-accent);
+  color: var(--scufris-color-accent);
+  outline: none;
+}
+
+.editing .dashboard-widget.linked-highlight {
+  outline: 3px solid var(--scufris-color-accent);
+  outline-offset: 2px;
+}
+
+.relink-control {
+  display: grid;
+  gap: 7px;
+  margin-top: 18px;
+  color: var(--scufris-color-text-muted);
+  font-size: 12px;
+}
+
+.relink-control select {
+  width: 100%;
+  padding: 7px;
+  border: 1px solid var(--scufris-color-border);
+  border-radius: 3px;
+  background: var(--scufris-color-surface);
+  color: var(--scufris-color-text-bright);
 }
 
 .dashboard-slot {

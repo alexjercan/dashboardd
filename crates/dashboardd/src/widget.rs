@@ -28,6 +28,19 @@ pub struct WidgetDescriptor {
     pub description: String,
     pub variants: Vec<WidgetVariant>,
     pub options: Vec<WidgetOption>,
+    pub inputs: Vec<WidgetLinkPort>,
+    pub outputs: Vec<WidgetLinkPort>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct WidgetLinkPort {
+    pub id: String,
+    pub name: String,
+    #[serde(rename = "type")]
+    pub link_type: String,
+    pub variants: Vec<String>,
+    #[serde(default)]
+    pub required: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -77,6 +90,20 @@ impl WidgetConfig {
             .find(|variant| variant.id == variant_id)
     }
 
+    pub fn input(&self, variant_id: &str, port_id: &str) -> Option<&WidgetLinkPort> {
+        self.descriptor
+            .inputs
+            .iter()
+            .find(|port| port.id == port_id && port.applies_to(variant_id))
+    }
+
+    pub fn output(&self, variant_id: &str, port_id: &str) -> Option<&WidgetLinkPort> {
+        self.descriptor
+            .outputs
+            .iter()
+            .find(|port| port.id == port_id && port.applies_to(variant_id))
+    }
+
     pub fn frontend(&self, variant_id: &str) -> Option<&Path> {
         self.descriptor
             .variants
@@ -109,6 +136,12 @@ impl WidgetConfig {
             normalized.insert(option.id.clone(), value.clone());
         }
         Ok(normalized)
+    }
+}
+
+impl WidgetLinkPort {
+    fn applies_to(&self, variant_id: &str) -> bool {
+        self.variants.is_empty() || self.variants.iter().any(|variant| variant == variant_id)
     }
 }
 
@@ -160,6 +193,10 @@ struct ManifestFile {
     variants: Vec<VariantFile>,
     #[serde(default)]
     options: Vec<WidgetOption>,
+    #[serde(default)]
+    inputs: Vec<WidgetLinkPort>,
+    #[serde(default)]
+    outputs: Vec<WidgetLinkPort>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -279,6 +316,7 @@ fn read_config(widget_directory: &Path) -> io::Result<WidgetConfig> {
     }
 
     validate_options(&manifest_path, &manifest.options, &ids)?;
+    validate_ports(&manifest_path, &manifest.inputs, &manifest.outputs, &ids)?;
     Ok(WidgetConfig {
         descriptor: WidgetDescriptor {
             id: manifest.id,
@@ -286,6 +324,8 @@ fn read_config(widget_directory: &Path) -> io::Result<WidgetConfig> {
             description: manifest.description,
             variants,
             options: manifest.options,
+            inputs: manifest.inputs,
+            outputs: manifest.outputs,
         },
         backend,
         frontends,
@@ -343,6 +383,38 @@ fn validate_options(
     Ok(())
 }
 
+fn validate_ports(
+    manifest: &Path,
+    inputs: &[WidgetLinkPort],
+    outputs: &[WidgetLinkPort],
+    variant_ids: &HashSet<String>,
+) -> io::Result<()> {
+    let mut ids = HashSet::new();
+    for port in inputs.iter().chain(outputs) {
+        if port.id.is_empty()
+            || port.name.trim().is_empty()
+            || port.link_type.trim().is_empty()
+            || !ids.insert(&port.id)
+            || port
+                .variants
+                .iter()
+                .any(|variant| !variant_ids.contains(variant))
+        {
+            return Err(invalid_manifest(
+                manifest,
+                "link ports require unique IDs, names, types, and known variants",
+            ));
+        }
+    }
+    if outputs.iter().any(|port| port.required) {
+        return Err(invalid_manifest(
+            manifest,
+            "output link ports cannot be required",
+        ));
+    }
+    Ok(())
+}
+
 fn validate_path(manifest: &Path, label: &str, path: &Path) -> io::Result<()> {
     if path.is_absolute()
         || path
@@ -375,7 +447,7 @@ mod tests {
         fs::create_dir_all(&cpu).unwrap();
         fs::write(
             cpu.join("widget.json"),
-            r#"{"schema_version":2,"id":"cpu","name":"CPU","description":"Processor usage","backend":"backend","variants":[{"id":"full","name":"Full","width":3,"height":3,"frontend":"full.js"}],"options":[{"id":"root","name":"Root","description":"Project root","variants":["full"],"default":"~/personal","type":"text"},{"id":"history_points","name":"History length","description":"Retained samples","variants":["full"],"default":40,"type":"integer","minimum":20,"maximum":120,"step":10}]}"#,
+            r#"{"schema_version":2,"id":"cpu","name":"CPU","description":"Processor usage","backend":"backend","variants":[{"id":"full","name":"Full","width":3,"height":3,"frontend":"full.js"}],"options":[{"id":"root","name":"Root","description":"Project root","variants":["full"],"default":"~/personal","type":"text"},{"id":"history_points","name":"History length","description":"Retained samples","variants":["full"],"default":40,"type":"integer","minimum":20,"maximum":120,"step":10}],"inputs":[{"id":"task","name":"Task","type":"task/v1","variants":["full"],"required":true}],"outputs":[{"id":"selection","name":"Selection","type":"task/v1","variants":["full"],"required":false}]}"#,
         )
         .unwrap();
         fs::write(cpu.join("backend"), "executable").unwrap();
@@ -392,6 +464,12 @@ mod tests {
             "/widgets/cpu/variants/full/frontend.js"
         );
         assert_eq!(config.frontend("full"), Some(cpu.join("full.js").as_path()));
+        assert_eq!(config.input("full", "task").unwrap().link_type, "task/v1");
+        assert!(config.input("missing", "task").is_none());
+        assert_eq!(
+            config.output("full", "selection").unwrap().link_type,
+            "task/v1"
+        );
         assert_eq!(
             config.normalize_options("full", &BTreeMap::new()).unwrap(),
             BTreeMap::from([

@@ -4,7 +4,7 @@ use std::{
     collections::{BTreeMap, HashMap},
     process::Stdio,
     sync::{
-        Arc,
+        Arc, RwLock,
         atomic::{AtomicU64, Ordering},
     },
 };
@@ -24,7 +24,7 @@ use utoipa::ToSchema;
 use crate::{
     configuration::InitialWidget,
     event::{DashboardError, DashboardEvent},
-    state::{DashboardStateFile, PersistedInstance, Position, StateStore},
+    state::{DashboardLink, DashboardStateFile, PersistedInstance, Position, StateStore},
     widget::{WidgetConfig, WidgetsManager},
 };
 
@@ -67,6 +67,13 @@ pub struct Instance {
     pub options: BTreeMap<String, Value>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct NewInstanceLink {
+    pub source_instance_id: InstanceId,
+    pub source_port: String,
+    pub target_port: String,
+}
+
 #[derive(Clone)]
 pub struct InstanceManager {
     inner: Arc<Inner>,
@@ -75,6 +82,7 @@ pub struct InstanceManager {
 struct Inner {
     layout: DashboardLayout,
     instances: Mutex<HashMap<InstanceId, ManagedInstance>>,
+    links: RwLock<Vec<DashboardLink>>,
     events: broadcast::Sender<DashboardEvent>,
     next_id: AtomicU64,
     store: Option<Arc<StateStore>>,
@@ -82,6 +90,7 @@ struct Inner {
 
 struct ManagedInstance {
     resource: Instance,
+    config: Arc<WidgetConfig>,
     backend: WidgetBackend,
 }
 
@@ -107,6 +116,10 @@ pub enum InstanceError {
     LayoutOccupied,
     #[error("widget options are invalid: {0}")]
     InvalidOptions(String),
+    #[error("widget link is invalid: {0}")]
+    InvalidLink(String),
+    #[error("widget link was not found")]
+    UnknownLink,
     #[error("could not save dashboard composition")]
     PersistenceFailed,
     #[error("{0}")]
@@ -120,6 +133,7 @@ impl InstanceManager {
             inner: Arc::new(Inner {
                 layout,
                 instances: Mutex::new(HashMap::new()),
+                links: RwLock::new(Vec::new()),
                 events,
                 next_id: AtomicU64::new(1),
                 store: None,
@@ -148,8 +162,10 @@ impl InstanceManager {
         let had_saved_state = saved.is_some();
         let (events, _) = broadcast::channel(256);
         let mut restored = Vec::new();
+        let mut restored_links = Vec::new();
         let mut next_id = 1;
         if let Some(saved) = saved {
+            restored_links = saved.links;
             let mut layouts = Vec::new();
             let mut ids = std::collections::HashSet::new();
             for persisted in saved.instances {
@@ -205,34 +221,47 @@ impl InstanceManager {
                 ));
             }
         }
-        if had_saved_state {
-            let mut normalized = restored
-                .iter()
-                .map(|(resource, _)| PersistedInstance::from(resource))
-                .collect::<Vec<_>>();
-            normalized.sort_by(|left, right| left.id.cmp(&right.id));
-            store
-                .save(&DashboardStateFile::new(normalized))
-                .map_err(|error| {
-                    InstanceError::InvalidState(format!("could not migrate state: {error}"))
-                })?;
-        }
         let instances = restored
             .into_iter()
             .map(|(resource, config)| {
                 let backend = WidgetBackend::start(
-                    config,
+                    config.clone(),
                     resource.id.clone(),
+                    resource.variant_id.clone(),
                     resource.options.clone(),
                     events.clone(),
                 );
-                (resource.id.clone(), ManagedInstance { resource, backend })
+                (
+                    resource.id.clone(),
+                    ManagedInstance {
+                        resource,
+                        config,
+                        backend,
+                    },
+                )
             })
-            .collect();
+            .collect::<HashMap<_, _>>();
+        validate_links(&instances, &restored_links).map_err(|error| {
+            InstanceError::InvalidState(format!("dashboard has invalid links: {error}"))
+        })?;
+        if had_saved_state {
+            let mut normalized = instances
+                .values()
+                .map(|instance| PersistedInstance::from(&instance.resource))
+                .collect::<Vec<_>>();
+            normalized.sort_by(|left, right| left.id.cmp(&right.id));
+            sort_links(&mut restored_links);
+            store
+                .save(&DashboardStateFile::new(normalized, restored_links.clone()))
+                .map_err(|error| {
+                    InstanceError::InvalidState(format!("could not migrate state: {error}"))
+                })?;
+        }
         Ok(Self {
             inner: Arc::new(Inner {
                 layout,
                 instances: Mutex::new(instances),
+                links: RwLock::new(restored_links),
                 events,
                 next_id: AtomicU64::new(next_id),
                 store: Some(store),
@@ -262,6 +291,14 @@ impl InstanceManager {
         resources
     }
 
+    pub fn list_links(&self) -> Vec<DashboardLink> {
+        self.inner
+            .links
+            .read()
+            .expect("links lock is poisoned")
+            .clone()
+    }
+
     pub async fn get(&self, instance_id: &str) -> Result<Instance, InstanceError> {
         self.inner
             .instances
@@ -279,6 +316,7 @@ impl InstanceManager {
         column: u32,
         row: u32,
         supplied_options: BTreeMap<String, Value>,
+        supplied_links: Vec<NewInstanceLink>,
     ) -> Result<Instance, InstanceError> {
         if !config.backend.is_file() {
             tracing::warn!(
@@ -309,19 +347,28 @@ impl InstanceManager {
             instances.values().map(|instance| &instance.resource.layout),
         )?;
 
-        let sequence = self.inner.next_id.fetch_add(1, Ordering::Relaxed);
-        let resource = Instance {
-            id: format!("{widget_id}-{sequence}"),
+        let mut resource = Instance {
+            id: String::new(),
             widget_id: widget_id.clone(),
             variant_id,
             layout,
             options,
         };
-        self.persist(
+        let mut new_links =
+            validate_new_instance_links(&instances, &resource, &config, supplied_links)?;
+        let sequence = self.inner.next_id.fetch_add(1, Ordering::Relaxed);
+        resource.id = format!("{widget_id}-{sequence}");
+        for link in &mut new_links {
+            link.target_instance_id.clone_from(&resource.id);
+        }
+        let mut proposed_links = self.list_links();
+        proposed_links.extend(new_links.iter().cloned());
+        self.persist_composition(
             instances
                 .values()
                 .map(|instance| &instance.resource)
                 .chain(std::iter::once(&resource)),
+            &proposed_links,
         )?;
         tracing::info!(
             instance_id = %resource.id,
@@ -329,8 +376,9 @@ impl InstanceManager {
             "creating widget instance"
         );
         let backend = WidgetBackend::start(
-            config,
+            config.clone(),
             resource.id.clone(),
+            resource.variant_id.clone(),
             resource.options.clone(),
             self.inner.events.clone(),
         );
@@ -338,14 +386,25 @@ impl InstanceManager {
             resource.id.clone(),
             ManagedInstance {
                 resource: resource.clone(),
+                config,
                 backend,
             },
         );
+        if !new_links.is_empty() {
+            self.inner
+                .links
+                .write()
+                .expect("links lock is poisoned")
+                .extend(new_links.iter().cloned());
+        }
         drop(instances);
 
         let _ = self.inner.events.send(DashboardEvent::InstanceCreated {
             instance: resource.clone(),
         });
+        for link in new_links {
+            let _ = self.inner.events.send(DashboardEvent::LinkUpdated { link });
+        }
         Ok(resource)
     }
 
@@ -476,26 +535,89 @@ impl InstanceManager {
         Ok(updated)
     }
 
+    pub async fn set_link(&self, link: DashboardLink) -> Result<DashboardLink, InstanceError> {
+        let instances = self.inner.instances.lock().await;
+        validate_link(&instances, &link).map_err(InstanceError::InvalidLink)?;
+        let mut proposed = self.list_links();
+        proposed.retain(|existing| {
+            existing.target_instance_id != link.target_instance_id
+                || existing.target_port != link.target_port
+        });
+        proposed.push(link.clone());
+        self.persist_composition(
+            instances.values().map(|instance| &instance.resource),
+            &proposed,
+        )?;
+        sort_links(&mut proposed);
+        *self.inner.links.write().expect("links lock is poisoned") = proposed;
+        drop(instances);
+        let _ = self
+            .inner
+            .events
+            .send(DashboardEvent::LinkUpdated { link: link.clone() });
+        Ok(link)
+    }
+
+    pub async fn delete_link(
+        &self,
+        target_instance_id: &str,
+        target_port: &str,
+    ) -> Result<(), InstanceError> {
+        let instances = self.inner.instances.lock().await;
+        let mut proposed = self.list_links();
+        let previous_len = proposed.len();
+        proposed.retain(|link| {
+            link.target_instance_id != target_instance_id || link.target_port != target_port
+        });
+        if proposed.len() == previous_len {
+            return Err(InstanceError::UnknownLink);
+        }
+        self.persist_composition(
+            instances.values().map(|instance| &instance.resource),
+            &proposed,
+        )?;
+        *self.inner.links.write().expect("links lock is poisoned") = proposed;
+        drop(instances);
+        let _ = self.inner.events.send(DashboardEvent::LinkDestroyed {
+            target_instance_id: target_instance_id.into(),
+            target_port: target_port.into(),
+        });
+        Ok(())
+    }
+
     pub async fn destroy(&self, instance_id: &str) -> Result<(), InstanceError> {
         let mut instances = self.inner.instances.lock().await;
         if !instances.contains_key(instance_id) {
             return Err(InstanceError::UnknownInstance);
         }
-        self.persist(
+        let current_links = self.list_links();
+        let (removed_links, retained_links): (Vec<_>, Vec<_>) =
+            current_links.into_iter().partition(|link| {
+                link.source_instance_id == instance_id || link.target_instance_id == instance_id
+            });
+        self.persist_composition(
             instances
                 .iter()
                 .filter(|(id, _)| id.as_str() != instance_id)
                 .map(|(_, instance)| &instance.resource),
+            &retained_links,
         )?;
         let instance = instances
             .remove(instance_id)
             .expect("instance existence is checked");
+        *self.inner.links.write().expect("links lock is poisoned") = retained_links;
         drop(instances);
 
         tracing::info!(instance_id, "destroying widget instance");
         let _ = self.inner.events.send(DashboardEvent::InstanceDestroyed {
             instance_id: instance_id.into(),
         });
+        for link in removed_links {
+            let _ = self.inner.events.send(DashboardEvent::LinkDestroyed {
+                target_instance_id: link.target_instance_id,
+                target_port: link.target_port,
+            });
+        }
         instance.backend.shutdown().await;
         Ok(())
     }
@@ -504,15 +626,28 @@ impl InstanceManager {
         &self,
         resources: impl Iterator<Item = &'a Instance>,
     ) -> Result<(), InstanceError> {
+        let links = self.inner.links.read().expect("links lock is poisoned");
+        self.persist_composition(resources, &links)
+    }
+
+    fn persist_composition<'a>(
+        &self,
+        resources: impl Iterator<Item = &'a Instance>,
+        links: &[DashboardLink],
+    ) -> Result<(), InstanceError> {
         let Some(store) = &self.inner.store else {
             return Ok(());
         };
         let mut instances = resources.map(PersistedInstance::from).collect::<Vec<_>>();
         instances.sort_by(|left, right| left.id.cmp(&right.id));
-        store.save(&DashboardStateFile::new(instances)).map_err(|error| {
-            tracing::error!(%error, path = %store.path().display(), "failed to persist dashboard composition");
-            InstanceError::PersistenceFailed
-        })
+        let mut links = links.to_vec();
+        sort_links(&mut links);
+        store
+            .save(&DashboardStateFile::new(instances, links))
+            .map_err(|error| {
+                tracing::error!(%error, path = %store.path().display(), "failed to persist dashboard composition");
+                InstanceError::PersistenceFailed
+            })
     }
 
     pub async fn send(&self, instance_id: &str, payload: Value) -> Result<(), InstanceError> {
@@ -618,7 +753,7 @@ fn initial_state(
             options,
         });
     }
-    Ok(DashboardStateFile::new(instances))
+    Ok(DashboardStateFile::new(instances, Vec::new()))
 }
 
 fn sequence_after(instance_id: &str) -> u64 {
@@ -627,6 +762,117 @@ fn sequence_after(instance_id: &str) -> u64 {
         .and_then(|(_, suffix)| suffix.parse::<u64>().ok())
         .and_then(|sequence| sequence.checked_add(1))
         .unwrap_or(1)
+}
+
+fn validate_new_instance_links(
+    instances: &HashMap<InstanceId, ManagedInstance>,
+    target: &Instance,
+    target_config: &WidgetConfig,
+    supplied: Vec<NewInstanceLink>,
+) -> Result<Vec<DashboardLink>, InstanceError> {
+    let mut target_ports = std::collections::HashSet::new();
+    let links = supplied
+        .into_iter()
+        .map(|link| DashboardLink {
+            source_instance_id: link.source_instance_id,
+            source_port: link.source_port,
+            target_instance_id: target.id.clone(),
+            target_port: link.target_port,
+        })
+        .collect::<Vec<_>>();
+    for link in &links {
+        if !target_ports.insert(&link.target_port) {
+            return Err(InstanceError::InvalidLink(format!(
+                "input {:?} has multiple sources",
+                link.target_port
+            )));
+        }
+        validate_link_parts(instances, target, target_config, link)
+            .map_err(InstanceError::InvalidLink)?;
+    }
+    if let Some(port) = target_config.descriptor.inputs.iter().find(|port| {
+        port.required
+            && (port.variants.is_empty()
+                || port
+                    .variants
+                    .iter()
+                    .any(|variant| variant == &target.variant_id))
+            && !target_ports.contains(&port.id)
+    }) {
+        return Err(InstanceError::InvalidLink(format!(
+            "required input {:?} is not linked",
+            port.id
+        )));
+    }
+    Ok(links)
+}
+
+fn validate_links(
+    instances: &HashMap<InstanceId, ManagedInstance>,
+    links: &[DashboardLink],
+) -> Result<(), String> {
+    let mut targets = std::collections::HashSet::new();
+    for link in links {
+        if !targets.insert((&link.target_instance_id, &link.target_port)) {
+            return Err(format!(
+                "input {:?} on instance {:?} has multiple sources",
+                link.target_port, link.target_instance_id
+            ));
+        }
+        validate_link(instances, link)?;
+    }
+    Ok(())
+}
+
+fn validate_link(
+    instances: &HashMap<InstanceId, ManagedInstance>,
+    link: &DashboardLink,
+) -> Result<(), String> {
+    let target = instances.get(&link.target_instance_id).ok_or_else(|| {
+        format!(
+            "target instance {:?} does not exist",
+            link.target_instance_id
+        )
+    })?;
+    validate_link_parts(instances, &target.resource, &target.config, link)
+}
+
+fn validate_link_parts(
+    instances: &HashMap<InstanceId, ManagedInstance>,
+    target: &Instance,
+    target_config: &WidgetConfig,
+    link: &DashboardLink,
+) -> Result<(), String> {
+    if link.source_instance_id == target.id {
+        return Err("an instance cannot link to itself".into());
+    }
+    let source = instances.get(&link.source_instance_id).ok_or_else(|| {
+        format!(
+            "source instance {:?} does not exist",
+            link.source_instance_id
+        )
+    })?;
+    let output = source
+        .config
+        .output(&source.resource.variant_id, &link.source_port)
+        .ok_or_else(|| format!("source output {:?} does not exist", link.source_port))?;
+    let input = target_config
+        .input(&target.variant_id, &link.target_port)
+        .ok_or_else(|| format!("target input {:?} does not exist", link.target_port))?;
+    if output.link_type != input.link_type {
+        return Err(format!(
+            "link types {:?} and {:?} do not match",
+            output.link_type, input.link_type
+        ));
+    }
+    Ok(())
+}
+
+fn sort_links(links: &mut [DashboardLink]) {
+    links.sort_by(|left, right| {
+        (&left.target_instance_id, &left.target_port)
+            .cmp(&(&right.target_instance_id, &right.target_port))
+    });
 }
 
 fn validate_layout<'a>(
@@ -665,14 +911,22 @@ impl WidgetBackend {
     fn start(
         config: Arc<WidgetConfig>,
         instance_id: InstanceId,
+        variant_id: String,
         options: BTreeMap<String, Value>,
         events: broadcast::Sender<DashboardEvent>,
     ) -> Self {
         let (commands_tx, commands_rx) = mpsc::unbounded_channel();
         let task_instance_id = instance_id.clone();
         let task = tokio::spawn(async move {
-            if let Err(error) =
-                run_backend(&config, &task_instance_id, options, &events, commands_rx).await
+            if let Err(error) = run_backend(
+                &config,
+                &task_instance_id,
+                &variant_id,
+                options,
+                &events,
+                commands_rx,
+            )
+            .await
             {
                 tracing::error!(
                     %error,
@@ -739,6 +993,7 @@ impl Drop for WidgetBackend {
 async fn run_backend(
     config: &WidgetConfig,
     instance_id: &str,
+    variant_id: &str,
     options: BTreeMap<String, Value>,
     events: &broadcast::Sender<DashboardEvent>,
     mut commands: mpsc::UnboundedReceiver<ServerToWidget>,
@@ -774,6 +1029,7 @@ async fn run_backend(
         ServerToWidget::Initialize {
             instance_id: instance_id.into(),
             widget_id: config.descriptor.id.clone(),
+            variant_id: variant_id.into(),
             options,
         },
     )
@@ -929,6 +1185,78 @@ mod tests {
             )
             .is_err()
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn restores_valid_links_and_rejects_invalid_ports() {
+        let root = std::env::temp_dir().join(format!(
+            "scufris-linked-state-{}-{}",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        let widget = root.join("widgets/tatr-tasks");
+        fs::create_dir_all(&widget).unwrap();
+        fs::write(
+            widget.join("widget.json"),
+            r#"{"schema_version":2,"id":"tatr-tasks","name":"Tatr Tasks","description":"Tasks","backend":"backend","variants":[{"id":"full","name":"Full","width":1,"height":1,"frontend":"full.js"},{"id":"details","name":"Details","width":1,"height":1,"frontend":"details.js"}],"options":[],"inputs":[{"id":"task","name":"Task","type":"tatr.task/v1","variants":["details"],"required":true}],"outputs":[{"id":"selected_task","name":"Selected","type":"tatr.task/v1","variants":["full"],"required":false}]}"#,
+        )
+        .unwrap();
+        fs::write(widget.join("backend"), "backend").unwrap();
+        fs::write(widget.join("full.js"), "frontend").unwrap();
+        fs::write(widget.join("details.js"), "frontend").unwrap();
+        let widgets = WidgetsManager::discover(&root.join("widgets")).unwrap();
+        let state_path = root.join("dashboard.json");
+        let store = Arc::new(StateStore::new(state_path));
+        let instances = vec![
+            PersistedInstance {
+                id: "tatr-tasks-1".into(),
+                widget_id: "tatr-tasks".into(),
+                variant_id: "full".into(),
+                position: Position { column: 0, row: 0 },
+                options: BTreeMap::new(),
+            },
+            PersistedInstance {
+                id: "tatr-tasks-2".into(),
+                widget_id: "tatr-tasks".into(),
+                variant_id: "details".into(),
+                position: Position { column: 1, row: 0 },
+                options: BTreeMap::new(),
+            },
+        ];
+        let link = DashboardLink {
+            source_instance_id: "tatr-tasks-1".into(),
+            source_port: "selected_task".into(),
+            target_instance_id: "tatr-tasks-2".into(),
+            target_port: "task".into(),
+        };
+        store
+            .save(&DashboardStateFile::new(
+                instances.clone(),
+                vec![link.clone()],
+            ))
+            .unwrap();
+
+        let manager = InstanceManager::restore(
+            DashboardLayout::default(),
+            widgets.clone(),
+            store.clone(),
+            &[],
+        )
+        .await
+        .unwrap();
+        assert_eq!(manager.list_links(), vec![link.clone()]);
+        drop(manager);
+
+        let mut invalid = link;
+        invalid.source_port = "missing".into();
+        store
+            .save(&DashboardStateFile::new(instances, vec![invalid]))
+            .unwrap();
+        assert!(matches!(
+            InstanceManager::restore(DashboardLayout::default(), widgets, store, &[],).await,
+            Err(InstanceError::InvalidState(_))
+        ));
         fs::remove_dir_all(root).unwrap();
     }
 

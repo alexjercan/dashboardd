@@ -15,6 +15,25 @@ name = "Full"
 size = [6, 3]
 entry = "src/full.ts"
 
+[[frontend.variants]]
+id = "details"
+name = "Details"
+size = [3, 3]
+entry = "src/details.ts"
+
+[[links.outputs]]
+id = "selected_task"
+name = "Selected task"
+type = "tatr.task-selection/v1"
+variants = ["full"]
+
+[[links.inputs]]
+id = "task"
+name = "Linked task list"
+type = "tatr.task-selection/v1"
+variants = ["details"]
+required = true
+
 [[options]]
 id = "root"
 name = "Root"
@@ -34,6 +53,7 @@ default = true
 [[options]]
 id = "filter"
 name = "Filter"
+variants = ["full"]
 description = "Tatr query applied before tasks reach the dashboard"
 default = ":status in [OPEN, IN_PROGRESS]"
 
@@ -42,6 +62,7 @@ default = ":status in [OPEN, IN_PROGRESS]"
 [[options]]
 id = "sort"
 name = "Sort"
+variants = ["full"]
 description = "Initial task order"
 default = "priority"
 

@@ -1,0 +1,150 @@
+:host {
+  display: block;
+  height: 100%;
+}
+
+article {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 13px 14px;
+  overflow: hidden;
+  background: var(--scufris-color-surface);
+}
+
+header {
+  flex: none;
+  padding-bottom: 9px;
+  border-bottom: 1px solid var(--scufris-color-selection);
+}
+
+h2 {
+  margin: 0;
+  color: var(--scufris-color-text-bright);
+  font-size: 15px;
+}
+
+.identity {
+  display: block;
+  margin-top: 3px;
+  overflow: hidden;
+  color: var(--scufris-color-text-muted);
+  font-family: var(--scufris-font-mono);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.content {
+  flex: 1;
+  min-height: 0;
+}
+
+.state {
+  display: grid;
+  place-items: center;
+  color: var(--scufris-color-text-muted);
+  font-size: 10px;
+}
+
+.markdown {
+  padding: 10px 3px 4px 0;
+  overflow-y: auto;
+  color: var(--scufris-color-text);
+  font-size: 11px;
+  line-height: 1.55;
+  scrollbar-color: var(--scufris-color-selection) transparent;
+  scrollbar-width: thin;
+}
+
+.markdown :first-child {
+  margin-top: 0;
+}
+
+.markdown :last-child {
+  margin-bottom: 0;
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4 {
+  margin: 15px 0 6px;
+  color: var(--scufris-color-text-bright);
+  line-height: 1.25;
+}
+
+.markdown h1 {
+  font-size: 17px;
+}
+
+.markdown h2 {
+  font-size: 14px;
+}
+
+.markdown h3,
+.markdown h4 {
+  font-size: 12px;
+}
+
+.markdown p,
+.markdown ul,
+.markdown ol,
+.markdown pre,
+.markdown blockquote {
+  margin: 7px 0;
+}
+
+.markdown ul,
+.markdown ol {
+  padding-left: 20px;
+}
+
+.markdown code {
+  padding: 1px 3px;
+  border-radius: 2px;
+  background: var(--scufris-color-canvas);
+  color: var(--scufris-color-secondary);
+  font-family: var(--scufris-font-mono);
+  font-size: 9px;
+}
+
+.markdown pre {
+  padding: 8px;
+  overflow-x: auto;
+  border: 1px solid var(--scufris-color-selection);
+  border-radius: 3px;
+  background: var(--scufris-color-canvas);
+}
+
+.markdown pre code {
+  padding: 0;
+  background: transparent;
+}
+
+.markdown blockquote {
+  padding-left: 9px;
+  border-left: 2px solid var(--scufris-color-border);
+  color: var(--scufris-color-text-muted);
+}
+
+.markdown a {
+  color: var(--scufris-color-accent);
+}
+
+.markdown hr {
+  border: 0;
+  border-top: 1px solid var(--scufris-color-selection);
+}
+
+.markdown table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.markdown th,
+.markdown td {
+  padding: 4px 5px;
+  border: 1px solid var(--scufris-color-selection);
+  text-align: left;
+}

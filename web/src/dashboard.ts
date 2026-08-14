@@ -2,10 +2,12 @@ import {
   parseDashboardEvent,
   parseDashboardLayout,
   parseInstanceList,
+  parseLinkList,
   parseTheme,
   parseWidgetList,
   type DashboardLayout,
   type ErrorResponse,
+  type DashboardLink,
   type Instance,
   type Theme,
   type WidgetDescriptor,
@@ -22,10 +24,13 @@ export type DashboardEvents = {
     layout: DashboardLayout,
     widgets: WidgetDescriptor[],
     instances: Instance[],
+    links: DashboardLink[],
   ): void;
   onInstanceCreated(instance: Instance): void;
   onInstanceUpdated(instance: Instance): void;
   onInstanceDestroyed(instanceId: string): void;
+  onLinkUpdated(link: DashboardLink): void;
+  onLinkDestroyed(targetInstanceId: string, targetPort: string): void;
   onWidgetUpdate(instanceId: string, payload: unknown): void;
   onError(message: string): void;
 };
@@ -67,6 +72,15 @@ export function connectDashboard(events: DashboardEvents): DashboardConnection {
           break;
         case "instance_destroyed":
           events.onInstanceDestroyed(event.data.instance_id);
+          break;
+        case "link_updated":
+          events.onLinkUpdated(event.data.link);
+          break;
+        case "link_destroyed":
+          events.onLinkDestroyed(
+            event.data.target_instance_id,
+            event.data.target_port,
+          );
           break;
         case "instance_error":
           events.onError(event.data.error.message);
@@ -113,14 +127,22 @@ export function connectDashboard(events: DashboardEvents): DashboardConnection {
 
 async function reconcile(events: DashboardEvents): Promise<void> {
   console.debug("Reconciling dashboard state");
-  const [layout, theme, widgetList, instanceList] = await Promise.all([
-    requestJson("/api/v1/layout", parseDashboardLayout),
-    requestJson("/api/v1/theme", parseTheme),
-    requestJson("/api/v1/widgets", parseWidgetList),
-    requestJson("/api/v1/instances", parseInstanceList),
-  ]);
+  const [layout, theme, widgetList, instanceList, linkList] = await Promise.all(
+    [
+      requestJson("/api/v1/layout", parseDashboardLayout),
+      requestJson("/api/v1/theme", parseTheme),
+      requestJson("/api/v1/widgets", parseWidgetList),
+      requestJson("/api/v1/instances", parseInstanceList),
+      requestJson("/api/v1/links", parseLinkList),
+    ],
+  );
   events.onTheme(theme);
-  events.onSnapshot(layout, widgetList.widgets, instanceList.instances);
+  events.onSnapshot(
+    layout,
+    widgetList.widgets,
+    instanceList.instances,
+    linkList.links,
+  );
 }
 
 async function requestJson<T>(

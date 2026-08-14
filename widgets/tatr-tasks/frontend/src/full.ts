@@ -14,6 +14,15 @@ type Task = {
 type Snapshot = { tasks: Task[] };
 type Sort = "created" | "priority" | "title";
 type Direction = "ascending" | "descending";
+type ViewState = {
+  tasks: Task[];
+  statuses: Set<Status>;
+  tags: Set<string>;
+  sort: Sort;
+  direction: Direction;
+  selectedTaskId: string | null;
+  publishSelection(task: Task): void;
+};
 
 export function mount(
   container: HTMLElement,
@@ -26,6 +35,13 @@ export function mount(
     tags: new Set<string>(),
     sort: parseSort(context.options.sort),
     direction: defaultDirection(parseSort(context.options.sort)),
+    selectedTaskId: null,
+    publishSelection(task: Task): void {
+      context.links.publish("selected_task", {
+        project: task.project,
+        task_id: task.id,
+      });
+    },
   };
   shadow.innerHTML = `<style>${widgetReset}\n${styles}</style><article><header><div><h2>Tatr Tasks</h2><span class="summary">Waiting for tasks...</span></div><label class="mobile-sort">Sort<select aria-label="Sort tasks"><option value="priority">Priority</option><option value="created">Created</option><option value="title">Title</option></select></label></header><div class="filters" hidden><span class="filter-list"></span><button class="clear" type="button">Clear</button></div><div class="table"><div class="table-head"><span>Status</span><span>Project</span><span>Task ID</span><button type="button" data-sort="title">Title</button><span>Tags</span><button type="button" data-sort="priority">Priority</button></div><div class="rows"><div class="empty">Waiting for tasks...</div></div></div></article>`;
   shadow.host.setAttribute(
@@ -78,16 +94,7 @@ export function mount(
   };
 }
 
-function render(
-  shadow: ShadowRoot,
-  state: {
-    tasks: Task[];
-    statuses: Set<Status>;
-    tags: Set<string>;
-    sort: Sort;
-    direction: Direction;
-  },
-): void {
+function render(shadow: ShadowRoot, state: ViewState): void {
   const filtered = state.tasks.filter(
     (task) =>
       (state.statuses.size === 0 || state.statuses.has(task.status)) &&
@@ -126,25 +133,36 @@ function render(
 
 function taskRow(
   task: Task,
-  state: {
-    tasks: Task[];
-    statuses: Set<Status>;
-    tags: Set<string>;
-    sort: Sort;
-    direction: Direction;
-  },
+  state: ViewState,
   shadow: ShadowRoot,
 ): HTMLElement {
   const row = document.createElement("div");
   row.className = "task-row";
+  row.classList.toggle("selected", state.selectedTaskId === task.id);
   row.dataset.status = task.status.toLowerCase();
+  row.tabIndex = 0;
+  const select = () => {
+    state.selectedTaskId = task.id;
+    state.publishSelection(task);
+    render(shadow, state);
+  };
+  row.addEventListener("click", (event) => {
+    if (!(event.target as Element).closest("button")) select();
+  });
+  row.addEventListener("keydown", (event) => {
+    if ((event.key === "Enter" || event.key === " ") && event.target === row) {
+      event.preventDefault();
+      select();
+    }
+  });
 
   const status = document.createElement("button");
   status.type = "button";
   status.className = "status";
   status.textContent = statusLabel(task.status);
   status.title = `Filter by ${status.textContent}`;
-  status.addEventListener("click", () => {
+  status.addEventListener("click", (event) => {
+    event.stopPropagation();
     toggle(state.statuses, task.status);
     render(shadow, state);
   });
@@ -158,10 +176,15 @@ function taskRow(
   taskId.className = "task-id";
   taskId.textContent = task.id;
 
-  const title = document.createElement("strong");
+  const title = document.createElement("button");
+  title.type = "button";
   title.className = "title";
   title.textContent = task.title;
-  title.title = task.title;
+  title.title = `Show details for ${task.title}`;
+  title.addEventListener("click", (event) => {
+    event.stopPropagation();
+    select();
+  });
 
   const metadata = document.createElement("span");
   metadata.className = "metadata";
@@ -173,7 +196,8 @@ function taskRow(
     tag.type = "button";
     tag.textContent = value;
     tag.classList.toggle("selected", state.tags.has(value));
-    tag.addEventListener("click", () => {
+    tag.addEventListener("click", (event) => {
+      event.stopPropagation();
       toggle(state.tags, value);
       render(shadow, state);
     });

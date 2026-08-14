@@ -5,9 +5,11 @@ import {
   type ConnectionStatus,
   type DashboardConnection,
 } from "./dashboard";
+import { WidgetLinkBus } from "./links";
 import {
   parseInstance,
   type DashboardLayout,
+  type DashboardLink,
   type Instance,
   type Theme,
   type WidgetDescriptor,
@@ -50,9 +52,17 @@ app.innerHTML = `
           <p id="selected-widget-description" class="widget-description"></p>
           <fieldset><legend>Variant</legend><div id="widget-variants" class="widget-variants"></div></fieldset>
           <fieldset><legend>Options</legend><div id="widget-options" class="widget-options"></div></fieldset>
+          <fieldset id="widget-links-fieldset" hidden><legend>Links</legend><div id="widget-links" class="widget-options"></div></fieldset>
         </section>
       </div>
       <footer><button class="button" value="cancel">Cancel</button><button id="confirm-add" class="button primary" type="button" disabled>Add widget</button></footer>
+    </form>
+  </dialog>
+  <dialog id="link-widget" class="modal confirm-modal">
+    <form method="dialog">
+      <header><h2>Link widget</h2><button class="icon-button" value="cancel" aria-label="Close">x</button></header>
+      <label class="relink-control"><span>Linked task list</span><select id="link-source"></select></label>
+      <footer><button class="button" value="cancel">Cancel</button><button id="confirm-link" class="button primary" type="button">Save link</button></footer>
     </form>
   </dialog>
   <dialog id="remove-widget" class="modal confirm-modal">
@@ -76,6 +86,7 @@ const editButton = required<HTMLAnchorElement>("#edit-layout");
 const doneButton = required<HTMLAnchorElement>("#finish-editing");
 const addDialog = required<HTMLDialogElement>("#add-widget");
 const removeDialog = required<HTMLDialogElement>("#remove-widget");
+const linkDialog = required<HTMLDialogElement>("#link-widget");
 const catalogElement = required<HTMLElement>("#widget-catalog");
 const selectionElement = required<HTMLElement>("#widget-selection");
 const selectedNameElement = required<HTMLElement>("#selected-widget-name");
@@ -84,12 +95,16 @@ const selectedDescriptionElement = required<HTMLElement>(
 );
 const variantsElement = required<HTMLElement>("#widget-variants");
 const optionsElement = required<HTMLElement>("#widget-options");
+const linksFieldset = required<HTMLElement>("#widget-links-fieldset");
+const linksElement = required<HTMLElement>("#widget-links");
+const linkSourceElement = required<HTMLSelectElement>("#link-source");
+const confirmLinkButton = required<HTMLButtonElement>("#confirm-link");
 const backToWidgetsButton = required<HTMLButtonElement>("#back-to-widgets");
 const addPositionElement = required<HTMLElement>("#add-position");
 const confirmAddButton = required<HTMLButtonElement>("#confirm-add");
 const confirmRemoveButton = required<HTMLButtonElement>("#confirm-remove");
 const removeTitleElement = required<HTMLElement>("#remove-title");
-for (const dialog of [addDialog, removeDialog]) {
+for (const dialog of [addDialog, linkDialog, removeDialog]) {
   dialog.addEventListener("click", (event) => {
     if (event.target === dialog) dialog.close();
   });
@@ -100,6 +115,7 @@ const frontends = new Map<string, WidgetFrontend>();
 const containers = new Map<string, HTMLElement>();
 const mounting = new Map<string, Promise<void>>();
 const pendingUpdates = new Map<string, unknown>();
+const linkBus = new WidgetLinkBus();
 let editing = window.location.pathname === "/edit";
 let dashboardLayout: DashboardLayout = { columns: 1 };
 let selectedSlot: { column: number; row: number } | null = null;
@@ -107,8 +123,14 @@ let selectedWidget: {
   widgetId: string;
   variantId: string;
   options: Record<string, boolean | number | string>;
+  links: Array<{
+    source_instance_id: string;
+    source_port: string;
+    target_port: string;
+  }>;
 } | null = null;
 let removeInstanceId: string | null = null;
+let relinkTarget: { instanceId: string; input: string } | null = null;
 let drag: DragState | null = null;
 let connection: DashboardConnection;
 
@@ -137,6 +159,7 @@ confirmRemoveButton.addEventListener(
   "click",
   () => void removeSelectedWidget(),
 );
+confirmLinkButton.addEventListener("click", () => void saveLink());
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && drag) cancelDrag();
 });
@@ -192,6 +215,7 @@ function applySnapshot(
   layout: DashboardLayout,
   widgets: WidgetDescriptor[],
   instances: Instance[],
+  links: DashboardLink[],
 ): void {
   dashboardLayout = layout;
   widgetsElement.style.setProperty(
@@ -205,6 +229,7 @@ function applySnapshot(
     if (!currentIds.has(instanceId)) removeInstance(instanceId);
   }
   for (const instance of instances) upsertInstance(instance);
+  linkBus.replace(links);
   renderCanvas();
 }
 
@@ -241,6 +266,8 @@ async function mountWidget(instance: Instance): Promise<void> {
   dragHandle.addEventListener("pointermove", updateDrag);
   dragHandle.addEventListener("pointerup", finishDrag);
   dragHandle.addEventListener("pointercancel", cancelDrag);
+  const linkControls = document.createElement("div");
+  linkControls.className = "widget-link-controls";
   const remove = document.createElement("button");
   remove.className = "remove-widget";
   remove.type = "button";
@@ -248,7 +275,7 @@ async function mountWidget(instance: Instance): Promise<void> {
   remove.setAttribute("aria-label", `Remove ${descriptor.name}`);
   remove.addEventListener("click", () => openRemoveDialog(instance.id));
   frame.addEventListener("keydown", moveWithKeyboard);
-  frame.append(mount, dragHandle, remove);
+  frame.append(mount, linkControls, dragHandle, remove);
   containers.set(instance.id, frame);
   renderCanvas();
 
@@ -262,6 +289,7 @@ async function mountWidget(instance: Instance): Promise<void> {
       variantId: instance.variant_id,
       instanceId: instance.id,
       options: instance.options,
+      links: linkBus.context(instance.id),
       send: (payload) => connection.sendWidget(instance.id, payload),
     });
     if (!resources.has(instance.id)) {
@@ -312,7 +340,10 @@ function renderCanvas(): void {
   editorHeader.hidden = !editing;
   editButton.hidden = editing;
   emptyDashboard.hidden = editing || resources.size > 0;
-  for (const frame of containers.values()) frame.tabIndex = editing ? 0 : -1;
+  for (const [instanceId, frame] of containers) {
+    frame.tabIndex = editing ? 0 : -1;
+    renderLinkControls(instanceId, frame);
+  }
   const instances = [...resources.values()].sort(
     (left, right) =>
       left.layout.row - right.layout.row ||
@@ -372,6 +403,130 @@ function renderCanvas(): void {
       slot.addEventListener("click", () => openAddDialog(column, row));
       widgetsElement.append(slot);
     }
+  }
+}
+
+function renderLinkControls(instanceId: string, frame: HTMLElement): void {
+  const controls = frame.querySelector<HTMLElement>(".widget-link-controls");
+  if (!controls) return;
+  controls.replaceChildren();
+  if (!editing) return;
+  const instance = resources.get(instanceId);
+  const descriptor = instance && descriptors.get(instance.widget_id);
+  if (!instance || !descriptor) return;
+  const outgoing = linkBus
+    .list()
+    .filter((link) => link.source_instance_id === instanceId);
+  if (outgoing.length > 0) {
+    const badge = document.createElement("span");
+    badge.className = "widget-link-badge output";
+    badge.tabIndex = 0;
+    badge.textContent = `Selected task -> ${outgoing.length} ${outgoing.length === 1 ? "widget" : "widgets"}`;
+    bindLinkHighlight(badge, [
+      instanceId,
+      ...outgoing.map((link) => link.target_instance_id),
+    ]);
+    controls.append(badge);
+  }
+  for (const input of descriptor.inputs.filter(
+    (port) =>
+      port.variants.length === 0 || port.variants.includes(instance.variant_id),
+  )) {
+    const link = linkBus
+      .list()
+      .find(
+        (candidate) =>
+          candidate.target_instance_id === instanceId &&
+          candidate.target_port === input.id,
+      );
+    const badge = document.createElement("button");
+    badge.type = "button";
+    badge.className = "widget-link-badge input";
+    const source = link && resources.get(link.source_instance_id);
+    badge.textContent = source
+      ? `Linked to ${instanceLabel(source)}`
+      : "Not linked";
+    badge.addEventListener("click", () => openLinkDialog(instanceId, input.id));
+    bindLinkHighlight(
+      badge,
+      link ? [instanceId, link.source_instance_id] : [instanceId],
+    );
+    controls.append(badge);
+  }
+}
+
+function bindLinkHighlight(element: HTMLElement, instanceIds: string[]): void {
+  const toggle = (active: boolean) => {
+    for (const instanceId of instanceIds)
+      containers.get(instanceId)?.classList.toggle("linked-highlight", active);
+  };
+  element.addEventListener("mouseenter", () => toggle(true));
+  element.addEventListener("mouseleave", () => toggle(false));
+  element.addEventListener("focus", () => toggle(true));
+  element.addEventListener("blur", () => toggle(false));
+}
+
+function openLinkDialog(instanceId: string, inputId: string): void {
+  const instance = resources.get(instanceId);
+  if (!instance) return;
+  const descriptor = descriptors.get(instance.widget_id);
+  const input = descriptor?.inputs.find(
+    (port) =>
+      port.id === inputId &&
+      (port.variants.length === 0 ||
+        port.variants.includes(instance.variant_id)),
+  );
+  if (!input) return;
+  relinkTarget = { instanceId, input: inputId };
+  linkSourceElement.replaceChildren();
+  const current = linkBus
+    .list()
+    .find(
+      (link) =>
+        link.target_instance_id === instanceId && link.target_port === inputId,
+    );
+  for (const source of compatibleOutputs(input.type).filter(
+    (source) => source.instance.id !== instanceId,
+  )) {
+    const option = document.createElement("option");
+    option.value = `${source.instance.id}\u0000${source.port}`;
+    option.textContent = instanceLabel(source.instance);
+    option.selected =
+      current?.source_instance_id === source.instance.id &&
+      current.source_port === source.port;
+    linkSourceElement.append(option);
+  }
+  confirmLinkButton.disabled = linkSourceElement.options.length === 0;
+  linkDialog.showModal();
+}
+
+async function saveLink(): Promise<void> {
+  if (!relinkTarget || !linkSourceElement.value) return;
+  const [sourceInstanceId, sourcePort] =
+    linkSourceElement.value.split("\u0000");
+  confirmLinkButton.disabled = true;
+  try {
+    const response = await fetch(
+      `/api/v1/links/${encodeURIComponent(relinkTarget.instanceId)}/${encodeURIComponent(relinkTarget.input)}`,
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          source_instance_id: sourceInstanceId,
+          source_port: sourcePort,
+        }),
+      },
+    );
+    if (!response.ok)
+      throw new Error(`${response.status} ${response.statusText}`);
+    linkBus.update((await response.json()) as DashboardLink);
+    linkDialog.close();
+    renderCanvas();
+  } catch (error) {
+    showError(errorMessage(error));
+  } finally {
+    confirmLinkButton.disabled = false;
+    relinkTarget = null;
   }
 }
 
@@ -651,6 +806,7 @@ function renderVariants(
     widgetId: descriptor.id,
     variantId: selectedVariant.id,
     options: {},
+    links: [],
   };
   variantsElement.replaceChildren();
   for (const variant of descriptor.variants) {
@@ -663,7 +819,7 @@ function renderVariants(
     variantsElement.append(button);
   }
   renderOptions(descriptor.options, selectedVariant.id);
-  confirmAddButton.disabled = false;
+  renderLinks(descriptor, selectedVariant.id);
 }
 
 function renderOptions(options: WidgetOption[], variantId: string): void {
@@ -695,6 +851,99 @@ function renderOptions(options: WidgetOption[], variantId: string): void {
     label.append(control, text);
     optionsElement.append(label);
   }
+}
+
+function renderLinks(descriptor: WidgetDescriptor, variantId: string): void {
+  linksElement.replaceChildren();
+  const inputs = descriptor.inputs.filter((port) =>
+    port.variants.length === 0 ? true : port.variants.includes(variantId),
+  );
+  linksFieldset.hidden = inputs.length === 0;
+  if (inputs.length === 0) {
+    confirmAddButton.disabled = false;
+    return;
+  }
+  for (const input of inputs) {
+    const label = document.createElement("label");
+    label.className = "widget-option select";
+    const select = document.createElement("select");
+    select.dataset.targetPort = input.id;
+    select.dataset.required = String(input.required);
+    const compatible = compatibleOutputs(input.type);
+    if (!input.required) {
+      const none = document.createElement("option");
+      none.value = "";
+      none.textContent = "Not linked";
+      select.append(none);
+    }
+    for (const source of compatible) {
+      const option = document.createElement("option");
+      option.value = `${source.instance.id}\u0000${source.port}`;
+      option.textContent = instanceLabel(source.instance);
+      select.append(option);
+    }
+    if (compatible.length === 0 && input.required) {
+      const unavailable = document.createElement("option");
+      unavailable.value = "";
+      unavailable.textContent = "Add a compatible widget first";
+      select.append(unavailable);
+      select.disabled = true;
+    }
+    const text = document.createElement("span");
+    text.innerHTML = `<strong>${input.name}</strong><small>${input.required ? "Required" : "Optional"} compatible widget output</small>`;
+    label.append(select, text);
+    linksElement.append(label);
+    select.addEventListener("change", updateSelectedLinks);
+  }
+  updateSelectedLinks();
+}
+
+function updateSelectedLinks(): void {
+  if (!selectedWidget) return;
+  const controls = [
+    ...linksElement.querySelectorAll<HTMLSelectElement>("select"),
+  ];
+  selectedWidget.links = controls.flatMap((control) => {
+    if (!control.value) return [];
+    const [source_instance_id, source_port] = control.value.split("\u0000");
+    return [
+      {
+        source_instance_id,
+        source_port,
+        target_port: control.dataset.targetPort ?? "",
+      },
+    ];
+  });
+  confirmAddButton.disabled = controls.some(
+    (control) => control.dataset.required === "true" && !control.value,
+  );
+}
+
+function compatibleOutputs(linkType: string): Array<{
+  instance: Instance;
+  port: string;
+}> {
+  const compatible = [];
+  for (const instance of resources.values()) {
+    const descriptor = descriptors.get(instance.widget_id);
+    if (!descriptor) continue;
+    for (const output of descriptor.outputs) {
+      if (
+        output.type === linkType &&
+        (output.variants.length === 0 ||
+          output.variants.includes(instance.variant_id))
+      )
+        compatible.push({ instance, port: output.id });
+    }
+  }
+  return compatible.sort((left, right) =>
+    left.instance.id.localeCompare(right.instance.id),
+  );
+}
+
+function instanceLabel(instance: Instance): string {
+  const name = descriptors.get(instance.widget_id)?.name ?? "Widget";
+  return `${name} at column ${instance.layout.column + 1}, row ${instance.layout.row + 1}`;
 }
 
 function optionControl(
@@ -760,6 +1009,7 @@ async function createSelectedWidget(): Promise<void> {
         variant_id: selectedWidget.variantId,
         position: selectedSlot,
         options: selectedWidget.options,
+        links: selectedWidget.links,
       }),
     });
     addDialog.close();
@@ -797,6 +1047,7 @@ async function removeSelectedWidget(): Promise<void> {
 
 function removeInstance(instanceId: string): void {
   resources.delete(instanceId);
+  linkBus.removeInstance(instanceId);
   pendingUpdates.delete(instanceId);
   frontends.get(instanceId)?.destroy();
   frontends.delete(instanceId);
@@ -854,6 +1105,14 @@ connection = connectDashboard({
   onInstanceCreated: upsertInstance,
   onInstanceUpdated: upsertInstance,
   onInstanceDestroyed: removeInstance,
+  onLinkUpdated(link) {
+    linkBus.update(link);
+    renderCanvas();
+  },
+  onLinkDestroyed(targetInstanceId, targetPort) {
+    linkBus.delete(targetInstanceId, targetPort);
+    renderCanvas();
+  },
   onWidgetUpdate(instanceId, payload) {
     const frontend = frontends.get(instanceId);
     if (frontend) frontend.update(payload);

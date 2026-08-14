@@ -19,6 +19,28 @@ struct SourceManifest {
     frontend: FrontendSource,
     #[serde(default)]
     options: Vec<OptionSource>,
+    #[serde(default)]
+    links: LinksSource,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct LinksSource {
+    #[serde(default)]
+    inputs: Vec<LinkPortSource>,
+    #[serde(default)]
+    outputs: Vec<LinkPortSource>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct LinkPortSource {
+    id: String,
+    name: String,
+    #[serde(rename = "type")]
+    link_type: String,
+    #[serde(default)]
+    variants: Vec<String>,
+    #[serde(default)]
+    required: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -101,6 +123,8 @@ struct RuntimeManifest<'a> {
     backend: String,
     variants: Vec<RuntimeVariant<'a>>,
     options: Vec<RuntimeOption<'a>>,
+    inputs: &'a [LinkPortSource],
+    outputs: &'a [LinkPortSource],
 }
 
 #[derive(Serialize)]
@@ -269,6 +293,8 @@ fn prepare(
         backend: format!("bin/{}", manifest.id),
         variants,
         options,
+        inputs: &manifest.links.inputs,
+        outputs: &manifest.links.outputs,
     };
     fs::write(
         output.join("widget.json"),
@@ -393,6 +419,28 @@ fn validate_manifest(
                 }
             }
             _ => {}
+        }
+    }
+
+    let mut port_ids = HashSet::new();
+    for port in manifest
+        .links
+        .inputs
+        .iter()
+        .chain(manifest.links.outputs.iter())
+    {
+        if !valid_option_id(&port.id)
+            || !port_ids.insert(&port.id)
+            || port.name.trim().is_empty()
+            || port.link_type.trim().is_empty()
+            || port
+                .variants
+                .iter()
+                .any(|variant| !variant_ids.contains(variant))
+        {
+            return Err(
+                "link ports require unique valid IDs, names, types, and known variants".into(),
+            );
         }
     }
 

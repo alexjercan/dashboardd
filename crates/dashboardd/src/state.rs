@@ -11,6 +11,7 @@ use std::{
 use dashboard_protocol::{InstanceId, WidgetId};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use utoipa::ToSchema;
 
 const SCHEMA_VERSION: u32 = 1;
 
@@ -30,17 +31,28 @@ pub struct PersistedInstance {
     pub options: BTreeMap<String, Value>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct DashboardLink {
+    pub source_instance_id: InstanceId,
+    pub source_port: String,
+    pub target_instance_id: InstanceId,
+    pub target_port: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DashboardStateFile {
     pub schema_version: u32,
     pub instances: Vec<PersistedInstance>,
+    #[serde(default)]
+    pub links: Vec<DashboardLink>,
 }
 
 impl DashboardStateFile {
-    pub fn new(instances: Vec<PersistedInstance>) -> Self {
+    pub fn new(instances: Vec<PersistedInstance>, links: Vec<DashboardLink>) -> Self {
         Self {
             schema_version: SCHEMA_VERSION,
             instances,
+            links,
         }
     }
 }
@@ -153,13 +165,21 @@ mod tests {
         let path = temporary_path("round-trip");
         let store = StateStore::new(path.clone());
         assert_eq!(store.load().unwrap(), None);
-        let state = DashboardStateFile::new(vec![PersistedInstance {
-            id: "cpu-7".into(),
-            widget_id: "cpu".into(),
-            variant_id: "full".into(),
-            position: Position { column: 3, row: 2 },
-            options: BTreeMap::from([("enabled".into(), Value::Bool(true))]),
-        }]);
+        let state = DashboardStateFile::new(
+            vec![PersistedInstance {
+                id: "cpu-7".into(),
+                widget_id: "cpu".into(),
+                variant_id: "full".into(),
+                position: Position { column: 3, row: 2 },
+                options: BTreeMap::from([("enabled".into(), Value::Bool(true))]),
+            }],
+            vec![DashboardLink {
+                source_instance_id: "cpu-7".into(),
+                source_port: "selection".into(),
+                target_instance_id: "cpu-8".into(),
+                target_port: "input".into(),
+            }],
+        );
 
         store.save(&state).unwrap();
 

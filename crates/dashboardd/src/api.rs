@@ -27,8 +27,9 @@ use crate::{
     AppState,
     configuration::Theme,
     event::{self, DashboardError, DashboardEvent},
-    instance::{DashboardLayout, Instance, InstanceError, InstanceLayout},
-    widget::{WidgetDescriptor, WidgetVariant},
+    instance::{DashboardLayout, Instance, InstanceError, InstanceLayout, NewInstanceLink},
+    state::DashboardLink,
+    widget::{WidgetDescriptor, WidgetLinkPort, WidgetVariant},
 };
 
 const WEB_DIST: &str = "web/dist";
@@ -56,6 +57,19 @@ pub struct CreateInstance {
     pub position: Position,
     #[serde(default)]
     pub options: BTreeMap<String, Value>,
+    #[serde(default)]
+    pub links: Vec<NewInstanceLink>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct LinkList {
+    pub links: Vec<DashboardLink>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct SetLink {
+    pub source_instance_id: InstanceId,
+    pub source_port: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -88,6 +102,9 @@ pub struct ErrorResponse {
         list_widgets,
         get_widget,
         list_instances,
+        list_links,
+        set_link,
+        delete_link,
         get_instance,
         create_instance,
         update_instance,
@@ -106,11 +123,16 @@ pub struct ErrorResponse {
         Instance,
         InstanceLayout,
         InstanceList,
+        LinkList,
+        NewInstanceLink,
+        DashboardLink,
+        SetLink,
         Position,
         SwapInstances,
         SwapResult,
         UpdateInstance,
         WidgetDescriptor,
+        WidgetLinkPort,
         WidgetList,
         WidgetVariant,
     )),
@@ -133,6 +155,11 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/api/v1/instances",
             get(list_instances).post(create_instance),
+        )
+        .route("/api/v1/links", get(list_links))
+        .route(
+            "/api/v1/links/{target_instance_id}/{target_port}",
+            axum::routing::put(set_link).delete(delete_link),
         )
         .route(
             "/api/v1/instances/{instance_id}",
@@ -235,6 +262,75 @@ async fn list_instances(State(state): State<AppState>) -> Json<InstanceList> {
 
 #[utoipa::path(
     get,
+    path = "/api/v1/links",
+    tag = "instances",
+    responses((status = 200, description = "Dashboard widget links", body = LinkList))
+)]
+async fn list_links(State(state): State<AppState>) -> Json<LinkList> {
+    Json(LinkList {
+        links: state.instances.list_links(),
+    })
+}
+
+#[utoipa::path(
+    put,
+    path = "/api/v1/links/{target_instance_id}/{target_port}",
+    tag = "instances",
+    params(
+        ("target_instance_id" = String, Path, description = "Target instance ID"),
+        ("target_port" = String, Path, description = "Target input port")
+    ),
+    request_body = SetLink,
+    responses(
+        (status = 200, description = "Created or replaced link", body = DashboardLink),
+        (status = 400, description = "Link is incompatible", body = ErrorResponse),
+        (status = 404, description = "An instance or port was not found", body = ErrorResponse)
+    )
+)]
+async fn set_link(
+    AxumPath((target_instance_id, target_port)): AxumPath<(InstanceId, String)>,
+    State(state): State<AppState>,
+    ApiJson(request): ApiJson<SetLink>,
+) -> Result<Json<DashboardLink>, ApiError> {
+    Ok(Json(
+        state
+            .instances
+            .set_link(DashboardLink {
+                source_instance_id: request.source_instance_id,
+                source_port: request.source_port,
+                target_instance_id,
+                target_port,
+            })
+            .await?,
+    ))
+}
+
+#[utoipa::path(
+    delete,
+    path = "/api/v1/links/{target_instance_id}/{target_port}",
+    tag = "instances",
+    params(
+        ("target_instance_id" = String, Path, description = "Target instance ID"),
+        ("target_port" = String, Path, description = "Target input port")
+    ),
+    responses(
+        (status = 204, description = "Link deleted"),
+        (status = 404, description = "Link was not found", body = ErrorResponse)
+    )
+)]
+async fn delete_link(
+    AxumPath((target_instance_id, target_port)): AxumPath<(InstanceId, String)>,
+    State(state): State<AppState>,
+) -> Result<StatusCode, ApiError> {
+    state
+        .instances
+        .delete_link(&target_instance_id, &target_port)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
+    get,
     path = "/api/v1/instances/{instance_id}",
     tag = "instances",
     params(("instance_id" = String, Path, description = "Running instance ID")),
@@ -279,6 +375,7 @@ async fn create_instance(
             request.position.column,
             request.position.row,
             request.options,
+            request.links,
         )
         .await?;
     Ok((
@@ -494,6 +591,8 @@ impl From<InstanceError> for ApiError {
             InstanceError::UnknownInstance => (StatusCode::NOT_FOUND, "unknown_instance"),
             InstanceError::UnknownVariant => (StatusCode::NOT_FOUND, "unknown_variant"),
             InstanceError::InvalidOptions(_) => (StatusCode::BAD_REQUEST, "invalid_options"),
+            InstanceError::InvalidLink(_) => (StatusCode::BAD_REQUEST, "invalid_link"),
+            InstanceError::UnknownLink => (StatusCode::NOT_FOUND, "unknown_link"),
             InstanceError::BackendNotFound => {
                 (StatusCode::INTERNAL_SERVER_ERROR, "backend_not_found")
             }

@@ -7,7 +7,7 @@ use std::{
     env,
     error::Error,
     fs,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
     time::SystemTime,
 };
 
@@ -20,6 +20,7 @@ use tokio::time::{Duration, Instant, interval_at};
 
 const WIDGET_ID: &str = "tatr-tasks";
 const UPDATE_INTERVAL: Duration = Duration::from_secs(2);
+const MAX_TASK_FILE_BYTES: u64 = 256 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -89,13 +90,52 @@ struct CachedTask {
     task: Task,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TaskSelection {
+    project: String,
+    task_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct DetailsSnapshot {
+    project: String,
+    task_id: String,
+    markdown: String,
+}
+
+enum Runtime {
+    Full {
+        instance_id: String,
+        settings: Settings,
+        loader: Loader,
+        previous: Option<Result<Value, String>>,
+    },
+    Details {
+        instance_id: String,
+        settings: Settings,
+        views: HashMap<String, DetailView>,
+    },
+}
+
+struct DetailView {
+    selection: TaskSelection,
+    previous: Option<Result<Value, String>>,
+}
+
+impl Runtime {
+    fn instance_id(&self) -> &str {
+        match self {
+            Self::Full { instance_id, .. } | Self::Details { instance_id, .. } => instance_id,
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let stdin = BufReader::new(tokio::io::stdin());
     let mut lines = stdin.lines();
     let mut stdout = tokio::io::stdout();
-    let mut runtime: Option<(String, Settings, Loader)> = None;
-    let mut previous: Option<Result<Snapshot, String>> = None;
+    let mut runtime: Option<Runtime> = None;
     let mut updates = interval_at(Instant::now(), UPDATE_INTERVAL);
 
     write_message(
@@ -110,26 +150,32 @@ async fn main() -> Result<(), Box<dyn Error>> {
         tokio::select! {
             line = lines.next_line() => match line? {
                 Some(line) => match dashboard_protocol::parse::<ServerToWidget>(&line) {
-                    Ok(ServerToWidget::Initialize { instance_id, widget_id, options }) if widget_id == WIDGET_ID => {
-                        match Settings::from_options(&options) {
-                            Ok(settings) => runtime = Some((instance_id, settings, Loader::default())),
-                            Err(message) => write_error(&mut stdout, Some(instance_id), "invalid_options", message).await?,
+                    Ok(ServerToWidget::Initialize { instance_id, widget_id, variant_id, options }) if widget_id == WIDGET_ID => {
+                        match (Settings::from_options(&options), variant_id.as_str()) {
+                            (Ok(settings), "full") => runtime = Some(Runtime::Full {
+                                instance_id,
+                                settings,
+                                loader: Loader::default(),
+                                previous: None,
+                            }),
+                            (Ok(settings), "details") => runtime = Some(Runtime::Details {
+                                instance_id,
+                                settings,
+                                views: HashMap::new(),
+                            }),
+                            (Ok(_), _) => write_error(&mut stdout, Some(instance_id), "invalid_variant", "unsupported Tatr Tasks variant".into()).await?,
+                            (Err(message), _) => write_error(&mut stdout, Some(instance_id), "invalid_options", message).await?,
                         }
                     }
                     Ok(ServerToWidget::Message { instance_id, payload }) => {
-                        if let Some((active_id, settings, loader)) = runtime.as_mut()
-                            && instance_id == *active_id
-                            && payload.get("command").and_then(Value::as_str) == Some("refresh")
+                        let handled = if let Some(active) = runtime.as_mut()
+                            && instance_id == active.instance_id()
                         {
-                            let current = loader.load(settings);
-                            publish_result(
-                                &mut stdout,
-                                active_id,
-                                current,
-                                &mut previous,
-                                true,
-                            ).await?;
+                            handle_command(&mut stdout, active, &payload).await?
                         } else {
+                            false
+                        };
+                        if !handled {
                             write_error(
                                 &mut stdout,
                                 Some(instance_id),
@@ -142,7 +188,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     Ok(_) => {}
                     Err(error) => write_error(
                         &mut stdout,
-                        runtime.as_ref().map(|(id, _, _)| id.clone()),
+                        runtime.as_ref().map(|runtime| runtime.instance_id().into()),
                         "invalid_message",
                         error.to_string(),
                     ).await?,
@@ -150,13 +196,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 None => break,
             },
             _ = updates.tick(), if runtime.is_some() => {
-                let (instance_id, settings, loader) = runtime.as_mut().expect("runtime is checked");
-                let current = loader.load(settings);
-                publish_result(
+                publish_runtime(
                     &mut stdout,
-                    instance_id,
-                    current,
-                    &mut previous,
+                    runtime.as_mut().expect("runtime is checked"),
                     false,
                 ).await?;
             }
@@ -176,15 +218,16 @@ impl Settings {
             .get("recursive")
             .and_then(Value::as_bool)
             .ok_or("recursive must be Boolean")?;
-        let filter_source = options
+        let filter = options
             .get("filter")
             .and_then(Value::as_str)
-            .ok_or("filter must be text")?;
-        let filter =
-            filter::compile(filter_source).map_err(|error| format!("invalid filter: {error}"))?;
+            .map(filter::compile)
+            .transpose()
+            .map_err(|error| format!("invalid filter: {error}"))?
+            .flatten();
         let sort = match options.get("sort").and_then(Value::as_str) {
+            None | Some("priority") => Sort::Priority,
             Some("created") => Sort::Created,
-            Some("priority") => Sort::Priority,
             Some("title") => Sort::Title,
             _ => return Err("sort must be created, priority, or title".into()),
         };
@@ -387,38 +430,209 @@ fn sort_tasks(tasks: &mut [Task], sort: Sort) {
     });
 }
 
-async fn publish_result(
+fn parse_selection(payload: &Value) -> Option<TaskSelection> {
+    let project = payload.get("project")?.as_str()?;
+    let task_id = payload.get("task_id")?.as_str()?;
+    if project.is_empty() || !valid_task_id(task_id) {
+        return None;
+    }
+    Some(TaskSelection {
+        project: project.into(),
+        task_id: task_id.into(),
+    })
+}
+
+fn load_details(settings: &Settings, selection: &TaskSelection) -> Result<DetailsSnapshot, String> {
+    let relative = Path::new(&selection.project);
+    if relative
+        .components()
+        .any(|component| !matches!(component, Component::Normal(_)))
+    {
+        return Err("Selected task project is invalid".into());
+    }
+    let root_name = settings.root.file_name().map(|name| name.to_string_lossy());
+    let project = if root_name.as_deref() == Some(selection.project.as_str())
+        && settings.root.join("tasks").is_dir()
+    {
+        settings.root.clone()
+    } else {
+        settings.root.join(relative)
+    };
+    let canonical_root =
+        fs::canonicalize(&settings.root).map_err(|_| "Tatr root is unavailable".to_string())?;
+    let project = fs::canonicalize(project)
+        .map_err(|_| "Selected task project is unavailable".to_string())?;
+    if !project.starts_with(canonical_root) {
+        return Err("Selected task project escapes the configured root".into());
+    }
+    let path = project
+        .join("tasks")
+        .join(&selection.task_id)
+        .join("TASK.md");
+    let metadata =
+        fs::symlink_metadata(&path).map_err(|_| "Selected TASK.md is unavailable".to_string())?;
+    if !metadata.file_type().is_file() {
+        return Err("Selected TASK.md must be a regular file".into());
+    }
+    if metadata.len() > MAX_TASK_FILE_BYTES {
+        return Err("Selected TASK.md exceeds 256 KiB".into());
+    }
+    let markdown = fs::read_to_string(path)
+        .map_err(|_| "Selected TASK.md is not valid UTF-8 text".to_string())?;
+    parse_task(
+        &markdown,
+        selection.task_id.clone(),
+        selection.project.clone(),
+    )
+    .map_err(|error| format!("Selected TASK.md is invalid: {error}"))?;
+    Ok(DetailsSnapshot {
+        project: selection.project.clone(),
+        task_id: selection.task_id.clone(),
+        markdown,
+    })
+}
+
+async fn handle_command(
     stdout: &mut tokio::io::Stdout,
-    instance_id: &str,
-    current: Result<Snapshot, String>,
-    previous: &mut Option<Result<Snapshot, String>>,
+    runtime: &mut Runtime,
+    payload: &Value,
+) -> Result<bool, Box<dyn Error>> {
+    match runtime {
+        Runtime::Full { .. }
+            if payload.get("command").and_then(Value::as_str) == Some("refresh") =>
+        {
+            publish_runtime(stdout, runtime, true).await?;
+            Ok(true)
+        }
+        Runtime::Details {
+            instance_id,
+            settings,
+            views,
+        } if payload.get("command").and_then(Value::as_str) == Some("select_task") => {
+            let Some(view_id) = parse_view_id(payload) else {
+                return Ok(false);
+            };
+            let Some(selection) = parse_selection(payload) else {
+                return Ok(false);
+            };
+            views.insert(
+                view_id.clone(),
+                DetailView {
+                    selection,
+                    previous: None,
+                },
+            );
+            publish_detail(stdout, instance_id, settings, &view_id, views, true).await?;
+            Ok(true)
+        }
+        Runtime::Details { views, .. }
+            if payload.get("command").and_then(Value::as_str) == Some("release_view") =>
+        {
+            let Some(view_id) = parse_view_id(payload) else {
+                return Ok(false);
+            };
+            views.remove(&view_id);
+            Ok(true)
+        }
+        _ => Ok(false),
+    }
+}
+
+async fn publish_runtime(
+    stdout: &mut tokio::io::Stdout,
+    runtime: &mut Runtime,
     force: bool,
 ) -> Result<(), Box<dyn Error>> {
-    if force || previous.as_ref() != Some(&current) {
-        match &current {
-            Ok(snapshot) => {
-                write_message(
-                    stdout,
-                    WidgetToServer::Update {
-                        instance_id: instance_id.into(),
-                        payload: serde_json::to_value(snapshot)?,
-                    },
-                )
-                .await?
-            }
-            Err(message) => {
-                write_error(
-                    stdout,
-                    Some(instance_id.into()),
-                    "tasks_unavailable",
-                    message.clone(),
-                )
-                .await?
+    match runtime {
+        Runtime::Full {
+            instance_id,
+            settings,
+            loader,
+            previous,
+        } => {
+            let current = loader.load(settings).and_then(|snapshot| {
+                serde_json::to_value(snapshot).map_err(|error| error.to_string())
+            });
+            if force || previous.as_ref() != Some(&current) {
+                match &current {
+                    Ok(payload) => {
+                        write_message(
+                            stdout,
+                            WidgetToServer::Update {
+                                instance_id: instance_id.clone(),
+                                payload: payload.clone(),
+                            },
+                        )
+                        .await?
+                    }
+                    Err(message) => {
+                        write_error(
+                            stdout,
+                            Some(instance_id.clone()),
+                            "tasks_unavailable",
+                            message.clone(),
+                        )
+                        .await?
+                    }
+                }
+                *previous = Some(current);
             }
         }
-        *previous = Some(current);
+        Runtime::Details {
+            instance_id,
+            settings,
+            views,
+        } => {
+            let view_ids = views.keys().cloned().collect::<Vec<_>>();
+            for view_id in view_ids {
+                publish_detail(stdout, instance_id, settings, &view_id, views, force).await?;
+            }
+        }
     }
     Ok(())
+}
+
+async fn publish_detail(
+    stdout: &mut tokio::io::Stdout,
+    instance_id: &str,
+    settings: &Settings,
+    view_id: &str,
+    views: &mut HashMap<String, DetailView>,
+    force: bool,
+) -> Result<(), Box<dyn Error>> {
+    let Some(view) = views.get_mut(view_id) else {
+        return Ok(());
+    };
+    let current = load_details(settings, &view.selection)
+        .and_then(|snapshot| serde_json::to_value(snapshot).map_err(|error| error.to_string()));
+    if force || view.previous.as_ref() != Some(&current) {
+        let payload = match &current {
+            Ok(payload) => {
+                let mut payload = payload.clone();
+                payload["view_id"] = Value::String(view_id.into());
+                payload
+            }
+            Err(message) => serde_json::json!({
+                "view_id": view_id,
+                "error": {"code": "tasks_unavailable", "message": message}
+            }),
+        };
+        write_message(
+            stdout,
+            WidgetToServer::Update {
+                instance_id: instance_id.into(),
+                payload,
+            },
+        )
+        .await?;
+        view.previous = Some(current);
+    }
+    Ok(())
+}
+
+fn parse_view_id(payload: &Value) -> Option<String> {
+    let view_id = payload.get("view_id")?.as_str()?;
+    (!view_id.is_empty() && view_id.len() <= 64 && view_id.is_ascii()).then(|| view_id.into())
 }
 
 async fn write_error(
@@ -477,6 +691,57 @@ mod tests {
         let home = PathBuf::from(env::var_os("HOME").unwrap());
         assert_eq!(expand_root("~/personal").unwrap(), home.join("personal"));
         assert!(expand_root("personal").is_err());
+    }
+
+    #[test]
+    fn loads_only_the_selected_task_markdown_with_size_and_path_guards() {
+        let root = env::temp_dir().join(format!("scufris-tatr-details-{}", std::process::id()));
+        write_task(
+            &root.join("scufris"),
+            "20260814-150000",
+            "Linked details",
+            "OPEN",
+            100,
+        );
+        let settings = Settings {
+            root: root.clone(),
+            recursive: true,
+            filter: None,
+            sort: Sort::Priority,
+        };
+        let selection = TaskSelection {
+            project: "scufris".into(),
+            task_id: "20260814-150000".into(),
+        };
+
+        let details = load_details(&settings, &selection).unwrap();
+
+        assert!(details.markdown.contains("# Linked details"));
+        assert!(
+            !serde_json::to_string(&details)
+                .unwrap()
+                .contains(root.to_string_lossy().as_ref())
+        );
+        let path = root.join("scufris/tasks/20260814-150000/TASK.md");
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_len(MAX_TASK_FILE_BYTES + 1)
+            .unwrap();
+        assert_eq!(
+            load_details(&settings, &selection).unwrap_err(),
+            "Selected TASK.md exceeds 256 KiB"
+        );
+        let invalid = TaskSelection {
+            project: "../outside".into(),
+            task_id: selection.task_id,
+        };
+        assert_eq!(
+            load_details(&settings, &invalid).unwrap_err(),
+            "Selected task project is invalid"
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
