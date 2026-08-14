@@ -5,42 +5,93 @@ import widgetReset from "@scufris/widget-sdk/widget.css";
 import styles from "./details.css";
 
 type TaskSelection = { project: string; task_id: string };
-type Details = TaskSelection & { markdown: string };
+type ArtifactKind = "markdown" | "html" | "text" | "image";
+type ArtifactDescriptor = { path: string; kind: ArtifactKind };
+type ArtifactDetails = TaskSelection & {
+  artifact: string;
+  artifacts: ArtifactDescriptor[];
+  kind: ArtifactKind;
+  content: string;
+  mediaType: string | null;
+};
 
 export function mount(
   container: HTMLElement,
   context: WidgetContext,
 ): WidgetFrontend {
   const shadow = container.attachShadow({ mode: "open" });
-  shadow.innerHTML = `<style>${widgetReset}\n${styles}</style><article><header><h2>Task Details</h2><span class="identity"></span></header><div class="content state">Select a task</div></article>`;
+  shadow.innerHTML = `
+    <style>${widgetReset}\n${styles}</style>
+    <article class="artifact-shell">
+      <header class="artifact-header">
+        <h2>Task Artifact</h2>
+        <details class="picker" hidden>
+          <summary class="identity"></summary>
+          <div class="artifact-menu" role="menu" aria-label="Task artifacts"></div>
+        </details>
+      </header>
+      <div class="content state">Select a task</div>
+    </article>
+  `;
   shadow.host.setAttribute(
     "aria-label",
-    `Tatr task details for ${context.instanceId}`,
+    `Tatr task artifact viewer for ${context.instanceId}`,
   );
-  let hasDetails = false;
   const viewId = createViewId();
+  let hasDetails = false;
+  let selection: TaskSelection | null = null;
+  let requestedArtifact = "TASK.md";
+
+  const requestArtifact = (artifact: string): void => {
+    if (!selection || artifact === requestedArtifact) return;
+    requestedArtifact = artifact;
+    required<HTMLDetailsElement>(shadow, ".picker").open = false;
+    renderIdentity(shadow, selection, artifact);
+    void context
+      .send({
+        command: "select_artifact",
+        view_id: viewId,
+        ...selection,
+        artifact,
+      })
+      .catch(() => {
+        if (!hasDetails) renderState(shadow, "Task artifact unavailable");
+      });
+  };
 
   const unsubscribe = context.links.subscribe("task", (payload) => {
-    const selection = parseSelection(payload);
-    if (!selection) return;
-    if (hasDetails)
-      required<HTMLElement>(shadow, ".identity").textContent =
-        `${selection.project} / ${selection.task_id}`;
-    else renderLoading(shadow, selection);
+    const next = parseSelection(payload);
+    if (!next) return;
+    selection = next;
+    requestedArtifact = "TASK.md";
+    hasDetails = false;
+    renderLoading(shadow, next);
     void context
-      .send({ command: "select_task", view_id: viewId, ...selection })
-      .catch(() => renderState(shadow, "Task details unavailable"));
+      .send({ command: "select_task", view_id: viewId, ...next })
+      .catch(() => renderState(shadow, "Task artifact unavailable"));
+  });
+
+  shadow.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const option = target.closest<HTMLButtonElement>("[data-artifact]");
+    if (option?.dataset.artifact) requestArtifact(option.dataset.artifact);
+  });
+  shadow.addEventListener("keydown", (event) => {
+    if (event instanceof KeyboardEvent && event.key === "Escape")
+      required<HTMLDetailsElement>(shadow, ".picker").open = false;
   });
 
   return {
     update(payload: unknown): void {
       if (!isRecord(payload) || payload.view_id !== viewId) return;
       const details = parseDetails(payload);
-      if (details) {
+      if (details && details.artifact === requestedArtifact) {
         hasDetails = true;
-        renderDetails(shadow, details);
+        selection = { project: details.project, task_id: details.task_id };
+        renderDetails(shadow, details, requestArtifact);
       } else if (!hasDetails && isRecord(payload.error)) {
-        renderState(shadow, "Task details unavailable");
+        renderState(shadow, "Task artifact unavailable");
       }
     },
     destroy(): void {
@@ -54,9 +105,21 @@ export function mount(
 }
 
 function renderLoading(shadow: ShadowRoot, selection: TaskSelection): void {
-  required<HTMLElement>(shadow, ".identity").textContent =
-    `${selection.project} / ${selection.task_id}`;
+  const picker = required<HTMLDetailsElement>(shadow, ".picker");
+  picker.hidden = false;
+  picker.open = false;
+  renderIdentity(shadow, selection, "TASK.md");
+  required<HTMLElement>(shadow, ".artifact-menu").replaceChildren();
   renderState(shadow, "Loading TASK.md...");
+}
+
+function renderIdentity(
+  shadow: ShadowRoot,
+  selection: TaskSelection,
+  artifact: string,
+): void {
+  required<HTMLElement>(shadow, ".identity").textContent =
+    `${selection.project} // ${selection.task_id}/${artifact}`;
 }
 
 function renderState(shadow: ShadowRoot, message: string): void {
@@ -65,31 +128,168 @@ function renderState(shadow: ShadowRoot, message: string): void {
   content.textContent = message;
 }
 
-function renderDetails(shadow: ShadowRoot, details: Details): void {
-  required<HTMLElement>(shadow, ".identity").textContent =
-    `${details.project} / ${details.task_id}`;
+function renderDetails(
+  shadow: ShadowRoot,
+  details: ArtifactDetails,
+  selectArtifact: (artifact: string) => void,
+): void {
+  renderIdentity(shadow, details, details.artifact);
+  renderArtifactMenu(shadow, details.artifacts, details.artifact);
+  const content = required<HTMLElement>(shadow, ".content");
+  switch (details.kind) {
+    case "markdown":
+      renderMarkdown(content, details, selectArtifact);
+      break;
+    case "html":
+      renderHtml(content, details, selectArtifact);
+      break;
+    case "text":
+      content.className = "content text-artifact";
+      content.replaceChildren(
+        Object.assign(document.createElement("pre"), {
+          textContent: details.content,
+        }),
+      );
+      break;
+    case "image": {
+      content.className = "content image-artifact";
+      const image = document.createElement("img");
+      image.alt = details.artifact;
+      image.src = `data:${details.mediaType ?? "application/octet-stream"};base64,${details.content}`;
+      content.replaceChildren(image);
+      break;
+    }
+  }
+}
+
+function renderArtifactMenu(
+  shadow: ShadowRoot,
+  artifacts: ArtifactDescriptor[],
+  selected: string,
+): void {
+  const picker = required<HTMLDetailsElement>(shadow, ".picker");
+  picker.hidden = false;
+  const menu = required<HTMLElement>(shadow, ".artifact-menu");
+  menu.replaceChildren(
+    ...artifacts.map((artifact) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.dataset.artifact = artifact.path;
+      button.dataset.kind = artifact.kind;
+      button.setAttribute("role", "menuitemradio");
+      button.setAttribute("aria-checked", String(artifact.path === selected));
+      button.className = artifact.path === selected ? "selected" : "";
+      button.textContent = artifact.path;
+      return button;
+    }),
+  );
+}
+
+function renderMarkdown(
+  content: HTMLElement,
+  details: ArtifactDetails,
+  selectArtifact: (artifact: string) => void,
+): void {
   const renderer = new Renderer();
   renderer.html = () => "";
   renderer.image = () => "";
-  const rendered = marked.parse(details.markdown, {
+  const rendered = marked.parse(details.content, {
     async: false,
     breaks: false,
     gfm: true,
     renderer,
   });
-  const content = required<HTMLElement>(shadow, ".content");
-  content.className = "content markdown";
+  content.className = "content document-artifact markdown";
   content.innerHTML = DOMPurify.sanitize(rendered, {
     FORBID_TAGS: ["img", "style", "iframe", "object", "embed"],
+    FORBID_ATTR: ["class", "id", "style"],
   });
+  secureLinks(content, details, selectArtifact);
+}
+
+function renderHtml(
+  content: HTMLElement,
+  details: ArtifactDetails,
+  selectArtifact: (artifact: string) => void,
+): void {
+  content.className = "content document-artifact html-artifact";
+  content.innerHTML = DOMPurify.sanitize(details.content, {
+    FORBID_TAGS: [
+      "script",
+      "style",
+      "form",
+      "input",
+      "button",
+      "select",
+      "textarea",
+      "iframe",
+      "object",
+      "embed",
+      "img",
+      "audio",
+      "video",
+      "source",
+      "link",
+      "meta",
+      "base",
+    ],
+    FORBID_ATTR: ["class", "id", "style"],
+  });
+  secureLinks(content, details, selectArtifact);
+}
+
+function secureLinks(
+  content: HTMLElement,
+  details: ArtifactDetails,
+  selectArtifact: (artifact: string) => void,
+): void {
+  const available = new Set(details.artifacts.map((artifact) => artifact.path));
   for (const link of content.querySelectorAll<HTMLAnchorElement>("a")) {
-    if (/^https?:\/\//i.test(link.getAttribute("href") ?? "")) {
+    const href = link.getAttribute("href") ?? "";
+    if (/^https?:\/\//i.test(href)) {
       link.target = "_blank";
       link.rel = "noopener noreferrer";
-    } else {
+      continue;
+    }
+    if (href.startsWith("#")) continue;
+    const artifact = resolveRelativeArtifact(details.artifact, href);
+    if (!artifact || !available.has(artifact)) {
       link.removeAttribute("href");
+      continue;
+    }
+    link.href = "#";
+    link.addEventListener("click", (event) => {
+      event.preventDefault();
+      selectArtifact(artifact);
+    });
+  }
+}
+
+function resolveRelativeArtifact(current: string, href: string): string | null {
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(href.split(/[?#]/, 1)[0]);
+  } catch {
+    return null;
+  }
+  if (
+    !decoded ||
+    decoded.startsWith("/") ||
+    /^[a-z][a-z0-9+.-]*:/i.test(decoded)
+  )
+    return null;
+  const parts = current.split("/");
+  parts.pop();
+  for (const part of decoded.split("/")) {
+    if (!part || part === ".") continue;
+    if (part === "..") {
+      if (parts.length === 0) return null;
+      parts.pop();
+    } else {
+      parts.push(part);
     }
   }
+  return parts.join("/");
 }
 
 function createViewId(): string {
@@ -113,17 +313,45 @@ function parseSelection(value: unknown): TaskSelection | null {
   return { project: value.project, task_id: value.task_id };
 }
 
-function parseDetails(value: unknown): Details | null {
+function parseDetails(value: unknown): ArtifactDetails | null {
   const selection = parseSelection(value);
-  if (!selection || typeof value !== "object" || value === null) return null;
-  const markdown = (value as Record<string, unknown>).markdown;
-  return typeof markdown === "string" ? { ...selection, markdown } : null;
+  if (
+    !selection ||
+    !isRecord(value) ||
+    typeof value.artifact !== "string" ||
+    !Array.isArray(value.artifacts) ||
+    !isArtifactKind(value.kind) ||
+    typeof value.content !== "string" ||
+    (value.media_type !== null && typeof value.media_type !== "string")
+  )
+    return null;
+  const artifacts = value.artifacts.map(parseArtifactDescriptor);
+  if (artifacts.some((artifact) => artifact === null)) return null;
+  return {
+    ...selection,
+    artifact: value.artifact,
+    artifacts: artifacts as ArtifactDescriptor[],
+    kind: value.kind,
+    content: value.content,
+    mediaType: value.media_type,
+  };
 }
 
+function parseArtifactDescriptor(value: unknown): ArtifactDescriptor | null {
+  if (
+    !isRecord(value) ||
+    typeof value.path !== "string" ||
+    !isArtifactKind(value.kind)
+  )
+    return null;
+  return { path: value.path, kind: value.kind };
+}
+function isArtifactKind(value: unknown): value is ArtifactKind {
+  return ["markdown", "html", "text", "image"].includes(value as string);
+}
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
-
 function required<T extends Element>(root: ParentNode, selector: string): T {
   const element = root.querySelector<T>(selector);
   if (!element) throw new Error(`missing widget element: ${selector}`);

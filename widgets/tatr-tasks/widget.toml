@@ -17,7 +17,7 @@ entry = "src/full.ts"
 
 [[frontend.variants]]
 id = "details"
-name = "Details"
+name = "Artifact"
 size = [3, 3]
 entry = "src/details.ts"
 

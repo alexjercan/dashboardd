@@ -7,10 +7,12 @@ use std::{
     env,
     error::Error,
     fs,
+    io::Read,
     path::{Component, Path, PathBuf},
     time::SystemTime,
 };
 
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use dashboard_protocol::{ServerToWidget, WidgetToServer};
 use filter::Expr;
 use serde::Serialize;
@@ -20,7 +22,11 @@ use tokio::time::{Duration, Instant, interval_at};
 
 const WIDGET_ID: &str = "tatr-tasks";
 const UPDATE_INTERVAL: Duration = Duration::from_secs(2);
-const MAX_TASK_FILE_BYTES: u64 = 256 * 1024;
+const MAX_TEXT_ARTIFACT_BYTES: u64 = 256 * 1024;
+const MAX_IMAGE_ARTIFACT_BYTES: u64 = 2 * 1024 * 1024;
+const MAX_ARTIFACTS: usize = 200;
+const MAX_ARTIFACT_DEPTH: usize = 32;
+const MAX_ARTIFACT_PATH_BYTES: usize = 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -96,11 +102,30 @@ struct TaskSelection {
     task_id: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ArtifactKind {
+    Markdown,
+    Html,
+    Text,
+    Image,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct ArtifactDescriptor {
+    path: String,
+    kind: ArtifactKind,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 struct DetailsSnapshot {
     project: String,
     task_id: String,
-    markdown: String,
+    artifact: String,
+    artifacts: Vec<ArtifactDescriptor>,
+    kind: ArtifactKind,
+    content: String,
+    media_type: Option<String>,
 }
 
 enum Runtime {
@@ -119,6 +144,7 @@ enum Runtime {
 
 struct DetailView {
     selection: TaskSelection,
+    artifact: String,
     previous: Option<Result<Value, String>>,
 }
 
@@ -446,7 +472,65 @@ fn parse_selection(payload: &Value) -> Option<TaskSelection> {
     })
 }
 
-fn load_details(settings: &Settings, selection: &TaskSelection) -> Result<DetailsSnapshot, String> {
+fn load_details(
+    settings: &Settings,
+    selection: &TaskSelection,
+    selected_artifact: &str,
+) -> Result<DetailsSnapshot, String> {
+    let task_directory = resolve_task_directory(settings, selection)?;
+    let artifacts = list_artifacts(&task_directory)?;
+    let descriptor = artifacts
+        .iter()
+        .find(|artifact| artifact.path == selected_artifact)
+        .cloned()
+        .ok_or_else(|| "Selected artifact is unavailable".to_string())?;
+    let path = task_directory.join(Path::new(&descriptor.path));
+    let metadata =
+        fs::symlink_metadata(&path).map_err(|_| "Selected artifact is unavailable".to_string())?;
+    if !metadata.file_type().is_file() {
+        return Err("Selected artifact must be a regular file".into());
+    }
+    let canonical_path =
+        fs::canonicalize(&path).map_err(|_| "Selected artifact is unavailable".to_string())?;
+    if !canonical_path.starts_with(&task_directory) {
+        return Err("Selected artifact escapes the task directory".into());
+    }
+    let bytes =
+        fs::read(&canonical_path).map_err(|_| "Selected artifact is unreadable".to_string())?;
+    let (content, media_type) = match descriptor.kind {
+        ArtifactKind::Image => (
+            BASE64.encode(bytes),
+            Some(image_media_type(&descriptor.path).to_string()),
+        ),
+        ArtifactKind::Markdown | ArtifactKind::Html | ArtifactKind::Text => {
+            let content = String::from_utf8(bytes)
+                .map_err(|_| "Selected artifact is not valid UTF-8 text".to_string())?;
+            if descriptor.path == "TASK.md" {
+                parse_task(
+                    &content,
+                    selection.task_id.clone(),
+                    selection.project.clone(),
+                )
+                .map_err(|error| format!("Selected TASK.md is invalid: {error}"))?;
+            }
+            (content, None)
+        }
+    };
+    Ok(DetailsSnapshot {
+        project: selection.project.clone(),
+        task_id: selection.task_id.clone(),
+        artifact: descriptor.path.clone(),
+        artifacts,
+        kind: descriptor.kind,
+        content,
+        media_type,
+    })
+}
+
+fn resolve_task_directory(
+    settings: &Settings,
+    selection: &TaskSelection,
+) -> Result<PathBuf, String> {
     let relative = Path::new(&selection.project);
     if relative
         .components()
@@ -466,34 +550,162 @@ fn load_details(settings: &Settings, selection: &TaskSelection) -> Result<Detail
         fs::canonicalize(&settings.root).map_err(|_| "Tatr root is unavailable".to_string())?;
     let project = fs::canonicalize(project)
         .map_err(|_| "Selected task project is unavailable".to_string())?;
-    if !project.starts_with(canonical_root) {
+    if !project.starts_with(&canonical_root) {
         return Err("Selected task project escapes the configured root".into());
     }
-    let path = project
-        .join("tasks")
-        .join(&selection.task_id)
-        .join("TASK.md");
+    let tasks = fs::canonicalize(project.join("tasks"))
+        .map_err(|_| "Selected task project has no tasks directory".to_string())?;
+    let task = project.join("tasks").join(&selection.task_id);
     let metadata =
-        fs::symlink_metadata(&path).map_err(|_| "Selected TASK.md is unavailable".to_string())?;
+        fs::symlink_metadata(&task).map_err(|_| "Selected task is unavailable".to_string())?;
+    if !metadata.file_type().is_dir() {
+        return Err("Selected task must be a regular directory".into());
+    }
+    let task = fs::canonicalize(task).map_err(|_| "Selected task is unavailable".to_string())?;
+    if !task.starts_with(tasks) {
+        return Err("Selected task escapes its project".into());
+    }
+    Ok(task)
+}
+
+fn list_artifacts(task_directory: &Path) -> Result<Vec<ArtifactDescriptor>, String> {
+    let mut artifacts = Vec::new();
+    let task_path = task_directory.join("TASK.md");
+    if let Some(kind) = classify_artifact(&task_path)? {
+        artifacts.push(ArtifactDescriptor {
+            path: "TASK.md".into(),
+            kind,
+        });
+    }
+    collect_artifacts(task_directory, Path::new(""), &mut artifacts)?;
+    Ok(artifacts)
+}
+
+fn collect_artifacts(
+    task_directory: &Path,
+    relative_directory: &Path,
+    artifacts: &mut Vec<ArtifactDescriptor>,
+) -> Result<(), String> {
+    if artifacts.len() >= MAX_ARTIFACTS
+        || relative_directory.components().count() >= MAX_ARTIFACT_DEPTH
+    {
+        return Ok(());
+    }
+    let directory = task_directory.join(relative_directory);
+    for entry in sorted_entries(&directory).map_err(|_| "Could not list task artifacts")? {
+        if artifacts.len() >= MAX_ARTIFACTS {
+            break;
+        }
+        let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        if name.starts_with('.') {
+            continue;
+        }
+        let relative = relative_directory.join(&name);
+        if relative == Path::new("TASK.md") {
+            continue;
+        }
+        let file_type = entry
+            .file_type()
+            .map_err(|_| "Could not inspect task artifact")?;
+        if file_type.is_symlink() {
+            continue;
+        }
+        if file_type.is_dir() {
+            collect_artifacts(task_directory, &relative, artifacts)?;
+        } else if file_type.is_file()
+            && let Some(kind) = classify_artifact(&entry.path())?
+        {
+            let Some(path) = relative
+                .to_str()
+                .filter(|path| path.len() <= MAX_ARTIFACT_PATH_BYTES)
+            else {
+                continue;
+            };
+            artifacts.push(ArtifactDescriptor {
+                path: path.replace(std::path::MAIN_SEPARATOR, "/"),
+                kind,
+            });
+        }
+    }
+    Ok(())
+}
+
+fn classify_artifact(path: &Path) -> Result<Option<ArtifactKind>, String> {
+    let metadata = fs::symlink_metadata(path).map_err(|_| "Could not inspect task artifact")?;
     if !metadata.file_type().is_file() {
-        return Err("Selected TASK.md must be a regular file".into());
+        return Ok(None);
     }
-    if metadata.len() > MAX_TASK_FILE_BYTES {
-        return Err("Selected TASK.md exceeds 256 KiB".into());
+    let extension = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let kind = match extension.as_str() {
+        "md" | "markdown" if metadata.len() <= MAX_TEXT_ARTIFACT_BYTES => {
+            Some(ArtifactKind::Markdown)
+        }
+        "html" | "htm" if metadata.len() <= MAX_TEXT_ARTIFACT_BYTES => Some(ArtifactKind::Html),
+        "png" | "jpg" | "jpeg" | "gif" | "webp"
+            if metadata.len() <= MAX_IMAGE_ARTIFACT_BYTES
+                && valid_image_artifact(path, &extension) =>
+        {
+            Some(ArtifactKind::Image)
+        }
+        "svg" | "pdf" | "mp4" | "mov" | "avi" | "zip" | "gz" | "xz" | "bz2" | "7z" | "tar" => None,
+        _ if metadata.len() <= MAX_TEXT_ARTIFACT_BYTES => fs::read(path)
+            .ok()
+            .and_then(|bytes| String::from_utf8(bytes).ok())
+            .map(|_| ArtifactKind::Text),
+        _ => None,
+    };
+    Ok(kind)
+}
+
+fn valid_image_artifact(path: &Path, extension: &str) -> bool {
+    let Ok(mut file) = fs::File::open(path) else {
+        return false;
+    };
+    let mut header = [0_u8; 12];
+    let Ok(length) = file.read(&mut header) else {
+        return false;
+    };
+    let header = &header[..length];
+    match extension {
+        "png" => header.starts_with(b"\x89PNG\r\n\x1a\n"),
+        "jpg" | "jpeg" => header.starts_with(&[0xff, 0xd8, 0xff]),
+        "gif" => header.starts_with(b"GIF87a") || header.starts_with(b"GIF89a"),
+        "webp" => header.starts_with(b"RIFF") && header.get(8..12) == Some(b"WEBP"),
+        _ => false,
     }
-    let markdown = fs::read_to_string(path)
-        .map_err(|_| "Selected TASK.md is not valid UTF-8 text".to_string())?;
-    parse_task(
-        &markdown,
-        selection.task_id.clone(),
-        selection.project.clone(),
-    )
-    .map_err(|error| format!("Selected TASK.md is invalid: {error}"))?;
-    Ok(DetailsSnapshot {
-        project: selection.project.clone(),
-        task_id: selection.task_id.clone(),
-        markdown,
-    })
+}
+
+fn image_media_type(path: &str) -> &'static str {
+    match Path::new(path)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        _ => "application/octet-stream",
+    }
+}
+
+fn parse_artifact(payload: &Value) -> Option<String> {
+    let artifact = payload.get("artifact")?.as_str()?;
+    let path = Path::new(artifact);
+    (!artifact.is_empty()
+        && artifact.len() <= MAX_ARTIFACT_PATH_BYTES
+        && path
+            .components()
+            .all(|component| matches!(component, Component::Normal(_))))
+    .then(|| artifact.into())
 }
 
 async fn handle_command(
@@ -523,9 +735,35 @@ async fn handle_command(
                 view_id.clone(),
                 DetailView {
                     selection,
+                    artifact: "TASK.md".into(),
                     previous: None,
                 },
             );
+            publish_detail(stdout, instance_id, settings, &view_id, views, true).await?;
+            Ok(true)
+        }
+        Runtime::Details {
+            instance_id,
+            settings,
+            views,
+        } if payload.get("command").and_then(Value::as_str) == Some("select_artifact") => {
+            let Some(view_id) = parse_view_id(payload) else {
+                return Ok(false);
+            };
+            let Some(selection) = parse_selection(payload) else {
+                return Ok(false);
+            };
+            let Some(artifact) = parse_artifact(payload) else {
+                return Ok(false);
+            };
+            let Some(view) = views.get_mut(&view_id) else {
+                return Ok(false);
+            };
+            if view.selection != selection {
+                return Ok(false);
+            }
+            view.artifact = artifact;
+            view.previous = None;
             publish_detail(stdout, instance_id, settings, &view_id, views, true).await?;
             Ok(true)
         }
@@ -607,7 +845,7 @@ async fn publish_detail(
     let Some(view) = views.get_mut(view_id) else {
         return Ok(());
     };
-    let current = load_details(settings, &view.selection)
+    let current = load_details(settings, &view.selection, &view.artifact)
         .and_then(|snapshot| serde_json::to_value(snapshot).map_err(|error| error.to_string()));
     if force || view.previous.as_ref() != Some(&current) {
         let payload = match &current {
@@ -618,7 +856,7 @@ async fn publish_detail(
             }
             Err(message) => serde_json::json!({
                 "view_id": view_id,
-                "error": {"code": "tasks_unavailable", "message": message}
+                "error": {"code": "artifact_unavailable", "message": message}
             }),
         };
         write_message(
@@ -698,7 +936,7 @@ mod tests {
     }
 
     #[test]
-    fn loads_only_the_selected_task_markdown_with_size_and_path_guards() {
+    fn lists_and_loads_private_task_artifacts_with_format_and_path_guards() {
         let root = env::temp_dir().join(format!("scufris-tatr-details-{}", std::process::id()));
         write_task(
             &root.join("scufris"),
@@ -707,6 +945,29 @@ mod tests {
             "OPEN",
             100,
         );
+        let task = root.join("scufris/tasks/20260814-150000");
+        fs::create_dir_all(task.join("research")).unwrap();
+        fs::write(
+            task.join("research/notes.md"),
+            "# Notes\n\n[raw](../summary.txt)",
+        )
+        .unwrap();
+        fs::write(task.join("summary.txt"), "plain text").unwrap();
+        fs::write(
+            task.join("report.html"),
+            "<h1>Report</h1><script>bad()</script>",
+        )
+        .unwrap();
+        fs::write(task.join("result.png"), b"\x89PNG\r\n\x1a\nfixture").unwrap();
+        fs::write(task.join("blocked.svg"), "<svg></svg>").unwrap();
+        fs::write(task.join("binary.bin"), [0xff, 0xfe, 0xfd]).unwrap();
+        fs::write(task.join(".secret.txt"), "secret").unwrap();
+        fs::File::create(task.join("oversized.md"))
+            .unwrap()
+            .set_len(MAX_TEXT_ARTIFACT_BYTES + 1)
+            .unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("/etc/passwd", task.join("linked.txt")).unwrap();
         let settings = Settings {
             root: root.clone(),
             recursive: true,
@@ -718,33 +979,65 @@ mod tests {
             task_id: "20260814-150000".into(),
         };
 
-        let details = load_details(&settings, &selection).unwrap();
-
-        assert!(details.markdown.contains("# Linked details"));
+        let details = load_details(&settings, &selection, "TASK.md").unwrap();
+        assert_eq!(details.artifact, "TASK.md");
+        assert_eq!(details.kind, ArtifactKind::Markdown);
+        assert!(details.content.contains("# Linked details"));
+        assert_eq!(
+            details
+                .artifacts
+                .iter()
+                .map(|artifact| artifact.path.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "TASK.md",
+                "report.html",
+                "research/notes.md",
+                "result.png",
+                "summary.txt",
+            ]
+        );
         assert!(
             !serde_json::to_string(&details)
                 .unwrap()
                 .contains(root.to_string_lossy().as_ref())
         );
-        let path = root.join("scufris/tasks/20260814-150000/TASK.md");
-        fs::OpenOptions::new()
-            .write(true)
-            .open(&path)
-            .unwrap()
-            .set_len(MAX_TASK_FILE_BYTES + 1)
-            .unwrap();
+        let text = load_details(&settings, &selection, "summary.txt").unwrap();
+        assert_eq!(text.kind, ArtifactKind::Text);
+        assert_eq!(text.content, "plain text");
+        let image = load_details(&settings, &selection, "result.png").unwrap();
+        assert_eq!(image.kind, ArtifactKind::Image);
+        assert_eq!(image.media_type.as_deref(), Some("image/png"));
         assert_eq!(
-            load_details(&settings, &selection).unwrap_err(),
-            "Selected TASK.md exceeds 256 KiB"
+            BASE64.decode(image.content).unwrap(),
+            b"\x89PNG\r\n\x1a\nfixture"
         );
+        assert!(load_details(&settings, &selection, "../TASK.md").is_err());
         let invalid = TaskSelection {
             project: "../outside".into(),
             task_id: selection.task_id,
         };
         assert_eq!(
-            load_details(&settings, &invalid).unwrap_err(),
+            load_details(&settings, &invalid, "TASK.md").unwrap_err(),
             "Selected task project is invalid"
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn limits_artifact_lists_and_validates_artifact_commands() {
+        let root = env::temp_dir().join(format!("scufris-tatr-limit-{}", std::process::id()));
+        write_task(&root, "20260814-160000", "Many artifacts", "OPEN", 1);
+        let task = root.join("tasks/20260814-160000");
+        for index in 0..MAX_ARTIFACTS + 10 {
+            fs::write(task.join(format!("artifact-{index:03}.txt")), "text").unwrap();
+        }
+        let artifacts = list_artifacts(&task).unwrap();
+        assert_eq!(artifacts.len(), MAX_ARTIFACTS);
+        assert_eq!(artifacts[0].path, "TASK.md");
+        assert!(parse_artifact(&serde_json::json!({"artifact": "notes/file.md"})).is_some());
+        assert!(parse_artifact(&serde_json::json!({"artifact": "../file.md"})).is_none());
+        assert!(parse_artifact(&serde_json::json!({"artifact": "/file.md"})).is_none());
         fs::remove_dir_all(root).unwrap();
     }
 

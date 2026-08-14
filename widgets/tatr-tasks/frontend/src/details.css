@@ -3,36 +3,109 @@
   height: 100%;
 }
 
-article {
+.artifact-shell {
   display: flex;
-  flex-direction: column;
   height: 100%;
+  flex-direction: column;
   padding: 13px 14px;
   overflow: hidden;
   background: var(--scufris-color-surface);
 }
 
-header {
+.artifact-header {
+  position: relative;
+  z-index: 2;
   flex: none;
   padding-bottom: 9px;
   border-bottom: 1px solid var(--scufris-color-selection);
 }
 
-h2 {
+.artifact-header h2 {
   margin: 0;
   color: var(--scufris-color-text-bright);
   font-size: 15px;
 }
 
-.identity {
-  display: block;
+.picker {
+  position: relative;
   margin-top: 3px;
+}
+
+.identity {
   overflow: hidden;
   color: var(--scufris-color-text-muted);
+  cursor: pointer;
   font-family: var(--scufris-font-mono);
   font-size: 9px;
+  line-height: 1.35;
+  list-style: none;
+  overflow-wrap: anywhere;
+}
+
+.identity::-webkit-details-marker {
+  display: none;
+}
+
+.identity::after {
+  margin-left: 6px;
+  color: var(--scufris-color-accent);
+  content: "+";
+}
+
+.picker[open] .identity::after {
+  content: "-";
+}
+
+.identity:focus-visible {
+  color: var(--scufris-color-accent);
+  outline: none;
+}
+
+.artifact-menu {
+  position: absolute;
+  top: calc(100% + 7px);
+  right: 0;
+  left: 0;
+  display: grid;
+  max-height: 190px;
+  padding: 5px;
+  overflow-y: auto;
+  border: 1px solid var(--scufris-color-border);
+  border-radius: 4px;
+  background: var(--scufris-color-canvas);
+  box-shadow: 0 12px 28px rgb(0 0 0 / 45%);
+  scrollbar-color: var(--scufris-color-selection) transparent;
+  scrollbar-width: thin;
+}
+
+.artifact-menu button {
+  width: 100%;
+  padding: 6px 7px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  color: var(--scufris-color-text-muted);
+  cursor: pointer;
+  font-family: var(--scufris-font-mono);
+  font-size: 9px;
+  text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.artifact-menu button:hover,
+.artifact-menu button:focus-visible,
+.artifact-menu button.selected {
+  background: var(--scufris-color-selection);
+  color: var(--scufris-color-text-bright);
+  outline: none;
+}
+
+.artifact-menu button.selected::before {
+  margin-right: 6px;
+  color: var(--scufris-color-accent);
+  content: "*";
 }
 
 .content {
@@ -47,9 +120,11 @@ h2 {
   font-size: 10px;
 }
 
-.markdown {
+.document-artifact,
+.text-artifact,
+.image-artifact {
   padding: 10px 3px 4px 0;
-  overflow-y: auto;
+  overflow: auto;
   color: var(--scufris-color-text);
   font-size: 11px;
   line-height: 1.55;
@@ -57,50 +132,72 @@ h2 {
   scrollbar-width: thin;
 }
 
-.markdown :first-child {
+.text-artifact pre {
+  min-width: max-content;
+  margin: 0;
+  color: var(--scufris-color-text);
+  font-family: var(--scufris-font-mono);
+  font-size: 9px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.image-artifact {
+  display: grid;
+  place-items: center;
+}
+
+.image-artifact img {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.document-artifact :first-child {
   margin-top: 0;
 }
 
-.markdown :last-child {
+.document-artifact :last-child {
   margin-bottom: 0;
 }
 
-.markdown h1,
-.markdown h2,
-.markdown h3,
-.markdown h4 {
+.document-artifact h1,
+.document-artifact h2,
+.document-artifact h3,
+.document-artifact h4 {
   margin: 15px 0 6px;
   color: var(--scufris-color-text-bright);
   line-height: 1.25;
 }
 
-.markdown h1 {
+.document-artifact h1 {
   font-size: 17px;
 }
 
-.markdown h2 {
+.document-artifact h2 {
   font-size: 14px;
 }
 
-.markdown h3,
-.markdown h4 {
+.document-artifact h3,
+.document-artifact h4 {
   font-size: 12px;
 }
 
-.markdown p,
-.markdown ul,
-.markdown ol,
-.markdown pre,
-.markdown blockquote {
+.document-artifact p,
+.document-artifact ul,
+.document-artifact ol,
+.document-artifact pre,
+.document-artifact blockquote {
   margin: 7px 0;
 }
 
-.markdown ul,
-.markdown ol {
+.document-artifact ul,
+.document-artifact ol {
   padding-left: 20px;
 }
 
-.markdown code {
+.document-artifact code {
   padding: 1px 3px;
   border-radius: 2px;
   background: var(--scufris-color-canvas);
@@ -109,7 +206,7 @@ h2 {
   font-size: 9px;
 }
 
-.markdown pre {
+.document-artifact pre {
   padding: 8px;
   overflow-x: auto;
   border: 1px solid var(--scufris-color-selection);
@@ -117,33 +214,33 @@ h2 {
   background: var(--scufris-color-canvas);
 }
 
-.markdown pre code {
+.document-artifact pre code {
   padding: 0;
   background: transparent;
 }
 
-.markdown blockquote {
+.document-artifact blockquote {
   padding-left: 9px;
   border-left: 2px solid var(--scufris-color-border);
   color: var(--scufris-color-text-muted);
 }
 
-.markdown a {
+.document-artifact a {
   color: var(--scufris-color-accent);
 }
 
-.markdown hr {
+.document-artifact hr {
   border: 0;
   border-top: 1px solid var(--scufris-color-selection);
 }
 
-.markdown table {
+.document-artifact table {
   width: 100%;
   border-collapse: collapse;
 }
 
-.markdown th,
-.markdown td {
+.document-artifact th,
+.document-artifact td {
   padding: 4px 5px;
   border: 1px solid var(--scufris-color-selection);
   text-align: left;

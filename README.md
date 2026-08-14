@@ -69,8 +69,11 @@ The 6x3 Tatr Tasks widget reads `TASK.md` records directly without executing
 `tatr`. It defaults to recursive discovery under `~/personal`, filters to open
 and in-progress tasks, and sorts by priority. Rows include the complete Task ID.
 Its root accepts absolute paths and `~/...`. Status and tag controls apply
-temporary browser-local filters. The linked 3x3 Details variant safely renders
-the selected task's `TASK.md`; raw HTML and embedded images are ignored.
+temporary browser-local filters. The linked 3x3 Artifact variant defaults to
+`TASK.md` and can securely select task-local Markdown, sanitized HTML, UTF-8
+text, and raster images from its normal-mode identity menu. Absolute paths,
+symlinks, active HTML, embedded local assets, and unsupported binaries remain
+unavailable.
 
 Dashboard composition persists in `$XDG_STATE_HOME/scufris/dashboard.json`, or
 `$HOME/.local/state/scufris/dashboard.json` when `XDG_STATE_HOME` is unset.

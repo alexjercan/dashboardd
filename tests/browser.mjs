@@ -42,6 +42,7 @@ writeTatrTask("tatr", "20260814-110000", "Document filters", "OPEN", 40, [
 writeTatrTask("tatr", "20260814-100000", "Old task", "CLOSED", 200, [
   "archive",
 ]);
+writeTatrArtifacts("scufris", "20260814-120000");
 writeConfiguration("#123456");
 const dashboardUrl = `http://127.0.0.1:${dashboardPort}`;
 const baseUrl = `http://127.0.0.1:${browserPort}`;
@@ -626,7 +627,7 @@ try {
 
   await page.locator('.dashboard-slot[data-column="6"][data-row="3"]').click();
   await page.locator(".widget-choice", { hasText: "Tatr Tasks" }).click();
-  await page.locator(".variant-choice", { hasText: "Details" }).click();
+  await page.locator(".variant-choice", { hasText: "Artifact" }).click();
   await page.locator('.widget-option input[type="text"]').fill(tatrRoot);
   assert.equal(await page.locator("#widget-links-fieldset").isVisible(), true);
   assert.match(
@@ -706,9 +707,9 @@ try {
       hasText: "Select a task",
     })
     .waitFor();
-  assert.match(
+  assert.equal(
     await detailsFrame.locator(".identity").textContent(),
-    /scufris \/ 20260814-120000/,
+    "scufris // 20260814-120000/TASK.md",
   );
   assert.equal(await detailsFrame.locator(".markdown script").count(), 0);
   assert.equal(await detailsFrame.locator(".markdown img").count(), 0);
@@ -718,6 +719,110 @@ try {
       .getAttribute("rel"),
     "noopener noreferrer",
   );
+  await detailsFrame.locator(".identity").click();
+  assert.deepEqual(
+    await detailsFrame.locator(".artifact-menu button").allTextContents(),
+    ["TASK.md", "notes/related.md", "report.html", "result.png", "summary.txt"],
+  );
+  assert.equal(
+    await detailsFrame
+      .locator('.artifact-menu button:text-is(".secret.txt")')
+      .count(),
+    0,
+  );
+  await page.screenshot({
+    path: path.join(artifacts, "tatr-artifact-menu-narrow.png"),
+    fullPage: true,
+  });
+  await detailsFrame
+    .locator('.artifact-menu button:text-is("summary.txt")')
+    .click();
+  await detailsFrame
+    .locator(".text-artifact", { hasText: "Plain artifact text" })
+    .waitFor();
+  assert.match(
+    await detailsFrame.locator(".identity").textContent(),
+    /\/summary\.txt$/,
+  );
+  await detailsFrame.locator(".identity").click();
+  await detailsFrame
+    .locator('.artifact-menu button:text-is("report.html")')
+    .click();
+  await detailsFrame
+    .locator(".html-artifact h1", { hasText: "HTML report" })
+    .waitFor();
+  assert.equal(await detailsFrame.locator(".html-artifact script").count(), 0);
+  assert.equal(await detailsFrame.locator(".html-artifact form").count(), 0);
+  assert.equal(await detailsFrame.locator(".html-artifact img").count(), 0);
+  assert.equal(
+    await detailsFrame
+      .locator(".html-artifact [class], .html-artifact [id]")
+      .count(),
+    0,
+  );
+  await detailsFrame.locator(".identity").click();
+  await page.screenshot({
+    path: path.join(artifacts, "tatr-artifact-html-menu-narrow.png"),
+    fullPage: true,
+  });
+  await detailsFrame
+    .locator('.artifact-menu button:text-is("summary.txt")')
+    .click();
+  await detailsFrame.locator(".identity").click();
+  await detailsFrame
+    .locator('.artifact-menu button:text-is("report.html")')
+    .click();
+  await detailsFrame
+    .locator(".html-artifact h1", { hasText: "HTML report" })
+    .waitFor();
+  await detailsFrame
+    .locator(".html-artifact a", { hasText: "Related artifact" })
+    .click();
+  await detailsFrame
+    .locator(".markdown h1", { hasText: "Related artifact" })
+    .waitFor();
+  assert.match(
+    await detailsFrame.locator(".identity").textContent(),
+    /\/notes\/related\.md$/,
+  );
+  await detailsFrame.locator(".identity").click();
+  await detailsFrame
+    .locator('.artifact-menu button:text-is("result.png")')
+    .click();
+  const artifactImage = detailsFrame.locator(
+    '.image-artifact img[alt="result.png"]',
+  );
+  await artifactImage.waitFor();
+  assert.equal(
+    await artifactImage.evaluate(
+      (image) => image instanceof HTMLImageElement && image.naturalWidth,
+    ),
+    1,
+  );
+  await page.screenshot({
+    path: path.join(artifacts, "tatr-artifact-image-narrow.png"),
+    fullPage: true,
+  });
+  await detailsFrame.locator(".identity").click();
+  await detailsFrame
+    .locator('.artifact-menu button:text-is("TASK.md")')
+    .click();
+  await detailsFrame
+    .locator(".markdown h1", { hasText: "Add Tatr widget" })
+    .waitFor();
+  await tatrFrame.locator(".title", { hasText: "Document filters" }).click();
+  await detailsFrame
+    .locator(".markdown h1", { hasText: "Document filters" })
+    .waitFor();
+  assert.equal(
+    await detailsFrame.locator(".identity").textContent(),
+    "tatr // 20260814-110000/TASK.md",
+    "a new task resets artifact selection to TASK.md",
+  );
+  await tatrFrame.locator(".title", { hasText: "Add Tatr widget" }).click();
+  await detailsFrame
+    .locator(".markdown h1", { hasText: "Add Tatr widget" })
+    .waitFor();
   await page.screenshot({
     path: path.join(artifacts, "tatr-tasks-narrow.png"),
     fullPage: true,
@@ -1063,6 +1168,28 @@ function writeTatrTask(project, id, title, status, priority, tags) {
     path.join(directory, "TASK.md"),
     `# ${title}\n\n- STATUS: ${status}\n- PRIORITY: ${priority}\n- TAGS: ${tags.join(", ")}\n\n## Notes\n\n**Fixture markdown** with [Example](https://example.com).\n\n<script>unsafe()</script>\n\n![Ignored image](secret.png)\n`,
   );
+}
+
+function writeTatrArtifacts(project, id) {
+  const directory = path.join(tatrRoot, project, "tasks", id);
+  mkdirSync(path.join(directory, "notes"), { recursive: true });
+  writeFileSync(
+    path.join(directory, "notes/related.md"),
+    "# Related artifact\n\nArtifact navigation works.\n",
+  );
+  writeFileSync(path.join(directory, "summary.txt"), "Plain artifact text\n");
+  writeFileSync(
+    path.join(directory, "report.html"),
+    '<header class="content" id="report-header"><h1>HTML report</h1></header><script>unsafe()</script><form><input></form><img src="https://example.com/tracker.png"><a href="notes/related.md">Related artifact</a>',
+  );
+  writeFileSync(
+    path.join(directory, "result.png"),
+    Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+      "base64",
+    ),
+  );
+  writeFileSync(path.join(directory, ".secret.txt"), "hidden");
 }
 
 function writeConfiguration(accent, dashboard = "", font = "Iosevka") {

@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Artifact viewer preview</title>
+  </head>
+  <body>
+    <header>
+      <p>SCUFRIS / ARTIFACT REPORT</p>
+      <h1>Artifact viewer preview</h1>
+      <p>A small semantic HTML report rendered through the sanitizer.</p>
+    </header>
+
+    <main>
+      <section>
+        <h2>Checks</h2>
+        <ul>
+          <li><strong>Sanitization:</strong> active content stays unavailable.</li>
+          <li><strong>Typography:</strong> headings, prose, and code remain readable.</li>
+          <li><strong>Navigation:</strong> relative artifact links use the local selector.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Telemetry sample</h2>
+        <table>
+          <thead>
+            <tr><th>Signal</th><th>Value</th><th>State</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Artifacts</td><td>3</td><td>Healthy</td></tr>
+            <tr><td>Sanitizer</td><td>Enabled</td><td>Healthy</td></tr>
+            <tr><td>Selection</td><td>Page-local</td><td>Healthy</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>Related artifacts</h2>
+        <p>
+          Open the <a href="ui-preview.md">Markdown preview</a> or
+          <a href="ui-preview.png">PNG preview</a>.
+        </p>
+      </section>
+    </main>
+  </body>
+</html>
