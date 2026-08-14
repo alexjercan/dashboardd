@@ -10,6 +10,7 @@ import {
   type DashboardLayout,
   type Instance,
   type WidgetDescriptor,
+  type WidgetOption,
   type WidgetVariant,
 } from "./protocol";
 
@@ -36,11 +37,16 @@ app.innerHTML = `
     <form method="dialog">
       <header><h2>Add widget</h2><button class="icon-button" value="cancel" aria-label="Close">x</button></header>
       <p id="add-position" class="modal-position"></p>
-      <div id="widget-catalog" class="widget-catalog"></div>
-      <section id="widget-selection" class="widget-selection" hidden>
-        <h3 id="selected-widget-name"></h3>
-        <dl><div><dt>Size</dt><dd id="selected-widget-size"></dd></div><div><dt>Options</dt><dd>No options</dd></div></dl>
-      </section>
+      <div class="widget-picker">
+        <div id="widget-catalog" class="widget-catalog" aria-label="Widget catalog"></div>
+        <section id="widget-selection" class="widget-selection" tabindex="-1" hidden>
+          <button id="back-to-widgets" class="back-to-widgets" type="button">&lt; Back</button>
+          <h3 id="selected-widget-name"></h3>
+          <p id="selected-widget-description" class="widget-description"></p>
+          <fieldset><legend>Variant</legend><div id="widget-variants" class="widget-variants"></div></fieldset>
+          <fieldset><legend>Options</legend><div id="widget-options" class="widget-options"></div></fieldset>
+        </section>
+      </div>
       <footer><button class="button" value="cancel">Cancel</button><button id="confirm-add" class="button primary" type="button" disabled>Add widget</button></footer>
     </form>
   </dialog>
@@ -65,7 +71,12 @@ const removeDialog = required<HTMLDialogElement>("#remove-widget");
 const catalogElement = required<HTMLElement>("#widget-catalog");
 const selectionElement = required<HTMLElement>("#widget-selection");
 const selectedNameElement = required<HTMLElement>("#selected-widget-name");
-const selectedSizeElement = required<HTMLElement>("#selected-widget-size");
+const selectedDescriptionElement = required<HTMLElement>(
+  "#selected-widget-description",
+);
+const variantsElement = required<HTMLElement>("#widget-variants");
+const optionsElement = required<HTMLElement>("#widget-options");
+const backToWidgetsButton = required<HTMLButtonElement>("#back-to-widgets");
 const addPositionElement = required<HTMLElement>("#add-position");
 const confirmAddButton = required<HTMLButtonElement>("#confirm-add");
 const confirmRemoveButton = required<HTMLButtonElement>("#confirm-remove");
@@ -84,7 +95,11 @@ const pendingUpdates = new Map<string, unknown>();
 let editing = false;
 let dashboardLayout: DashboardLayout = { columns: 1 };
 let selectedSlot: { column: number; row: number } | null = null;
-let selectedWidget: { widgetId: string; variantId: string } | null = null;
+let selectedWidget: {
+  widgetId: string;
+  variantId: string;
+  options: Record<string, boolean | number | string>;
+} | null = null;
 let removeInstanceId: string | null = null;
 let drag: DragState | null = null;
 let connection: DashboardConnection;
@@ -104,6 +119,7 @@ type DragState = {
 editButton.addEventListener("click", () => setEditing(true));
 doneButton.addEventListener("click", () => setEditing(false));
 confirmAddButton.addEventListener("click", () => void createSelectedWidget());
+backToWidgetsButton.addEventListener("click", showWidgetCatalog);
 confirmRemoveButton.addEventListener(
   "click",
   () => void removeSelectedWidget(),
@@ -206,6 +222,7 @@ async function mountWidget(instance: Instance): Promise<void> {
       widgetId: instance.widget_id,
       variantId: instance.variant_id,
       instanceId: instance.id,
+      options: instance.options,
       send: (payload) => connection.sendWidget(instance.id, payload),
     });
     if (!resources.has(instance.id)) {
@@ -535,32 +552,137 @@ function openAddDialog(column: number, row: number): void {
   selectedWidget = null;
   addPositionElement.textContent = `Position: Column ${column + 1}, Row ${row + 1}`;
   selectionElement.hidden = true;
+  catalogElement.hidden = false;
   confirmAddButton.disabled = true;
   catalogElement.replaceChildren();
   for (const descriptor of [...descriptors.values()].sort((a, b) =>
     a.name.localeCompare(b.name),
   )) {
-    for (const variant of descriptor.variants) {
-      const choice = document.createElement("button");
-      choice.className = "widget-choice";
-      choice.type = "button";
-      choice.dataset.widgetId = descriptor.id;
-      choice.dataset.variantId = variant.id;
-      choice.innerHTML = `<strong>${descriptor.name} - ${variant.name}</strong><span>${variant.width}x${variant.height} - ${descriptor.description}</span>`;
-      choice.addEventListener("click", () => {
-        selectedWidget = { widgetId: descriptor.id, variantId: variant.id };
-        for (const item of catalogElement.children)
-          item.classList.remove("selected");
-        choice.classList.add("selected");
-        selectedNameElement.textContent = `${descriptor.name} - ${variant.name}`;
-        selectedSizeElement.textContent = `${variant.width}x${variant.height}`;
-        selectionElement.hidden = false;
-        confirmAddButton.disabled = false;
-      });
-      catalogElement.append(choice);
-    }
+    const choice = document.createElement("button");
+    choice.className = "widget-choice";
+    choice.type = "button";
+    choice.dataset.widgetId = descriptor.id;
+    choice.innerHTML = `<strong>${descriptor.name}</strong><span>${descriptor.description}</span>`;
+    choice.addEventListener("click", () => selectWidget(descriptor, choice));
+    catalogElement.append(choice);
   }
   addDialog.showModal();
+}
+
+function selectWidget(
+  descriptor: WidgetDescriptor,
+  choice: HTMLButtonElement,
+): void {
+  for (const item of catalogElement.children) item.classList.remove("selected");
+  choice.classList.add("selected");
+  selectedNameElement.textContent = descriptor.name;
+  selectedDescriptionElement.textContent = descriptor.description;
+  selectionElement.hidden = false;
+  if (window.matchMedia("(max-width: 680px)").matches)
+    catalogElement.hidden = true;
+  renderVariants(descriptor, descriptor.variants[0]);
+  selectionElement.focus();
+}
+
+function renderVariants(
+  descriptor: WidgetDescriptor,
+  selectedVariant: WidgetVariant,
+): void {
+  selectedWidget = {
+    widgetId: descriptor.id,
+    variantId: selectedVariant.id,
+    options: {},
+  };
+  variantsElement.replaceChildren();
+  for (const variant of descriptor.variants) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "variant-choice";
+    button.classList.toggle("selected", variant.id === selectedVariant.id);
+    button.innerHTML = `<strong>${variant.name}</strong><span>${variant.width}x${variant.height}</span>`;
+    button.addEventListener("click", () => renderVariants(descriptor, variant));
+    variantsElement.append(button);
+  }
+  renderOptions(descriptor.options, selectedVariant.id);
+  confirmAddButton.disabled = false;
+}
+
+function renderOptions(options: WidgetOption[], variantId: string): void {
+  optionsElement.replaceChildren();
+  const applicable = options.filter(
+    (option) =>
+      option.variants.length === 0 || option.variants.includes(variantId),
+  );
+  if (applicable.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "no-options";
+    empty.textContent = "No options for this variant";
+    optionsElement.append(empty);
+    return;
+  }
+  for (const option of applicable) {
+    const label = document.createElement("label");
+    label.className = `widget-option ${option.type}`;
+    const control = optionControl(option);
+    control.setAttribute("aria-describedby", `option-${option.id}-description`);
+    control.addEventListener("input", () => {
+      if (!selectedWidget) return;
+      selectedWidget.options[option.id] = optionValue(option, control);
+    });
+    if (selectedWidget)
+      selectedWidget.options[option.id] = optionValue(option, control);
+    const text = document.createElement("span");
+    text.innerHTML = `<strong>${option.name}</strong><small id="option-${option.id}-description">${option.description}</small>`;
+    label.append(control, text);
+    optionsElement.append(label);
+  }
+}
+
+function optionControl(
+  option: WidgetOption,
+): HTMLInputElement | HTMLSelectElement {
+  if (option.type === "select") {
+    const select = document.createElement("select");
+    for (const choice of option.choices) {
+      const item = document.createElement("option");
+      item.value = choice.value;
+      item.textContent = choice.name;
+      item.selected = choice.value === option.default;
+      select.append(item);
+    }
+    return select;
+  }
+  const input = document.createElement("input");
+  if (option.type === "boolean") {
+    input.type = "checkbox";
+    input.checked = option.default === true;
+  } else {
+    input.type = "number";
+    input.value = String(option.default);
+    input.min = String(option.minimum);
+    input.max = String(option.maximum);
+    input.step = String(option.step);
+  }
+  return input;
+}
+
+function optionValue(
+  option: WidgetOption,
+  control: HTMLInputElement | HTMLSelectElement,
+): boolean | number | string {
+  if (option.type === "boolean") return (control as HTMLInputElement).checked;
+  if (option.type === "integer") return Number(control.value);
+  return control.value;
+}
+
+function showWidgetCatalog(): void {
+  selectionElement.hidden = true;
+  catalogElement.hidden = false;
+  const selected = selectedWidget?.widgetId;
+  catalogElement
+    .querySelector<HTMLButtonElement>(`[data-widget-id="${selected}"]`)
+    ?.focus();
+  confirmAddButton.disabled = true;
 }
 
 async function createSelectedWidget(): Promise<void> {
@@ -575,6 +697,7 @@ async function createSelectedWidget(): Promise<void> {
         widget_id: selectedWidget.widgetId,
         variant_id: selectedWidget.variantId,
         position: selectedSlot,
+        options: selectedWidget.options,
       }),
     });
     addDialog.close();

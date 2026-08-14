@@ -1,6 +1,6 @@
 //! Dashboard HTTP resources, SSE stream, and OpenAPI documentation.
 
-use std::{convert::Infallible, time::Duration};
+use std::{collections::BTreeMap, convert::Infallible, time::Duration};
 
 use axum::{
     Json, Router,
@@ -50,6 +50,8 @@ pub struct CreateInstance {
     pub widget_id: WidgetId,
     pub variant_id: String,
     pub position: Position,
+    #[serde(default)]
+    pub options: BTreeMap<String, Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -254,6 +256,7 @@ async fn create_instance(
             request.variant_id,
             request.position.column,
             request.position.row,
+            request.options,
         )
         .await?;
     Ok((
@@ -468,6 +471,7 @@ impl From<InstanceError> for ApiError {
         let (status, code) = match error {
             InstanceError::UnknownInstance => (StatusCode::NOT_FOUND, "unknown_instance"),
             InstanceError::UnknownVariant => (StatusCode::NOT_FOUND, "unknown_variant"),
+            InstanceError::InvalidOptions(_) => (StatusCode::BAD_REQUEST, "invalid_options"),
             InstanceError::BackendNotFound => {
                 (StatusCode::INTERNAL_SERVER_ERROR, "backend_not_found")
             }

@@ -10,11 +10,25 @@ export type WidgetVariant = {
   frontend_url: string;
 };
 
+export type WidgetOptionChoice = { value: string; name: string };
+export type WidgetOption = {
+  id: string;
+  name: string;
+  description: string;
+  variants: string[];
+  default: boolean | number | string;
+} & (
+  | { type: "boolean" }
+  | { type: "integer"; minimum: number; maximum: number; step: number }
+  | { type: "select"; choices: WidgetOptionChoice[] }
+);
+
 export type WidgetDescriptor = {
   id: string;
   name: string;
   description: string;
   variants: WidgetVariant[];
+  options: WidgetOption[];
 };
 
 export type InstanceLayout = {
@@ -29,6 +43,7 @@ export type Instance = {
   widget_id: string;
   variant_id: string;
   layout: InstanceLayout;
+  options: Record<string, boolean | number | string>;
 };
 
 export type WidgetList = { widgets: WidgetDescriptor[] };
@@ -99,7 +114,8 @@ export function parseInstance(value: unknown): Instance {
     !isNumber(value.layout.column) ||
     !isNumber(value.layout.row) ||
     !isNumber(value.layout.width) ||
-    !isNumber(value.layout.height)
+    !isNumber(value.layout.height) ||
+    !isOptions(value.options)
   )
     throw new Error("invalid instance");
   return {
@@ -112,6 +128,7 @@ export function parseInstance(value: unknown): Instance {
       width: value.layout.width,
       height: value.layout.height,
     },
+    options: value.options,
   };
 }
 
@@ -175,7 +192,8 @@ function parseWidget(value: unknown): WidgetDescriptor {
     typeof value.id !== "string" ||
     typeof value.name !== "string" ||
     typeof value.description !== "string" ||
-    !Array.isArray(value.variants)
+    !Array.isArray(value.variants) ||
+    !Array.isArray(value.options)
   )
     throw new Error("invalid widget descriptor");
   return {
@@ -183,6 +201,7 @@ function parseWidget(value: unknown): WidgetDescriptor {
     name: value.name,
     description: value.description,
     variants: value.variants.map(parseVariant),
+    options: value.options.map(parseOption),
   };
 }
 
@@ -203,6 +222,74 @@ function parseVariant(value: unknown): WidgetVariant {
     height: value.height,
     frontend_url: value.frontend_url,
   };
+}
+
+function parseOption(value: unknown): WidgetOption {
+  if (
+    !isRecord(value) ||
+    typeof value.id !== "string" ||
+    typeof value.name !== "string" ||
+    typeof value.description !== "string" ||
+    !Array.isArray(value.variants) ||
+    !value.variants.every((variant) => typeof variant === "string")
+  )
+    throw new Error("invalid widget option");
+  const common = {
+    id: value.id,
+    name: value.name,
+    description: value.description,
+    variants: value.variants,
+    default: value.default as boolean | number | string,
+  };
+  if (value.type === "boolean" && typeof value.default === "boolean")
+    return { ...common, default: value.default, type: "boolean" };
+  if (
+    value.type === "integer" &&
+    Number.isInteger(value.default) &&
+    Number.isInteger(value.minimum) &&
+    Number.isInteger(value.maximum) &&
+    Number.isInteger(value.step)
+  )
+    return {
+      ...common,
+      default: value.default as number,
+      type: "integer",
+      minimum: value.minimum as number,
+      maximum: value.maximum as number,
+      step: value.step as number,
+    };
+  if (
+    value.type === "select" &&
+    typeof value.default === "string" &&
+    Array.isArray(value.choices) &&
+    value.choices.every(
+      (choice) =>
+        isRecord(choice) &&
+        typeof choice.value === "string" &&
+        typeof choice.name === "string",
+    )
+  )
+    return {
+      ...common,
+      default: value.default,
+      type: "select",
+      choices: value.choices as WidgetOptionChoice[],
+    };
+  throw new Error("invalid widget option");
+}
+
+function isOptions(
+  value: unknown,
+): value is Record<string, boolean | number | string> {
+  return (
+    isRecord(value) &&
+    Object.values(value).every(
+      (option) =>
+        typeof option === "boolean" ||
+        typeof option === "string" ||
+        (typeof option === "number" && Number.isFinite(option)),
+    )
+  );
 }
 
 function isError(value: unknown): value is ErrorResponse["error"] {

@@ -19,6 +19,12 @@ cargo run -p dashboardd
 into runtime bundles under `.build/widgets`. Development bundles use artifact
 symlinks. Use `--copy --release` to make a standalone packaging bundle.
 
+Widget manifests can declare Boolean, bounded integer, and static select
+options. dashboardd validates submitted values, persists effective values, and
+provides active values to the backend initialization message and frontend
+`WidgetContext.options`. Option values are public instance configuration. Do
+not use them for credentials or other secrets.
+
 Useful commands:
 
 ```bash

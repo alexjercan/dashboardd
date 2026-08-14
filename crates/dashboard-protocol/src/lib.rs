@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
+use std::collections::BTreeMap;
 use thiserror::Error;
 
 pub mod prelude;
@@ -109,6 +110,9 @@ pub enum ServerToWidget {
         instance_id: InstanceId,
         /// Widget manifest identifier.
         widget_id: WidgetId,
+        /// Validated effective options active for the selected variant.
+        #[serde(default)]
+        options: BTreeMap<String, Value>,
     },
     /// Sends widget-specific data to the backend process.
     Message {
@@ -188,7 +192,7 @@ mod tests {
     #[test]
     fn parse_returns_message_data_and_validates_version() {
         let parsed = parse::<ServerToWidget>(
-            r#"{"version":1,"kind":"initialize","data":{"instance_id":"cpu-1","widget_id":"cpu"}}"#,
+            r#"{"version":1,"kind":"initialize","data":{"instance_id":"cpu-1","widget_id":"cpu","options":{"history_points":40}}}"#,
         )
         .unwrap();
 
@@ -196,7 +200,8 @@ mod tests {
             parsed,
             ServerToWidget::Initialize {
                 instance_id: "cpu-1".into(),
-                widget_id: "cpu".into()
+                widget_id: "cpu".into(),
+                options: BTreeMap::from([("history_points".into(), json!(40))]),
             }
         );
         assert_eq!(

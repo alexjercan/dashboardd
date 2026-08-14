@@ -1,6 +1,7 @@
 //! Durable dashboard composition storage.
 
 use std::{
+    collections::BTreeMap,
     fs::{self, File, OpenOptions},
     io::{self, Write},
     path::{Path, PathBuf},
@@ -9,6 +10,7 @@ use std::{
 
 use dashboard_protocol::{InstanceId, WidgetId};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 const SCHEMA_VERSION: u32 = 1;
 
@@ -24,6 +26,8 @@ pub struct PersistedInstance {
     pub widget_id: WidgetId,
     pub variant_id: String,
     pub position: Position,
+    #[serde(default)]
+    pub options: BTreeMap<String, Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -154,6 +158,7 @@ mod tests {
             widget_id: "cpu".into(),
             variant_id: "full".into(),
             position: Position { column: 3, row: 2 },
+            options: BTreeMap::from([("enabled".into(), Value::Bool(true))]),
         }]);
 
         store.save(&state).unwrap();

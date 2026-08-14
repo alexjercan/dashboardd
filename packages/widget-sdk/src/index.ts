@@ -1,7 +1,11 @@
+export type WidgetOptionValue = boolean | number | string;
+export type WidgetOptions = Readonly<Record<string, WidgetOptionValue>>;
+
 export interface WidgetContext {
   widgetId: string;
   variantId: string;
   instanceId: string;
+  options: WidgetOptions;
   send(payload: unknown): Promise<void>;
 }
 

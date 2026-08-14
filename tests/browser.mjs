@@ -69,6 +69,24 @@ try {
   const catalogResponse = await page.request.get(`${baseUrl}/api/v1/widgets`);
   const catalog = (await catalogResponse.json()).widgets;
   assert.deepEqual(
+    Object.fromEntries(catalog.map((widget) => [widget.id, widget.name])),
+    {
+      "claude-usage": "Claude Usage",
+      "codex-usage": "Codex Usage",
+      cpu: "CPU",
+      memory: "RAM",
+    },
+  );
+  assert.deepEqual(
+    catalog
+      .find((widget) => widget.id === "cpu")
+      .options.map((option) => [option.id, option.type, option.default]),
+    [
+      ["show_core_temperatures", "boolean", true],
+      ["history_points", "integer", 40],
+    ],
+  );
+  assert.deepEqual(
     Object.fromEntries(
       catalog.map((widget) => [
         widget.id,
@@ -116,7 +134,7 @@ try {
     "duplicate widget definitions create independent instances",
   );
 
-  const memory = await addWidget(page, "2", "0", "Memory", "Compact");
+  const memory = await addWidget(page, "2", "0", "RAM", "Compact");
   const memoryWidget = page.locator(`[data-instance-id="${memory}"]`);
   await waitForTelemetry(memoryWidget);
   await memoryWidget.locator(".bar .fill").waitFor();
@@ -168,7 +186,7 @@ try {
     "confirmed removal synchronizes across pages",
   );
 
-  const memoryTwo = await addWidget(page, "1", "0", "Memory", "Compact");
+  const memoryTwo = await addWidget(page, "1", "0", "RAM", "Compact");
   await secondPage.locator(`[data-instance-id="${memoryTwo}"]`).waitFor();
   assert.equal(
     await instanceCount(page, baseUrl),
@@ -195,7 +213,7 @@ try {
     .waitFor();
   await cpuFrame.press("ArrowRight");
   await page
-    .locator('#dashboard-announcement:text-is("CPU swapped with Memory")')
+    .locator('#dashboard-announcement:text-is("CPU swapped with RAM")')
     .waitFor();
   await secondPage
     .locator(`[data-instance-id="${cpuOne}"][data-column="1"]`)
@@ -206,7 +224,7 @@ try {
 
   await dragToWidget(page, memoryTwo, memory);
   await page
-    .locator('#dashboard-announcement:text-is("Memory swapped with Memory")')
+    .locator('#dashboard-announcement:text-is("RAM swapped with RAM")')
     .waitFor();
   await secondPage
     .locator(`[data-instance-id="${memoryTwo}"][data-column="2"][data-row="0"]`)
@@ -234,13 +252,32 @@ try {
     "server rejects occupied atomic creation",
   );
 
-  const fullResponse = await page.request.post(`${baseUrl}/api/v1/instances`, {
-    data: {
-      widget_id: "cpu",
-      variant_id: "full",
-      position: { column: 3, row: 0 },
+  const invalidOptions = await page.request.post(
+    `${baseUrl}/api/v1/instances`,
+    {
+      data: {
+        widget_id: "cpu",
+        variant_id: "compact",
+        position: { column: 8, row: 0 },
+        options: { history_points: 40 },
+      },
     },
-  });
+  );
+  assert.equal(invalidOptions.status(), 400);
+
+  await page.locator('.dashboard-slot[data-column="3"][data-row="0"]').click();
+  assert.equal(await page.locator(".widget-choice").count(), 4);
+  await page.locator(".widget-choice", { hasText: "CPU" }).click();
+  await page.locator(".variant-choice", { hasText: "Full" }).click();
+  await page.locator('.widget-option input[type="number"]').fill("20");
+  await page.locator('.widget-option input[type="checkbox"]').uncheck();
+  const fullResponsePromise = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/v1/instances") &&
+      response.request().method() === "POST",
+  );
+  await page.locator("#confirm-add").click();
+  const fullResponse = await fullResponsePromise;
   assert.equal(fullResponse.status(), 201);
   const fullInstance = await fullResponse.json();
   const fullFrame = page.locator(`[data-instance-id="${fullInstance.id}"]`);
@@ -255,9 +292,18 @@ try {
     width: 3,
     height: 3,
   });
-  await page.request.delete(`${baseUrl}/api/v1/instances/${fullInstance.id}`);
-  await fullFrame.waitFor({ state: "detached" });
-
+  assert.deepEqual(fullInstance.options, {
+    history_points: 20,
+    show_core_temperatures: false,
+  });
+  assert.equal(
+    await fullFrame.locator(".eyebrow").textContent(),
+    "20 second history",
+  );
+  assert.equal(
+    await fullFrame.locator(".core-temperature").first().isHidden(),
+    true,
+  );
   await page.screenshot({
     path: path.join(artifacts, "dashboard-edit-wide.png"),
     fullPage: true,
@@ -279,6 +325,19 @@ try {
     ),
     true,
   );
+  await page.locator(".dashboard-slot").first().click();
+  await page.locator(".widget-choice", { hasText: "CPU" }).click();
+  assert.equal(await page.locator("#widget-catalog").isHidden(), true);
+  assert.equal(await page.locator("#back-to-widgets").isVisible(), true);
+  await page.locator("#back-to-widgets").click();
+  assert.equal(await page.locator("#widget-catalog").isVisible(), true);
+  assert.equal(
+    await page
+      .locator('.widget-choice[data-widget-id="cpu"]')
+      .evaluate((element) => element === document.activeElement),
+    true,
+  );
+  await page.locator('#add-widget .button[value="cancel"]').click();
   await page.screenshot({
     path: path.join(artifacts, "dashboard-edit-narrow.png"),
     fullPage: true,
@@ -294,7 +353,7 @@ try {
     .waitFor();
   assert.equal(
     await instanceCount(page, baseUrl),
-    3,
+    4,
     "reconnect retains composition",
   );
 
@@ -329,9 +388,16 @@ try {
   await page.locator(`[data-instance-id="${cpuOne}"]`).waitFor();
   assert.equal(
     await instanceCount(page, baseUrl),
-    3,
+    4,
     "restart restores persisted composition with stable IDs",
   );
+  const restoredFull = await page.request.get(
+    `${baseUrl}/api/v1/instances/${fullInstance.id}`,
+  );
+  assert.deepEqual((await restoredFull.json()).options, {
+    history_points: 20,
+    show_core_temperatures: false,
+  });
   await waitForTelemetry(page.locator(`[data-instance-id="${cpuOne}"]`));
   await requestGracefulStop(dashboardd);
   console.log("browser integration scenarios passed");
@@ -356,16 +422,18 @@ try {
 
 async function exerciseUsageCommands(page, widgetId) {
   return page.evaluate(async (id) => {
+    const variant = id === "claude-usage" ? "full" : "compact";
     const module = await import(
-      `/widgets/${id}/variants/compact/frontend.js?command-test`
+      `/widgets/${id}/variants/${variant}/frontend.js?command-test`
     );
     const container = document.createElement("div");
     document.body.append(container);
     const commands = [];
     const frontend = module.mount(container, {
       widgetId: id,
-      variantId: "compact",
+      variantId: variant,
       instanceId: `${id}-command-test`,
+      options: { display_mode: "usage" },
       async send(payload) {
         commands.push(payload);
       },
@@ -378,10 +446,12 @@ async function exerciseUsageCommands(page, widgetId) {
       stale: false,
       important: {
         label: "Weekly",
-        remaining_percent: 50,
+        remaining_percent: 30,
         resets_at: Math.floor(Date.now() / 1000) + 3600,
       },
     });
+    if (!container.shadowRoot.textContent.includes("70% used"))
+      throw new Error("Usage display option was not applied");
     container.shadowRoot.querySelector(".refresh").click();
     await new Promise((resolve) => setTimeout(resolve));
     if (!container.shadowRoot.querySelector(".refresh").disabled)
@@ -398,6 +468,7 @@ async function exerciseUsageCommands(page, widgetId) {
       widgetId: id,
       variantId: "minimal",
       instanceId: `${id}-minimal-command-test`,
+      options: {},
       async send() {},
     });
     minimalFrontend.update({
@@ -500,14 +571,11 @@ async function addWidget(page, column, row, name, variant) {
     await page.locator("#add-position").textContent(),
     /Position: Column \d, Row \d/,
   );
-  await page
-    .locator(
-      `.widget-choice[data-widget-id="${name.toLowerCase()}"][data-variant-id="${variant.toLowerCase()}"]`,
-    )
-    .click();
+  await page.locator(".widget-choice", { hasText: name }).click();
   assert.equal(await page.locator("#widget-selection").isVisible(), true);
+  await page.locator(".variant-choice", { hasText: variant }).click();
   assert.match(
-    await page.locator("#widget-selection").textContent(),
+    await page.locator("#widget-options").textContent(),
     /No options/,
   );
   const responsePromise = page.waitForResponse(

@@ -1,7 +1,7 @@
 //! Running widget instances and backend process lifecycle.
 
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     process::Stdio,
     sync::{
         Arc,
@@ -63,6 +63,7 @@ pub struct Instance {
     pub widget_id: WidgetId,
     pub variant_id: String,
     pub layout: InstanceLayout,
+    pub options: BTreeMap<String, Value>,
 }
 
 #[derive(Clone)]
@@ -103,6 +104,8 @@ pub enum InstanceError {
     InvalidLayout,
     #[error("layout overlaps another widget instance")]
     LayoutOccupied,
+    #[error("widget options are invalid: {0}")]
+    InvalidOptions(String),
     #[error("could not save dashboard composition")]
     PersistenceFailed,
     #[error("{0}")]
@@ -131,6 +134,7 @@ impl InstanceManager {
         let saved = store.load().map_err(|error| {
             InstanceError::InvalidState(format!("could not read state: {error}"))
         })?;
+        let had_saved_state = saved.is_some();
         let (events, _) = broadcast::channel(256);
         let mut restored = Vec::new();
         let mut next_id = 1;
@@ -156,6 +160,14 @@ impl InstanceManager {
                         persisted.id, persisted.variant_id
                     ))
                 })?;
+                let options = config
+                    .normalize_options(&persisted.variant_id, &persisted.options)
+                    .map_err(|error| {
+                        InstanceError::InvalidState(format!(
+                            "instance {:?} has invalid options: {error}",
+                            persisted.id
+                        ))
+                    })?;
                 let instance_layout = InstanceLayout {
                     column: persisted.position.column,
                     row: persisted.position.row,
@@ -176,15 +188,33 @@ impl InstanceManager {
                         widget_id: persisted.widget_id,
                         variant_id: persisted.variant_id,
                         layout: instance_layout,
+                        options,
                     },
                     config,
                 ));
             }
         }
+        if had_saved_state {
+            let mut normalized = restored
+                .iter()
+                .map(|(resource, _)| PersistedInstance::from(resource))
+                .collect::<Vec<_>>();
+            normalized.sort_by(|left, right| left.id.cmp(&right.id));
+            store
+                .save(&DashboardStateFile::new(normalized))
+                .map_err(|error| {
+                    InstanceError::InvalidState(format!("could not migrate state: {error}"))
+                })?;
+        }
         let instances = restored
             .into_iter()
             .map(|(resource, config)| {
-                let backend = WidgetBackend::start(config, resource.id.clone(), events.clone());
+                let backend = WidgetBackend::start(
+                    config,
+                    resource.id.clone(),
+                    resource.options.clone(),
+                    events.clone(),
+                );
                 (resource.id.clone(), ManagedInstance { resource, backend })
             })
             .collect();
@@ -233,6 +263,7 @@ impl InstanceManager {
         variant_id: String,
         column: u32,
         row: u32,
+        supplied_options: BTreeMap<String, Value>,
     ) -> Result<Instance, InstanceError> {
         if !config.backend.is_file() {
             tracing::warn!(
@@ -247,6 +278,9 @@ impl InstanceManager {
         let variant = config
             .variant(&variant_id)
             .ok_or(InstanceError::UnknownVariant)?;
+        let options = config
+            .normalize_options(&variant_id, &supplied_options)
+            .map_err(InstanceError::InvalidOptions)?;
         let layout = InstanceLayout {
             column,
             row,
@@ -266,6 +300,7 @@ impl InstanceManager {
             widget_id: widget_id.clone(),
             variant_id,
             layout,
+            options,
         };
         self.persist(
             instances
@@ -278,7 +313,12 @@ impl InstanceManager {
             widget_id = %resource.widget_id,
             "creating widget instance"
         );
-        let backend = WidgetBackend::start(config, resource.id.clone(), self.inner.events.clone());
+        let backend = WidgetBackend::start(
+            config,
+            resource.id.clone(),
+            resource.options.clone(),
+            self.inner.events.clone(),
+        );
         instances.insert(
             resource.id.clone(),
             ManagedInstance {
@@ -501,6 +541,7 @@ impl From<&Instance> for PersistedInstance {
                 column: instance.layout.column,
                 row: instance.layout.row,
             },
+            options: instance.options.clone(),
         }
     }
 }
@@ -549,12 +590,14 @@ impl WidgetBackend {
     fn start(
         config: Arc<WidgetConfig>,
         instance_id: InstanceId,
+        options: BTreeMap<String, Value>,
         events: broadcast::Sender<DashboardEvent>,
     ) -> Self {
         let (commands_tx, commands_rx) = mpsc::unbounded_channel();
         let task_instance_id = instance_id.clone();
         let task = tokio::spawn(async move {
-            if let Err(error) = run_backend(&config, &task_instance_id, &events, commands_rx).await
+            if let Err(error) =
+                run_backend(&config, &task_instance_id, options, &events, commands_rx).await
             {
                 tracing::error!(
                     %error,
@@ -621,6 +664,7 @@ impl Drop for WidgetBackend {
 async fn run_backend(
     config: &WidgetConfig,
     instance_id: &str,
+    options: BTreeMap<String, Value>,
     events: &broadcast::Sender<DashboardEvent>,
     mut commands: mpsc::UnboundedReceiver<ServerToWidget>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -655,6 +699,7 @@ async fn run_backend(
         ServerToWidget::Initialize {
             instance_id: instance_id.into(),
             widget_id: config.descriptor.id.clone(),
+            options,
         },
     )
     .await?;

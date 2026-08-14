@@ -1,6 +1,6 @@
 schema_version = 1
 id = "memory"
-name = "Memory"
+name = "RAM"
 description = "RAM and swap usage"
 
 [backend]
@@ -20,3 +20,12 @@ id = "compact"
 name = "Compact"
 size = [1, 1]
 entry = "src/compact.ts"
+
+[[options]]
+id = "show_swap"
+name = "Show swap"
+description = "Show swap usage in the detailed view"
+variants = ["full"]
+default = true
+
+[options.boolean]

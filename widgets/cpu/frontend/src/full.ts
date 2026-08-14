@@ -2,7 +2,7 @@ import type { WidgetContext, WidgetFrontend } from "@scufris/widget-sdk";
 import widgetReset from "@scufris/widget-sdk/widget.css";
 import styles from "./styles.css";
 
-const HISTORY_LENGTH = 60;
+const DEFAULT_HISTORY_LENGTH = 40;
 const GRAPH_WIDTH = 600;
 const GRAPH_TOP = 5;
 const GRAPH_BOTTOM = 75;
@@ -25,11 +25,16 @@ export function mount(
   container: HTMLElement,
   context: WidgetContext,
 ): WidgetFrontend {
+  const historyLength = integerOption(
+    context.options.history_points,
+    DEFAULT_HISTORY_LENGTH,
+  );
+  const showCoreTemperatures = context.options.show_core_temperatures !== false;
   const shadow = container.attachShadow({ mode: "open" });
   shadow.innerHTML = `
     <style>${widgetReset}\n${styles}</style>
     <header>
-      <div class="title"><h2>CPU</h2><span class="eyebrow">60 second history</span></div>
+      <div class="title"><h2>CPU</h2><span class="eyebrow">${historyLength} second history</span></div>
       <div class="headline">
         <span class="usage">--.-%</span>
         <span class="temperature">-- C</span>
@@ -77,7 +82,7 @@ export function mount(
       }
 
       history.push(snapshot.usagePercent);
-      if (history.length > HISTORY_LENGTH) history.shift();
+      if (history.length > historyLength) history.shift();
 
       usageElement.textContent = `${snapshot.usagePercent.toFixed(1)}%`;
       temperatureElement.textContent = formatTemperature(
@@ -90,8 +95,8 @@ export function mount(
       required<HTMLElement>(shadow, '[data-load="fifteen"]').textContent =
         snapshot.load.fifteen.toFixed(2);
 
-      renderGraph(history, lineElement, areaElement);
-      renderCores(snapshot.cores, coresElement);
+      renderGraph(history, historyLength, lineElement, areaElement);
+      renderCores(snapshot.cores, coresElement, showCoreTemperatures);
     },
     destroy(): void {
       shadow.replaceChildren();
@@ -101,12 +106,13 @@ export function mount(
 
 function renderGraph(
   history: number[],
+  historyLength: number,
   lineElement: SVGPathElement,
   areaElement: SVGPathElement,
 ): void {
   const points = history.map((value, index) => {
-    const offset = HISTORY_LENGTH - history.length + index;
-    const x = (offset / (HISTORY_LENGTH - 1)) * GRAPH_WIDTH;
+    const offset = historyLength - history.length + index;
+    const x = (offset / (historyLength - 1)) * GRAPH_WIDTH;
     const y = GRAPH_BOTTOM - (value / 100) * (GRAPH_BOTTOM - GRAPH_TOP);
     return [x, y] as const;
   });
@@ -128,7 +134,11 @@ function renderGraph(
   );
 }
 
-function renderCores(cores: CoreSnapshot[], container: HTMLElement): void {
+function renderCores(
+  cores: CoreSnapshot[],
+  container: HTMLElement,
+  showTemperatures: boolean,
+): void {
   container.replaceChildren();
   container.style.setProperty(
     "--core-columns",
@@ -149,8 +159,9 @@ function renderCores(cores: CoreSnapshot[], container: HTMLElement): void {
       "--usage",
       `${core.usagePercent}%`,
     );
-    required<HTMLElement>(element, ".core-temperature").textContent =
-      formatTemperature(core.temperature);
+    const coreTemperature = required<HTMLElement>(element, ".core-temperature");
+    coreTemperature.textContent = formatTemperature(core.temperature);
+    coreTemperature.hidden = !showTemperatures;
     container.append(element);
   }
 }
@@ -221,6 +232,12 @@ function optionalNumber(value: unknown): number | null {
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
+}
+
+function integerOption(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isInteger(value)
+    ? value
+    : fallback;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

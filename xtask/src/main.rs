@@ -17,6 +17,8 @@ struct SourceManifest {
     description: String,
     backend: BackendSource,
     frontend: FrontendSource,
+    #[serde(default)]
+    options: Vec<OptionSource>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -38,6 +40,54 @@ struct VariantSource {
     entry: PathBuf,
 }
 
+#[derive(Debug, Deserialize)]
+struct OptionSource {
+    id: String,
+    name: String,
+    description: String,
+    #[serde(default)]
+    variants: Vec<String>,
+    default: serde_json::Value,
+    #[serde(flatten)]
+    kind: OptionKindSource,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum OptionKindSource {
+    Boolean {
+        #[serde(rename = "boolean")]
+        _boolean: EmptyTable,
+    },
+    Integer {
+        integer: IntegerOptionSource,
+    },
+    Select {
+        select: SelectOptionSource,
+    },
+}
+
+#[derive(Debug, Deserialize)]
+struct EmptyTable {}
+
+#[derive(Debug, Deserialize)]
+struct IntegerOptionSource {
+    minimum: i64,
+    maximum: i64,
+    step: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct SelectOptionSource {
+    choices: Vec<OptionChoiceSource>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct OptionChoiceSource {
+    value: String,
+    name: String,
+}
+
 #[derive(Serialize)]
 struct RuntimeManifest<'a> {
     schema_version: u32,
@@ -46,6 +96,7 @@ struct RuntimeManifest<'a> {
     description: &'a str,
     backend: String,
     variants: Vec<RuntimeVariant<'a>>,
+    options: Vec<RuntimeOption<'a>>,
 }
 
 #[derive(Serialize)]
@@ -55,6 +106,31 @@ struct RuntimeVariant<'a> {
     width: u32,
     height: u32,
     frontend: String,
+}
+
+#[derive(Serialize)]
+struct RuntimeOption<'a> {
+    id: &'a str,
+    name: &'a str,
+    description: &'a str,
+    variants: &'a [String],
+    default: &'a serde_json::Value,
+    #[serde(flatten)]
+    kind: RuntimeOptionKind<'a>,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum RuntimeOptionKind<'a> {
+    Boolean,
+    Integer {
+        minimum: i64,
+        maximum: i64,
+        step: u64,
+    },
+    Select {
+        choices: &'a [OptionChoiceSource],
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -157,6 +233,28 @@ fn prepare(
         });
     }
 
+    let options = manifest
+        .options
+        .iter()
+        .map(|option| RuntimeOption {
+            id: &option.id,
+            name: &option.name,
+            description: &option.description,
+            variants: &option.variants,
+            default: &option.default,
+            kind: match &option.kind {
+                OptionKindSource::Boolean { .. } => RuntimeOptionKind::Boolean,
+                OptionKindSource::Integer { integer } => RuntimeOptionKind::Integer {
+                    minimum: integer.minimum,
+                    maximum: integer.maximum,
+                    step: integer.step,
+                },
+                OptionKindSource::Select { select } => RuntimeOptionKind::Select {
+                    choices: &select.choices,
+                },
+            },
+        })
+        .collect();
     let runtime = RuntimeManifest {
         schema_version: 2,
         id: &manifest.id,
@@ -164,6 +262,7 @@ fn prepare(
         description: &manifest.description,
         backend: format!("bin/{}", manifest.id),
         variants,
+        options,
     };
     fs::write(
         output.join("widget.json"),
@@ -229,6 +328,64 @@ fn validate_manifest(
             "frontend entry does not exist",
         )?;
     }
+    let mut option_ids = HashSet::new();
+    for option in &manifest.options {
+        if !valid_option_id(&option.id)
+            || !option_ids.insert(&option.id)
+            || option.name.trim().is_empty()
+            || option.description.trim().is_empty()
+            || option
+                .variants
+                .iter()
+                .any(|variant| !variant_ids.contains(variant))
+        {
+            return Err(
+                "options require unique valid IDs, names, descriptions, and known variants".into(),
+            );
+        }
+        match &option.kind {
+            OptionKindSource::Boolean { .. } if !option.default.is_boolean() => {
+                return Err(format!("option {} requires a Boolean default", option.id).into());
+            }
+            OptionKindSource::Integer { integer } => {
+                let Some(default) = option.default.as_i64() else {
+                    return Err(format!("option {} requires an integer default", option.id).into());
+                };
+                if integer.minimum > integer.maximum
+                    || integer.step == 0
+                    || default < integer.minimum
+                    || default > integer.maximum
+                    || !((i128::from(default) - i128::from(integer.minimum)) as u128)
+                        .is_multiple_of(u128::from(integer.step))
+                {
+                    return Err(format!(
+                        "option {} has invalid integer constraints or default",
+                        option.id
+                    )
+                    .into());
+                }
+            }
+            OptionKindSource::Select { select } => {
+                let Some(default) = option.default.as_str() else {
+                    return Err(format!("option {} requires a string default", option.id).into());
+                };
+                let mut values = HashSet::new();
+                if select.choices.is_empty()
+                    || select.choices.iter().any(|choice| {
+                        choice.value.is_empty()
+                            || choice.name.trim().is_empty()
+                            || !values.insert(choice.value.as_str())
+                    })
+                    || !values.contains(default)
+                {
+                    return Err(
+                        format!("option {} has invalid choices or default", option.id).into(),
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
 
     let package_source = fs::read_to_string(widget_directory.join("frontend/package.json"))?;
     let package: serde_json::Value = serde_json::from_str(&package_source)?;
@@ -263,6 +420,15 @@ fn valid_name(value: &str) -> bool {
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
         && !value.starts_with('-')
         && !value.ends_with('-')
+}
+
+fn valid_option_id(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
+        && !value.starts_with('_')
+        && !value.ends_with('_')
 }
 
 fn run(root: &Path, command: &mut Command) -> Result<(), Box<dyn Error>> {

@@ -16,7 +16,7 @@ export function mount(
   shadow.innerHTML = `
     <style>${widgetReset}\n${styles}</style>
     <article>
-      <h2>Memory</h2>
+      <h2>RAM</h2>
       <strong class="usage">--.-%</strong>
       <div class="bar"><div class="fill"></div></div>
       <span class="amount">-- / --</span>
@@ -24,7 +24,7 @@ export function mount(
   `;
   shadow.host.setAttribute(
     "aria-label",
-    `Compact Memory telemetry for ${context.instanceId}`,
+    `Compact RAM telemetry for ${context.instanceId}`,
   );
 
   return {

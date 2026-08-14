@@ -25,6 +25,8 @@ export function mountUsage(
   variant: Variant,
 ): WidgetFrontend {
   const shadow = container.attachShadow({ mode: "open" });
+  const displayMode =
+    context.options.display_mode === "usage" ? "usage" : "remaining";
   let snapshot: Snapshot | null = null;
   let refreshing = false;
   shadow.innerHTML = `<style>${widgetReset}\n${styles}</style><article class="${variant}"><div class="state">Waiting for usage...</div></article>`;
@@ -40,6 +42,7 @@ export function mountUsage(
           shadow,
           snapshot,
           variant,
+          displayMode,
           refreshing,
           () => void requestRefresh(true),
         );
@@ -53,6 +56,7 @@ export function mountUsage(
           shadow,
           snapshot,
           variant,
+          displayMode,
           refreshing,
           () => void requestRefresh(true),
         );
@@ -65,6 +69,7 @@ export function mountUsage(
         shadow,
         snapshot,
         variant,
+        displayMode,
         refreshing,
         () => void requestRefresh(true),
       ),
@@ -79,6 +84,7 @@ export function mountUsage(
         shadow,
         snapshot,
         variant,
+        displayMode,
         refreshing,
         () => void requestRefresh(true),
       );
@@ -94,6 +100,7 @@ function render(
   shadow: ShadowRoot,
   snapshot: Snapshot,
   variant: Variant,
+  displayMode: "usage" | "remaining",
   refreshing: boolean,
   onRefresh: () => void,
 ): void {
@@ -117,9 +124,9 @@ function render(
   }
   const secondary =
     variant === "full" && snapshot.all_models
-      ? limitMarkup(snapshot.all_models, false, false)
+      ? limitMarkup(snapshot.all_models, false, false, displayMode)
       : "";
-  article.innerHTML = `<header><h2>Claude Usage</h2><span class="meta">${titleCase(snapshot.subscription_type)}</span>${refreshButton(refreshing)}<span class="updated">Updated ${relative(snapshot.updated_at, variant === "compact")}${snapshot.stale ? " - Stale" : ""}</span></header><div class="limits">${limitMarkup(important, true, variant === "compact")}${secondary}</div>`;
+  article.innerHTML = `<header><h2>Claude Usage</h2><span class="meta">${titleCase(snapshot.subscription_type)}</span>${refreshButton(refreshing)}<span class="updated">Updated ${relative(snapshot.updated_at, variant === "compact")}${snapshot.stale ? " - Stale" : ""}</span></header><div class="limits">${limitMarkup(important, true, variant === "compact", displayMode)}${secondary}</div>`;
   bindRefresh(article, onRefresh);
 }
 
@@ -133,8 +140,17 @@ function bindRefresh(article: HTMLElement, onRefresh: () => void): void {
     ?.addEventListener("click", onRefresh);
 }
 
-function limitMarkup(limit: Limit, primary: boolean, short: boolean): string {
-  return `<section class="limit ${primary ? "primary" : ""}" data-severity="${severity(limit.remaining_percent)}"><div class="line"><strong>${escapeHtml(limit.label)}</strong><span>${limit.remaining_percent}% remaining</span></div><div class="bar"><div class="fill" style="--remaining:${limit.remaining_percent}%"></div></div><span class="reset">${resetLabel(limit.resets_at, short)}</span></section>`;
+function limitMarkup(
+  limit: Limit,
+  primary: boolean,
+  short: boolean,
+  displayMode: "usage" | "remaining",
+): string {
+  const percent =
+    displayMode === "usage"
+      ? 100 - limit.remaining_percent
+      : limit.remaining_percent;
+  return `<section class="limit ${primary ? "primary" : ""}" data-severity="${severity(limit.remaining_percent)}"><div class="line"><strong>${escapeHtml(limit.label)}</strong><span>${percent}% ${displayMode === "usage" ? "used" : "remaining"}</span></div><div class="bar"><div class="fill" style="--remaining:${percent}%"></div></div><span class="reset">${resetLabel(limit.resets_at, short)}</span></section>`;
 }
 
 function parse(value: unknown): Snapshot {

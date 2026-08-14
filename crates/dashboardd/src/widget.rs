@@ -1,6 +1,7 @@
 //! Installed widget definitions discovered from the filesystem.
 
 use std::{
+    collections::{BTreeMap, HashSet},
     fs, io,
     path::{Component, Path, PathBuf},
     sync::Arc,
@@ -8,6 +9,7 @@ use std::{
 
 use dashboard_protocol::WidgetId;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use utoipa::ToSchema;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -25,6 +27,38 @@ pub struct WidgetDescriptor {
     pub name: String,
     pub description: String,
     pub variants: Vec<WidgetVariant>,
+    pub options: Vec<WidgetOption>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct WidgetOption {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub variants: Vec<String>,
+    pub default: Value,
+    #[serde(flatten)]
+    pub kind: WidgetOptionKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum WidgetOptionKind {
+    Boolean,
+    Integer {
+        minimum: i64,
+        maximum: i64,
+        step: u64,
+    },
+    Select {
+        choices: Vec<WidgetOptionChoice>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct WidgetOptionChoice {
+    pub value: String,
+    pub name: String,
 }
 
 #[derive(Debug)]
@@ -49,6 +83,64 @@ impl WidgetConfig {
             .position(|variant| variant.id == variant_id)
             .map(|index| self.frontends[index].as_path())
     }
+
+    pub fn normalize_options(
+        &self,
+        variant_id: &str,
+        supplied: &BTreeMap<String, Value>,
+    ) -> Result<BTreeMap<String, Value>, String> {
+        let active: Vec<_> = self
+            .descriptor
+            .options
+            .iter()
+            .filter(|option| option.applies_to(variant_id))
+            .collect();
+        if let Some(id) = supplied
+            .keys()
+            .find(|id| !active.iter().any(|option| option.id == id.as_str()))
+        {
+            return Err(format!("unknown or inapplicable option {id:?}"));
+        }
+        let mut normalized = BTreeMap::new();
+        for option in active {
+            let value = supplied.get(&option.id).unwrap_or(&option.default);
+            option.validate_value(value)?;
+            normalized.insert(option.id.clone(), value.clone());
+        }
+        Ok(normalized)
+    }
+}
+
+impl WidgetOption {
+    fn applies_to(&self, variant_id: &str) -> bool {
+        self.variants.is_empty() || self.variants.iter().any(|variant| variant == variant_id)
+    }
+
+    fn validate_value(&self, value: &Value) -> Result<(), String> {
+        let valid = match &self.kind {
+            WidgetOptionKind::Boolean => value.is_boolean(),
+            WidgetOptionKind::Integer {
+                minimum,
+                maximum,
+                step,
+            } => {
+                *step != 0
+                    && minimum <= maximum
+                    && value.as_i64().is_some_and(|value| {
+                        value >= *minimum
+                            && value <= *maximum
+                            && ((i128::from(value) - i128::from(*minimum)) as u128)
+                                .is_multiple_of(u128::from(*step))
+                    })
+            }
+            WidgetOptionKind::Select { choices } => value
+                .as_str()
+                .is_some_and(|value| choices.iter().any(|choice| choice.value == value)),
+        };
+        valid
+            .then_some(())
+            .ok_or_else(|| format!("invalid value for option {:?}", self.id))
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -64,6 +156,8 @@ struct ManifestFile {
     description: String,
     backend: PathBuf,
     variants: Vec<VariantFile>,
+    #[serde(default)]
+    options: Vec<WidgetOption>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -146,7 +240,7 @@ fn read_config(widget_directory: &Path) -> io::Result<WidgetConfig> {
         ));
     }
 
-    let mut ids = std::collections::HashSet::new();
+    let mut ids = HashSet::new();
     let mut variants = Vec::new();
     let mut frontends = Vec::new();
     for variant in manifest.variants {
@@ -182,16 +276,69 @@ fn read_config(widget_directory: &Path) -> io::Result<WidgetConfig> {
         frontends.push(frontend);
     }
 
+    validate_options(&manifest_path, &manifest.options, &ids)?;
     Ok(WidgetConfig {
         descriptor: WidgetDescriptor {
             id: manifest.id,
             name: manifest.name,
             description: manifest.description,
             variants,
+            options: manifest.options,
         },
         backend,
         frontends,
     })
+}
+
+fn validate_options(
+    manifest: &Path,
+    options: &[WidgetOption],
+    variant_ids: &HashSet<String>,
+) -> io::Result<()> {
+    let mut option_ids = HashSet::new();
+    for option in options {
+        if option.id.is_empty()
+            || option.name.trim().is_empty()
+            || option.description.trim().is_empty()
+            || !option_ids.insert(&option.id)
+            || option
+                .variants
+                .iter()
+                .any(|variant| !variant_ids.contains(variant))
+            || option.validate_value(&option.default).is_err()
+        {
+            return Err(invalid_manifest(
+                manifest,
+                "options require unique IDs, names, descriptions, known variants, and valid defaults",
+            ));
+        }
+        match &option.kind {
+            WidgetOptionKind::Integer {
+                minimum,
+                maximum,
+                step,
+            } if minimum > maximum || *step == 0 => {
+                return Err(invalid_manifest(
+                    manifest,
+                    "invalid integer option constraints",
+                ));
+            }
+            WidgetOptionKind::Select { choices } => {
+                let mut values = HashSet::new();
+                if choices.is_empty()
+                    || choices.iter().any(|choice| {
+                        choice.value.is_empty()
+                            || choice.name.trim().is_empty()
+                            || !values.insert(&choice.value)
+                    })
+                {
+                    return Err(invalid_manifest(manifest, "invalid select option choices"));
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 fn validate_path(manifest: &Path, label: &str, path: &Path) -> io::Result<()> {
@@ -226,7 +373,7 @@ mod tests {
         fs::create_dir_all(&cpu).unwrap();
         fs::write(
             cpu.join("widget.json"),
-            r#"{"schema_version":2,"id":"cpu","name":"CPU","description":"Processor usage","backend":"backend","variants":[{"id":"full","name":"Full","width":3,"height":3,"frontend":"full.js"}]}"#,
+            r#"{"schema_version":2,"id":"cpu","name":"CPU","description":"Processor usage","backend":"backend","variants":[{"id":"full","name":"Full","width":3,"height":3,"frontend":"full.js"}],"options":[{"id":"history_points","name":"History length","description":"Retained samples","variants":["full"],"default":40,"type":"integer","minimum":20,"maximum":120,"step":10}]}"#,
         )
         .unwrap();
         fs::write(cpu.join("backend"), "executable").unwrap();
@@ -243,6 +390,47 @@ mod tests {
             "/widgets/cpu/variants/full/frontend.js"
         );
         assert_eq!(config.frontend("full"), Some(cpu.join("full.js").as_path()));
+        assert_eq!(
+            config.normalize_options("full", &BTreeMap::new()).unwrap(),
+            BTreeMap::from([("history_points".into(), Value::from(40))])
+        );
+        assert_eq!(
+            config
+                .normalize_options(
+                    "full",
+                    &BTreeMap::from([("history_points".into(), Value::from(80))]),
+                )
+                .unwrap()["history_points"],
+            Value::from(80)
+        );
+        assert!(
+            config
+                .normalize_options(
+                    "full",
+                    &BTreeMap::from([("history_points".into(), Value::from(25))]),
+                )
+                .is_err()
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn rejects_invalid_option_manifests() {
+        let root =
+            std::env::temp_dir().join(format!("scufris-invalid-options-{}", std::process::id()));
+        let cpu = root.join("cpu");
+        fs::create_dir_all(&cpu).unwrap();
+        fs::write(
+            cpu.join("widget.json"),
+            r#"{"schema_version":2,"id":"cpu","name":"CPU","description":"Processor usage","backend":"backend","variants":[{"id":"full","name":"Full","width":3,"height":3,"frontend":"full.js"}],"options":[{"id":"history_points","name":"History","description":"Samples","variants":["full"],"default":40,"type":"integer","minimum":20,"maximum":120,"step":0}]}"#,
+        )
+        .unwrap();
+        fs::write(cpu.join("backend"), "executable").unwrap();
+        fs::write(cpu.join("full.js"), "export function mount() {}").unwrap();
+
+        let error = WidgetsManager::discover(&root).unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
         fs::remove_dir_all(root).unwrap();
     }
 

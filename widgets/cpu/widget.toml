@@ -20,3 +20,24 @@ id = "compact"
 name = "Compact"
 size = [1, 1]
 entry = "src/compact.ts"
+
+[[options]]
+id = "show_core_temperatures"
+name = "Show core temperatures"
+description = "Show temperature inside each CPU core square"
+variants = ["full"]
+default = true
+
+[options.boolean]
+
+[[options]]
+id = "history_points"
+name = "History length"
+description = "Number of samples retained in the graph"
+variants = ["full"]
+default = 40
+
+[options.integer]
+minimum = 20
+maximum = 120
+step = 10

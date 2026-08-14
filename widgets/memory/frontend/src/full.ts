@@ -25,11 +25,12 @@ export function mount(
   container: HTMLElement,
   context: WidgetContext,
 ): WidgetFrontend {
+  const showSwap = context.options.show_swap !== false;
   const shadow = container.attachShadow({ mode: "open" });
   shadow.innerHTML = `
     <style>${widgetReset}\n${styles}</style>
     <header>
-      <div class="title"><h2>Memory</h2><span class="eyebrow">60 second history</span></div>
+      <div class="title"><h2>RAM</h2><span class="eyebrow">60 second history</span></div>
       <div class="headline">
         <span class="usage">--.-%</span>
         <span class="total">-- GiB</span>
@@ -67,8 +68,9 @@ export function mount(
   `;
   shadow.host.setAttribute(
     "aria-label",
-    `Memory telemetry for ${context.instanceId}`,
+    `RAM telemetry for ${context.instanceId}`,
   );
+  required<HTMLElement>(shadow, ".swap").hidden = !showSwap;
 
   const history: number[] = [];
   const lineElement = required<SVGPathElement>(shadow, ".line");
@@ -103,7 +105,7 @@ export function mount(
       required<HTMLElement>(shadow, '[data-memory="available"]').textContent =
         formatBytes(snapshot.availableBytes);
 
-      renderSwap(shadow, snapshot.swap);
+      if (showSwap) renderSwap(shadow, snapshot.swap);
       renderGraph(history, lineElement, areaElement);
     },
     destroy(): void {
