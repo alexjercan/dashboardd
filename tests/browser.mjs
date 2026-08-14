@@ -74,11 +74,28 @@ try {
   });
 
   await page.goto(baseUrl);
+  await page.locator("#dashboard-empty").waitFor();
+  assert.equal(await page.locator(".dashboard-card").count(), 0);
+  page.once("dialog", (dialog) => dialog.accept("Main"));
+  await page.locator("#create-dashboard").click();
+  await page.waitForURL(new RegExp(`${baseUrl}/d/[^/]+/edit$`));
+  const dashboardId = decodeURIComponent(page.url().split("/").at(-2));
+  const dashboardPath = `/d/${encodeURIComponent(dashboardId)}`;
+  const dashboardViewUrl = `${baseUrl}${dashboardPath}`;
+  const dashboardEditUrl = `${dashboardViewUrl}/edit`;
+  const dashboardApi = `/api/v1/dashboards/${encodeURIComponent(dashboardId)}`;
+  const dashboardApiUrl = `${baseUrl}${dashboardApi}`;
   await page.locator('#connection-status:text-is("Connected")').waitFor();
+  await page.locator("#finish-editing").click();
+  await page.waitForURL(dashboardViewUrl);
   const layoutResponse = await page.request.get(`${baseUrl}/api/v1/layout`);
   assert.equal(layoutResponse.status(), 200);
   assert.deepEqual(await layoutResponse.json(), { columns: 9 });
-  assert.equal(await instanceCount(page, baseUrl), 0, "startup is empty");
+  assert.equal(
+    await instanceCount(page, dashboardApiUrl),
+    0,
+    "startup is empty",
+  );
   assert.equal(
     await page.locator("#editor-header").isHidden(),
     true,
@@ -95,7 +112,7 @@ try {
     "Zen controls remain in the viewport",
   );
   await page.locator("#edit-layout").click();
-  await page.waitForURL(`${baseUrl}/edit`);
+  await page.waitForURL(dashboardEditUrl);
   assert.equal(await page.locator("#finish-editing").isVisible(), true);
   assert.equal(
     await page
@@ -109,7 +126,7 @@ try {
     "empty editor canvas is 9x6",
   );
   await page.locator("#finish-editing").click();
-  await page.waitForURL(baseUrl + "/");
+  await page.waitForURL(dashboardViewUrl);
   assert.equal(
     await page
       .locator("#edit-layout")
@@ -117,12 +134,12 @@ try {
     true,
   );
   await page.goBack();
-  await page.waitForURL(`${baseUrl}/edit`);
+  await page.waitForURL(dashboardEditUrl);
   assert.equal(await page.locator("#editor-header").isVisible(), true);
   await page.goForward();
-  await page.waitForURL(baseUrl + "/");
+  await page.waitForURL(dashboardViewUrl);
   await page.locator("#edit-layout").click();
-  await page.waitForURL(`${baseUrl}/edit`);
+  await page.waitForURL(dashboardEditUrl);
   assert.equal(
     await page.evaluate(() =>
       getComputedStyle(document.documentElement).getPropertyValue(
@@ -345,11 +362,11 @@ try {
   const memoryWidget = page.locator(`[data-instance-id="${memory}"]`);
   await waitForTelemetry(memoryWidget);
   await memoryWidget.locator(".bar .fill").waitFor();
-  assert.equal(await instanceCount(page, baseUrl), 3);
+  assert.equal(await instanceCount(page, dashboardApiUrl), 3);
 
-  await waitForInstanceHealth(page, baseUrl, cpuOne, "healthy");
+  await waitForInstanceHealth(page, dashboardApiUrl, cpuOne, "healthy");
   const healthResponse = await page.request.get(
-    `${baseUrl}/api/v1/instance-health`,
+    `${dashboardApiUrl}/instance-health`,
   );
   assert.equal(healthResponse.status(), 200);
   assert.deepEqual(
@@ -382,10 +399,10 @@ try {
   await page
     .locator('#dashboard-announcement:text-is("Widget backend restarted")')
     .waitFor();
-  await waitForInstanceHealth(page, baseUrl, cpuOne, "healthy", 1);
+  await waitForInstanceHealth(page, dashboardApiUrl, cpuOne, "healthy", 1);
   assert.equal(await page.locator("#health-restarts").textContent(), "1");
   await page.locator('#widget-health .button[value="cancel"]').click();
-  assert.equal(await instanceCount(page, baseUrl), 3);
+  assert.equal(await instanceCount(page, dashboardApiUrl), 3);
 
   await page.locator("#finish-editing").click();
   assert.equal(
@@ -421,7 +438,7 @@ try {
   );
 
   const directEditPage = await context.newPage();
-  await directEditPage.goto(`${baseUrl}/edit`);
+  await directEditPage.goto(dashboardEditUrl);
   await directEditPage.locator("#editor-header").waitFor();
   assert.equal(
     await directEditPage.locator("#finish-editing").isVisible(),
@@ -431,7 +448,7 @@ try {
 
   const secondPage = await context.newPage();
   pages.push(secondPage);
-  await secondPage.goto(baseUrl);
+  await secondPage.goto(dashboardViewUrl);
   await secondPage.locator(`[data-instance-id="${memory}"]`).waitFor();
   await page.locator("#edit-layout").click();
   assert.equal(await secondPage.locator("#editor-header").isHidden(), true);
@@ -449,7 +466,7 @@ try {
     .locator(`[data-instance-id="${cpuTwo}"]`)
     .waitFor({ state: "detached" });
   assert.equal(
-    await instanceCount(page, baseUrl),
+    await instanceCount(page, dashboardApiUrl),
     2,
     "confirmed removal synchronizes across pages",
   );
@@ -457,7 +474,7 @@ try {
   const memoryTwo = await addWidget(page, "1", "0", "RAM", "Compact");
   await secondPage.locator(`[data-instance-id="${memoryTwo}"]`).waitFor();
   assert.equal(
-    await instanceCount(page, baseUrl),
+    await instanceCount(page, dashboardApiUrl),
     3,
     "addition synchronizes across pages",
   );
@@ -507,7 +524,7 @@ try {
     true,
   );
 
-  const collision = await page.request.post(`${baseUrl}/api/v1/instances`, {
+  const collision = await page.request.post(`${dashboardApiUrl}/instances`, {
     data: {
       widget_id: "cpu",
       variant_id: "compact",
@@ -521,7 +538,7 @@ try {
   );
 
   const invalidOptions = await page.request.post(
-    `${baseUrl}/api/v1/instances`,
+    `${dashboardApiUrl}/instances`,
     {
       data: {
         widget_id: "cpu",
@@ -541,7 +558,8 @@ try {
   await page.locator('.widget-option input[type="checkbox"]').uncheck();
   const fullResponsePromise = page.waitForResponse(
     (response) =>
-      response.url().endsWith("/api/v1/instances") &&
+      response.url().includes("/api/v1/dashboards/") &&
+      response.url().endsWith("/instances") &&
       response.request().method() === "POST",
   );
   await page.locator("#confirm-add").click();
@@ -612,7 +630,7 @@ try {
   });
 
   const unlinkedDetails = await page.request.post(
-    `${baseUrl}/api/v1/instances`,
+    `${dashboardApiUrl}/instances`,
     {
       data: {
         widget_id: "tatr-tasks",
@@ -636,7 +654,8 @@ try {
   await textOptions.nth(1).fill(":status in [OPEN, IN_PROGRESS]");
   const tatrResponsePromise = page.waitForResponse(
     (response) =>
-      response.url().endsWith("/api/v1/instances") &&
+      response.url().includes("/api/v1/dashboards/") &&
+      response.url().endsWith("/instances") &&
       response.request().method() === "POST",
   );
   await page.locator("#confirm-add").click();
@@ -664,7 +683,8 @@ try {
   );
   const detailsResponsePromise = page.waitForResponse(
     (response) =>
-      response.url().endsWith("/api/v1/instances") &&
+      response.url().includes("/api/v1/dashboards/") &&
+      response.url().endsWith("/instances") &&
       response.request().method() === "POST",
   );
   await page.locator("#confirm-add").click();
@@ -698,7 +718,8 @@ try {
   await rootsControl.fill(tatrRoot);
   const projectsListResponsePromise = page.waitForResponse(
     (response) =>
-      response.url().endsWith("/api/v1/instances") &&
+      response.url().includes("/api/v1/dashboards/") &&
+      response.url().endsWith("/instances") &&
       response.request().method() === "POST",
   );
   await page.locator("#confirm-add").click();
@@ -720,7 +741,8 @@ try {
   );
   const projectResponsePromise = page.waitForResponse(
     (response) =>
-      response.url().endsWith("/api/v1/instances") &&
+      response.url().includes("/api/v1/dashboards/") &&
+      response.url().endsWith("/instances") &&
       response.request().method() === "POST",
   );
   await page.locator("#confirm-add").click();
@@ -740,7 +762,8 @@ try {
   await page.locator(".widget-option textarea").fill(tatrRoot);
   const pinnedResponsePromise = page.waitForResponse(
     (response) =>
-      response.url().endsWith("/api/v1/instances") &&
+      response.url().includes("/api/v1/dashboards/") &&
+      response.url().endsWith("/instances") &&
       response.request().method() === "POST",
   );
   await page.locator("#confirm-add").click();
@@ -772,7 +795,9 @@ try {
     .selectOption(`${projectsListInstance.id}\u0000selected_project`);
   const projectFilterResponse = page.waitForResponse(
     (response) =>
-      response.url().includes(`/api/v1/links/${tatrInstance.id}/project`) &&
+      response
+        .url()
+        .includes(`${dashboardApi}/links/${tatrInstance.id}/project`) &&
       response.request().method() === "PUT",
   );
   await page.locator("#confirm-link").click();
@@ -786,7 +811,7 @@ try {
     "Selected project -> 2 widgets",
   );
 
-  const linkList = await page.request.get(`${baseUrl}/api/v1/links`);
+  const linkList = await page.request.get(`${dashboardApiUrl}/links`);
   assert.equal(linkList.status(), 200);
   assert.equal((await linkList.json()).links.length, 3);
   assert.equal(
@@ -799,7 +824,7 @@ try {
     fullPage: true,
   });
   await page.locator("#finish-editing").click();
-  await page.waitForURL(baseUrl + "/");
+  await page.waitForURL(dashboardViewUrl);
 
   const projectSearch = projectsListFrame.locator(".search");
   const projectSort = projectsListFrame.locator(".sort");
@@ -1254,7 +1279,7 @@ try {
     "variants must opt in to Focus",
   );
   await detailsFrame.locator(".widget-focus-button").click();
-  await page.waitForURL(`${baseUrl}/focus/${detailsInstance.id}`);
+  await page.waitForURL(`${dashboardViewUrl}/focus/${detailsInstance.id}`);
   assert.equal(await page.locator("#focus-layer").isVisible(), true);
   assert.equal(
     await page.locator(".dashboard-shell").getAttribute("inert"),
@@ -1285,7 +1310,7 @@ try {
     path: path.join(artifacts, "tatr-artifact-focus-image-narrow.png"),
   });
   await page.locator("#close-focus").click();
-  await page.waitForURL(baseUrl + "/");
+  await page.waitForURL(dashboardViewUrl);
   assert.match(
     await detailsFrame.locator(".identity").textContent(),
     /\/result\.png$/,
@@ -1293,13 +1318,13 @@ try {
   );
   assert.equal(await detailsFrame.getAttribute("data-presentation"), "tile");
   await detailsFrame.locator(".widget-focus-button").click();
-  await page.waitForURL(`${baseUrl}/focus/${detailsInstance.id}`);
+  await page.waitForURL(`${dashboardViewUrl}/focus/${detailsInstance.id}`);
   await page.keyboard.press("Escape");
-  await page.waitForURL(baseUrl + "/");
+  await page.waitForURL(dashboardViewUrl);
   await detailsFrame.locator(".widget-focus-button").click();
-  await page.waitForURL(`${baseUrl}/focus/${detailsInstance.id}`);
+  await page.waitForURL(`${dashboardViewUrl}/focus/${detailsInstance.id}`);
   await page.goBack();
-  await page.waitForURL(baseUrl + "/");
+  await page.waitForURL(dashboardViewUrl);
   await detailsFrame.locator(".identity").click();
   await detailsFrame
     .locator('.artifact-menu button:text-is("TASK.md")')
@@ -1309,16 +1334,16 @@ try {
     .waitFor();
   const directFocusPage = await context.newPage();
   pages.push(directFocusPage);
-  await directFocusPage.goto(`${baseUrl}/focus/${detailsInstance.id}`);
+  await directFocusPage.goto(`${dashboardViewUrl}/focus/${detailsInstance.id}`);
   await directFocusPage.locator("#focus-layer").waitFor();
   assert.equal(
     await directFocusPage.locator("#focus-title").textContent(),
     "Tatr Tasks - Artifact",
   );
   await directFocusPage.locator("#close-focus").click();
-  await directFocusPage.waitForURL(baseUrl + "/");
-  await directFocusPage.goto(`${baseUrl}/focus/${tatrInstance.id}`);
-  await directFocusPage.waitForURL(baseUrl + "/");
+  await directFocusPage.waitForURL(dashboardViewUrl);
+  await directFocusPage.goto(`${dashboardViewUrl}/focus/${tatrInstance.id}`);
+  await directFocusPage.waitForURL(dashboardViewUrl);
   await directFocusPage
     .locator("#dashboard-error", {
       hasText: "Could not focus widget: variant does not support Focus",
@@ -1330,7 +1355,7 @@ try {
     fullPage: true,
   });
   await projectFrame.locator(".widget-focus-button").click();
-  await page.waitForURL(`${baseUrl}/focus/${projectInstance.id}`);
+  await page.waitForURL(`${dashboardViewUrl}/focus/${projectInstance.id}`);
   await projectFrame.locator(".overview-grid").waitFor();
   await page.screenshot({
     path: path.join(artifacts, "project-focus-overview-narrow.png"),
@@ -1348,15 +1373,15 @@ try {
     .locator(".branches-list strong", { hasText: "feature/projects" })
     .waitFor();
   await page.locator("#close-focus").click();
-  await page.waitForURL(baseUrl + "/");
+  await page.waitForURL(dashboardViewUrl);
   await page.setViewportSize({ width: 1440, height: 1000 });
   await detailsFrame.locator(".widget-focus-button").click();
-  await page.waitForURL(`${baseUrl}/focus/${detailsInstance.id}`);
+  await page.waitForURL(`${dashboardViewUrl}/focus/${detailsInstance.id}`);
   await page.screenshot({
     path: path.join(artifacts, "tatr-artifact-focus-markdown-wide.png"),
   });
   await page.locator("#close-focus").click();
-  await page.waitForURL(baseUrl + "/");
+  await page.waitForURL(dashboardViewUrl);
   assert.equal(await tatrFrame.locator(".table-head").isVisible(), true);
   assert.equal(await tatrFrame.locator(".mobile-sort").isHidden(), true);
   await tatrFrame.locator('[data-sort="title"]').click();
@@ -1369,7 +1394,7 @@ try {
     fullPage: true,
   });
   await projectFrame.locator(".widget-focus-button").click();
-  await page.waitForURL(`${baseUrl}/focus/${projectInstance.id}`);
+  await page.waitForURL(`${dashboardViewUrl}/focus/${projectInstance.id}`);
   await projectFrame.locator('[data-tab="overview"]').click();
   await page.screenshot({
     path: path.join(artifacts, "project-focus-overview-wide.png"),
@@ -1379,7 +1404,7 @@ try {
     path: path.join(artifacts, "project-focus-changes-wide.png"),
   });
   await page.locator("#close-focus").click();
-  await page.waitForURL(baseUrl + "/");
+  await page.waitForURL(dashboardViewUrl);
   assert.equal(
     await tatrFrame
       .locator(".dashboard-widget-mount")
@@ -1493,7 +1518,9 @@ try {
   assert.equal(await page.locator("#link-widget").isVisible(), true);
   const relinkResponse = page.waitForResponse(
     (response) =>
-      response.url().includes(`/api/v1/links/${detailsInstance.id}/task`) &&
+      response
+        .url()
+        .includes(`${dashboardApi}/links/${detailsInstance.id}/task`) &&
       response.request().method() === "PUT",
   );
   await page.locator("#confirm-link").click();
@@ -1502,7 +1529,9 @@ try {
   await page.locator("#link-source").selectOption("");
   const unlinkProjectFilter = page.waitForResponse(
     (response) =>
-      response.url().includes(`/api/v1/links/${tatrInstance.id}/project`) &&
+      response
+        .url()
+        .includes(`${dashboardApi}/links/${tatrInstance.id}/project`) &&
       response.request().method() === "DELETE",
   );
   await page.locator("#confirm-link").click();
@@ -1519,7 +1548,9 @@ try {
     .selectOption(`${projectsListInstance.id}\u0000selected_project`);
   const restoreProjectFilter = page.waitForResponse(
     (response) =>
-      response.url().includes(`/api/v1/links/${tatrInstance.id}/project`) &&
+      response
+        .url()
+        .includes(`${dashboardApi}/links/${tatrInstance.id}/project`) &&
       response.request().method() === "PUT",
   );
   await page.locator("#confirm-link").click();
@@ -1535,7 +1566,9 @@ try {
     .selectOption(`${pinnedInstance.id}\u0000selected_project`);
   const projectFromPinned = page.waitForResponse(
     (response) =>
-      response.url().includes(`/api/v1/links/${projectInstance.id}/project`) &&
+      response
+        .url()
+        .includes(`${dashboardApi}/links/${projectInstance.id}/project`) &&
       response.request().method() === "PUT",
   );
   await page.locator("#confirm-link").click();
@@ -1546,7 +1579,9 @@ try {
     .selectOption(`${pinnedInstance.id}\u0000selected_project`);
   const tatrFromPinned = page.waitForResponse(
     (response) =>
-      response.url().includes(`/api/v1/links/${tatrInstance.id}/project`) &&
+      response
+        .url()
+        .includes(`${dashboardApi}/links/${tatrInstance.id}/project`) &&
       response.request().method() === "PUT",
   );
   await page.locator("#confirm-link").click();
@@ -1579,7 +1614,7 @@ try {
   await projectFrame.locator('.identity:text-is("scufris")').waitFor();
 
   const deleteProjectsList = await page.request.delete(
-    `${baseUrl}/api/v1/instances/${projectsListInstance.id}`,
+    `${dashboardApiUrl}/instances/${projectsListInstance.id}`,
   );
   assert.equal(deleteProjectsList.status(), 204);
   await projectsListFrame.waitFor({ state: "detached" });
@@ -1593,12 +1628,12 @@ try {
     "deleting the project source clears the page-local Tatr filter",
   );
   const deleteProject = await page.request.delete(
-    `${baseUrl}/api/v1/instances/${projectInstance.id}`,
+    `${dashboardApiUrl}/instances/${projectInstance.id}`,
   );
   assert.equal(deleteProject.status(), 204);
   await projectFrame.waitFor({ state: "detached" });
   const deletePinned = await page.request.delete(
-    `${baseUrl}/api/v1/instances/${pinnedInstance.id}`,
+    `${dashboardApiUrl}/instances/${pinnedInstance.id}`,
   );
   assert.equal(deletePinned.status(), 204);
   await pinnedFrame.waitFor({ state: "detached" });
@@ -1607,7 +1642,7 @@ try {
   );
   assert.equal((await retainedPins.json()).value.pins.length, 3);
   const deleteTatr = await page.request.delete(
-    `${baseUrl}/api/v1/instances/${tatrInstance.id}`,
+    `${dashboardApiUrl}/instances/${tatrInstance.id}`,
   );
   assert.equal(deleteTatr.status(), 204);
   await tatrFrame.waitFor({ state: "detached" });
@@ -1616,13 +1651,13 @@ try {
     .waitFor();
   await page.locator("#finish-editing").click();
   await detailsFrame.locator(".widget-focus-button").click();
-  await page.waitForURL(`${baseUrl}/focus/${detailsInstance.id}`);
+  await page.waitForURL(`${dashboardViewUrl}/focus/${detailsInstance.id}`);
   const deleteDetails = await page.request.delete(
-    `${baseUrl}/api/v1/instances/${detailsInstance.id}`,
+    `${dashboardApiUrl}/instances/${detailsInstance.id}`,
   );
   assert.equal(deleteDetails.status(), 204);
   await detailsFrame.waitFor({ state: "detached" });
-  await page.waitForURL(baseUrl + "/");
+  await page.waitForURL(dashboardViewUrl);
   await page
     .locator("#dashboard-error", {
       hasText: "Could not focus widget: instance was not found",
@@ -1646,8 +1681,8 @@ try {
   );
   assert.equal((await diskFullFrame.boundingBox()).height, 230);
   assert.equal((await networkFullFrame.boundingBox()).height, 230);
-  await waitForInstanceHealth(page, baseUrl, diskFull, "healthy");
-  await waitForInstanceHealth(page, baseUrl, networkFull, "healthy");
+  await waitForInstanceHealth(page, dashboardApiUrl, diskFull, "healthy");
+  await waitForInstanceHealth(page, dashboardApiUrl, networkFull, "healthy");
   assert.doesNotMatch(
     await diskFullFrame.locator(".filesystem").textContent(),
     /\//,
@@ -1683,7 +1718,7 @@ try {
     networkCompact,
   ]) {
     const response = await page.request.delete(
-      `${baseUrl}/api/v1/instances/${instanceId}`,
+      `${dashboardApiUrl}/instances/${instanceId}`,
     );
     assert.equal(response.status(), 204);
     await page
@@ -1700,7 +1735,7 @@ try {
     .locator('#connection-indicator[data-status="connected"]')
     .waitFor();
   assert.equal(
-    await instanceCount(page, baseUrl),
+    await instanceCount(page, dashboardApiUrl),
     4,
     "reconnect retains composition",
   );
@@ -1733,6 +1768,106 @@ try {
     assert.equal(commandResult.minimalHasRefresh, false);
   }
 
+  const homePage = await context.newPage();
+  pages.push(homePage);
+  await homePage.goto(baseUrl);
+  const mainCard = homePage.locator(".dashboard-card", { hasText: "Main" });
+  await mainCard.waitFor();
+  assert.equal(await mainCard.locator(".dashboard-preview-widget").count(), 4);
+  assert.match(
+    await mainCard.locator(".dashboard-card-health").textContent(),
+    /widgets/i,
+  );
+  homePage.once("dialog", (dialog) => dialog.accept("System"));
+  await mainCard.locator("summary", { hasText: "Manage" }).click();
+  await mainCard.getByRole("button", { name: "Rename" }).click();
+  await homePage.locator(".dashboard-card", { hasText: "System" }).waitFor();
+  const systemCard = homePage.locator(".dashboard-card", { hasText: "System" });
+  await systemCard.locator("summary", { hasText: "Manage" }).click();
+  await systemCard.getByRole("button", { name: "Duplicate" }).click();
+  await homePage.waitForURL(new RegExp(`${baseUrl}/d/[^/]+/edit$`));
+  const duplicateId = decodeURIComponent(homePage.url().split("/").at(-2));
+  assert.notEqual(duplicateId, dashboardId);
+  const duplicateApiUrl = `${baseUrl}/api/v1/dashboards/${encodeURIComponent(duplicateId)}`;
+  assert.equal(await instanceCount(homePage, duplicateApiUrl), 4);
+  const originalInstances = (
+    await (await page.request.get(`${dashboardApiUrl}/instances`)).json()
+  ).instances;
+  const duplicateInstances = (
+    await (await homePage.request.get(`${duplicateApiUrl}/instances`)).json()
+  ).instances;
+  assert.equal(
+    duplicateInstances.some((copy) =>
+      originalInstances.some((original) => original.id === copy.id),
+    ),
+    false,
+    "duplicate uses new globally unique instance IDs",
+  );
+  assert.equal(
+    await page.locator(".dashboard-widget").count(),
+    4,
+    "another dashboard does not alter the routed tab",
+  );
+  assert.equal(
+    await homePage
+      .locator("#dashboard-switcher")
+      .locator("option", { hasText: "System (1)" })
+      .count(),
+    1,
+  );
+  await homePage.goto(baseUrl);
+  await homePage
+    .locator(".dashboard-card", { hasText: "System (1)" })
+    .waitFor();
+  await homePage.screenshot({
+    path: path.join(artifacts, "dashboard-home-wide.png"),
+    fullPage: true,
+  });
+  await homePage.setViewportSize({ width: 420, height: 900 });
+  assert.equal(
+    await homePage.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+    true,
+  );
+  await homePage.screenshot({
+    path: path.join(artifacts, "dashboard-home-narrow.png"),
+    fullPage: true,
+  });
+  const duplicateCard = homePage.locator(".dashboard-card", {
+    hasText: "System (1)",
+  });
+  homePage.once("dialog", (dialog) => dialog.accept());
+  await duplicateCard.locator("summary", { hasText: "Manage" }).click();
+  await duplicateCard.getByRole("button", { name: "Delete" }).click();
+  await duplicateCard.waitFor({ state: "detached" });
+  const deleteDuplicate = await homePage.request.get(duplicateApiUrl);
+  assert.equal(deleteDuplicate.status(), 404);
+  homePage.once("dialog", (dialog) => dialog.accept("Projects"));
+  await homePage.locator("#create-dashboard").click();
+  await homePage.waitForURL(new RegExp(`${baseUrl}/d/[^/]+/edit$`));
+  const projectsDashboardId = decodeURIComponent(
+    homePage.url().split("/").at(-2),
+  );
+  await addWidget(homePage, 0, 0, "CPU", "Compact");
+  assert.equal(
+    await instanceCount(
+      homePage,
+      `${baseUrl}/api/v1/dashboards/${encodeURIComponent(projectsDashboardId)}`,
+    ),
+    1,
+  );
+  assert.equal(await instanceCount(page, dashboardApiUrl), 4);
+  await homePage.goto(baseUrl);
+  const projectsDashboardCard = homePage.locator(".dashboard-card", {
+    hasText: "Projects",
+  });
+  await projectsDashboardCard.waitFor();
+  homePage.once("dialog", (dialog) => dialog.accept());
+  await projectsDashboardCard.locator("summary", { hasText: "Manage" }).click();
+  await projectsDashboardCard.getByRole("button", { name: "Delete" }).click();
+  await projectsDashboardCard.waitFor({ state: "detached" });
+
   await requestGracefulStop(dashboardd);
   assert.equal(existsSync(stateFile), true, "composition is persisted");
   assert.equal(
@@ -1745,12 +1880,12 @@ try {
   await waitForHealth(dashboardUrl);
   await page.locator(`[data-instance-id="${cpuOne}"]`).waitFor();
   assert.equal(
-    await instanceCount(page, baseUrl),
+    await instanceCount(page, dashboardApiUrl),
     4,
     "restart restores persisted composition with stable IDs",
   );
   const restoredFull = await page.request.get(
-    `${baseUrl}/api/v1/instances/${fullInstance.id}`,
+    `${dashboardApiUrl}/instances/${fullInstance.id}`,
   );
   assert.deepEqual((await restoredFull.json()).options, {
     history_points: 20,
@@ -1775,7 +1910,7 @@ show_core_temperatures = false
   );
   dashboardd = startDashboardd();
   await waitForHealth(dashboardUrl);
-  const bootstrapped = await page.request.get(`${baseUrl}/api/v1/instances`);
+  const bootstrapped = await page.request.get(`${dashboardApiUrl}/instances`);
   const bootstrappedInstances = (await bootstrapped.json()).instances;
   assert.equal(bootstrappedInstances.length, 1);
   assert.deepEqual(bootstrappedInstances[0].layout, {
@@ -1801,10 +1936,33 @@ position = [1, 1]
   );
   dashboardd = startDashboardd();
   await waitForHealth(dashboardUrl);
-  const retained = await page.request.get(`${baseUrl}/api/v1/instances`);
+  const retained = await page.request.get(`${dashboardApiUrl}/instances`);
   const retainedInstances = (await retained.json()).instances;
   assert.equal(retainedInstances.length, 1);
   assert.equal(retainedInstances[0].widget_id, "cpu");
+  const dashboardsResponse = await page.request.get(
+    `${baseUrl}/api/v1/dashboards`,
+  );
+  const finalDashboards = (await dashboardsResponse.json()).dashboards;
+  assert.equal(finalDashboards.length, 1);
+  const deleteFinal = await page.request.delete(
+    `${baseUrl}/api/v1/dashboards/${encodeURIComponent(finalDashboards[0].id)}`,
+  );
+  assert.equal(deleteFinal.status(), 204);
+  await homePage.goto(baseUrl);
+  await homePage.locator("#dashboard-empty").waitFor();
+  assert.equal(await homePage.locator(".dashboard-card").count(), 0);
+  await homePage.screenshot({
+    path: path.join(artifacts, "dashboard-home-empty-narrow.png"),
+    fullPage: true,
+  });
+  await requestGracefulStop(dashboardd);
+  dashboardd = startDashboardd();
+  await waitForHealth(dashboardUrl);
+  const emptyAfterRestart = await page.request.get(
+    `${baseUrl}/api/v1/dashboards`,
+  );
+  assert.deepEqual(await emptyAfterRestart.json(), { dashboards: [] });
   await requestGracefulStop(dashboardd);
   console.log("browser integration scenarios passed");
 } catch (error) {
@@ -2119,7 +2277,8 @@ async function addWidget(page, column, row, name, variant) {
   );
   const responsePromise = page.waitForResponse(
     (response) =>
-      response.url().endsWith("/api/v1/instances") &&
+      response.url().includes("/api/v1/dashboards/") &&
+      response.url().endsWith("/instances") &&
       response.request().method() === "POST",
   );
   await page.locator("#confirm-add").click();
@@ -2300,7 +2459,7 @@ async function waitForHealth(baseUrl) {
 
 async function waitForInstanceHealth(
   page,
-  baseUrl,
+  dashboardApiUrl,
   instanceId,
   status,
   restartCount = 0,
@@ -2309,7 +2468,7 @@ async function waitForInstanceHealth(
   let actual = null;
   while (Date.now() < deadline) {
     const response = await page.request.get(
-      `${baseUrl}/api/v1/instances/${encodeURIComponent(instanceId)}/health`,
+      `${dashboardApiUrl}/instances/${encodeURIComponent(instanceId)}/health`,
     );
     if (response.ok()) {
       const health = await response.json();
@@ -2364,8 +2523,8 @@ async function waitForTelemetry(widget) {
   );
 }
 
-async function instanceCount(page, baseUrl) {
-  const response = await page.request.get(`${baseUrl}/api/v1/instances`);
+async function instanceCount(page, dashboardApiUrl) {
+  const response = await page.request.get(`${dashboardApiUrl}/instances`);
   assert.equal(response.ok(), true);
   return (await response.json()).instances.length;
 }

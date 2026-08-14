@@ -21,6 +21,7 @@ export type ConnectionStatus =
   "connecting" | "connected" | "disconnected" | "error";
 
 export type DashboardEvents = {
+  onDashboardsChanged(destroyedDashboardId?: string): void;
   onStatus(status: ConnectionStatus): void;
   onTheme(theme: Theme): void;
   onConfigurationError(message: string): void;
@@ -48,7 +49,10 @@ export type DashboardConnection = {
   close(): void;
 };
 
-export function connectDashboard(events: DashboardEvents): DashboardConnection {
+export function connectDashboard(
+  dashboardId: string,
+  events: DashboardEvents,
+): DashboardConnection {
   const source = new EventSource("/api/v1/events");
   let closed = false;
   let reconciliation = Promise.resolve();
@@ -59,7 +63,7 @@ export function connectDashboard(events: DashboardEvents): DashboardConnection {
     console.info("Dashboard event stream connected");
     events.onStatus("connected");
     reconciliation = reconciliation
-      .then(() => reconcile(events))
+      .then(() => reconcile(dashboardId, events))
       .catch((error) => {
         events.onStatus("error");
         events.onError(errorMessage(error));
@@ -72,32 +76,49 @@ export function connectDashboard(events: DashboardEvents): DashboardConnection {
       console.debug("Dashboard event received", { kind: event.kind });
 
       switch (event.kind) {
+        case "dashboard_created":
+        case "dashboard_updated":
+          events.onDashboardsChanged();
+          break;
+        case "dashboard_destroyed":
+          events.onDashboardsChanged(event.data.dashboard_id);
+          break;
         case "instance_created":
+          if (event.data.dashboard_id !== dashboardId) break;
           events.onInstanceCreated(event.data.instance);
           break;
         case "instance_updated":
+          if (event.data.dashboard_id !== dashboardId) break;
           events.onInstanceUpdated(event.data.instance);
           break;
         case "instance_destroyed":
+          if (event.data.dashboard_id !== dashboardId) break;
           events.onInstanceDestroyed(event.data.instance_id);
           break;
         case "link_updated":
+          if (event.data.dashboard_id !== dashboardId) break;
           events.onLinkUpdated(event.data.link);
           break;
         case "link_destroyed":
+          if (event.data.dashboard_id !== dashboardId) break;
           events.onLinkDestroyed(
             event.data.target_instance_id,
             event.data.target_port,
           );
           break;
         case "instance_error":
-          if (event.data.instance_id === null)
+          if (
+            event.data.dashboard_id === dashboardId &&
+            event.data.instance_id === null
+          )
             events.onError(event.data.error.message);
           break;
         case "instance_health_updated":
+          if (event.data.dashboard_id !== dashboardId) break;
           events.onInstanceHealth(event.data.health);
           break;
         case "widget_update":
+          if (event.data.dashboard_id !== dashboardId) break;
           events.onWidgetUpdate(event.data.instance_id, event.data.payload);
           break;
         case "widget_state_updated":
@@ -125,7 +146,7 @@ export function connectDashboard(events: DashboardEvents): DashboardConnection {
   return {
     async sendWidget(instanceId, payload) {
       await request(
-        `/api/v1/instances/${encodeURIComponent(instanceId)}/messages`,
+        `${dashboardPath(dashboardId)}/instances/${encodeURIComponent(instanceId)}/messages`,
         {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -135,7 +156,7 @@ export function connectDashboard(events: DashboardEvents): DashboardConnection {
     },
     async restartWidget(instanceId) {
       return requestJson(
-        `/api/v1/instances/${encodeURIComponent(instanceId)}/restart`,
+        `${dashboardPath(dashboardId)}/instances/${encodeURIComponent(instanceId)}/restart`,
         parseInstanceHealth,
         { method: "POST" },
       );
@@ -147,16 +168,20 @@ export function connectDashboard(events: DashboardEvents): DashboardConnection {
   };
 }
 
-async function reconcile(events: DashboardEvents): Promise<void> {
+async function reconcile(
+  dashboardId: string,
+  events: DashboardEvents,
+): Promise<void> {
   console.debug("Reconciling dashboard state");
+  const base = dashboardPath(dashboardId);
   const [layout, theme, widgetList, instanceList, healthList, linkList] =
     await Promise.all([
       requestJson("/api/v1/layout", parseDashboardLayout),
       requestJson("/api/v1/theme", parseTheme),
       requestJson("/api/v1/widgets", parseWidgetList),
-      requestJson("/api/v1/instances", parseInstanceList),
-      requestJson("/api/v1/instance-health", parseInstanceHealthList),
-      requestJson("/api/v1/links", parseLinkList),
+      requestJson(`${base}/instances`, parseInstanceList),
+      requestJson(`${base}/instance-health`, parseInstanceHealthList),
+      requestJson(`${base}/links`, parseLinkList),
     ]);
   events.onTheme(theme);
   events.onSnapshot(
@@ -166,6 +191,10 @@ async function reconcile(events: DashboardEvents): Promise<void> {
     healthList.instances,
     linkList.links,
   );
+}
+
+function dashboardPath(dashboardId: string): string {
+  return `/api/v1/dashboards/${encodeURIComponent(dashboardId)}`;
 }
 
 async function requestJson<T>(

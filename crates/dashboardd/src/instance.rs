@@ -25,7 +25,10 @@ use crate::{
     configuration::InitialWidget,
     event::DashboardEvent,
     health::{HealthTracker, InstanceHealth, PROBE_INTERVAL},
-    state::{DashboardLink, DashboardStateFile, PersistedInstance, Position, StateStore},
+    state::{
+        DashboardId, DashboardLink, DashboardStateFile, PersistedDashboard, PersistedInstance,
+        Position, StateStore,
+    },
     widget::{WidgetConfig, WidgetsManager},
 };
 
@@ -60,7 +63,16 @@ impl Default for InstanceLayout {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct Dashboard {
+    pub id: DashboardId,
+    pub name: String,
+    pub instances: Vec<Instance>,
+    pub health: Vec<InstanceHealth>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct Instance {
+    pub dashboard_id: DashboardId,
     pub id: InstanceId,
     pub widget_id: WidgetId,
     pub variant_id: String,
@@ -75,6 +87,14 @@ pub struct NewInstanceLink {
     pub target_port: String,
 }
 
+pub struct CreateInstanceSpec {
+    pub variant_id: String,
+    pub column: u32,
+    pub row: u32,
+    pub options: BTreeMap<String, Value>,
+    pub links: Vec<NewInstanceLink>,
+}
+
 #[derive(Clone)]
 pub struct InstanceManager {
     inner: Arc<Inner>,
@@ -84,14 +104,17 @@ struct Inner {
     layout: DashboardLayout,
     instances: Mutex<HashMap<InstanceId, ManagedInstance>>,
     links: RwLock<Vec<DashboardLink>>,
+    dashboards: RwLock<BTreeMap<DashboardId, String>>,
     events: broadcast::Sender<DashboardEvent>,
     next_id: AtomicU64,
+    next_dashboard_id: AtomicU64,
     store: Option<Arc<StateStore>>,
     widget_state: RwLock<BTreeMap<WidgetId, Value>>,
     widget_state_revisions: RwLock<BTreeMap<WidgetId, u64>>,
 }
 
 struct ManagedInstance {
+    dashboard_id: DashboardId,
     resource: Instance,
     config: Arc<WidgetConfig>,
     backend: WidgetBackend,
@@ -106,6 +129,12 @@ struct WidgetBackend {
 
 #[derive(Debug, Error)]
 pub enum InstanceError {
+    #[error("dashboard was not found")]
+    UnknownDashboard,
+    #[error("dashboard limit reached")]
+    DashboardLimit,
+    #[error("dashboard name must contain 1 to 64 characters")]
+    InvalidDashboardName,
     #[error("instance was not found")]
     UnknownInstance,
     #[error("widget variant was not found")]
@@ -142,8 +171,10 @@ impl InstanceManager {
                 layout,
                 instances: Mutex::new(HashMap::new()),
                 links: RwLock::new(Vec::new()),
+                dashboards: RwLock::new(BTreeMap::new()),
                 events,
                 next_id: AtomicU64::new(1),
+                next_dashboard_id: AtomicU64::new(1),
                 store: None,
                 widget_state: RwLock::new(BTreeMap::new()),
                 widget_state_revisions: RwLock::new(BTreeMap::new()),
@@ -173,76 +204,102 @@ impl InstanceManager {
         let (events, _) = broadcast::channel(256);
         let mut restored = Vec::new();
         let mut restored_links = Vec::new();
+        let mut restored_dashboards = BTreeMap::new();
         let mut restored_widget_state = BTreeMap::new();
         let mut next_id = 1;
+        let mut next_dashboard_id = 1;
         if let Some(saved) = saved {
-            restored_links = saved.links;
+            if saved.dashboards.len() > 32 {
+                return Err(InstanceError::InvalidState(
+                    "dashboard limit exceeded".into(),
+                ));
+            }
             restored_widget_state = saved.widget_state;
             for value in restored_widget_state.values() {
                 validate_widget_state(value).map_err(|error| {
                     InstanceError::InvalidState(format!("invalid widget state: {error}"))
                 })?;
             }
-            let mut layouts = Vec::new();
             let mut ids = std::collections::HashSet::new();
-            for persisted in saved.instances {
-                if !ids.insert(persisted.id.clone()) {
-                    return Err(InstanceError::InvalidState(format!(
-                        "duplicate instance id {:?}",
-                        persisted.id
-                    )));
+            for dashboard in saved.dashboards {
+                let name = normalize_dashboard_name(&dashboard.name).map_err(|error| {
+                    InstanceError::InvalidState(format!("invalid dashboard name: {error}"))
+                })?;
+                if dashboard.id.is_empty()
+                    || restored_dashboards
+                        .insert(dashboard.id.clone(), name)
+                        .is_some()
+                {
+                    return Err(InstanceError::InvalidState(
+                        "dashboard IDs must be non-empty and unique".into(),
+                    ));
                 }
-                let config = widgets.get(&persisted.widget_id).ok_or_else(|| {
-                    InstanceError::InvalidState(format!(
-                        "instance {:?} references unknown widget {:?}",
-                        persisted.id, persisted.widget_id
-                    ))
-                })?;
-                let variant = config.variant(&persisted.variant_id).ok_or_else(|| {
-                    InstanceError::InvalidState(format!(
-                        "instance {:?} references unknown variant {:?}",
-                        persisted.id, persisted.variant_id
-                    ))
-                })?;
-                let options = config
-                    .normalize_options(&persisted.variant_id, &persisted.options)
-                    .map_err(|error| {
+                next_dashboard_id = next_dashboard_id.max(sequence_after(&dashboard.id));
+                let mut layouts = Vec::new();
+                for persisted in dashboard.instances {
+                    if !ids.insert(persisted.id.clone()) {
+                        return Err(InstanceError::InvalidState(format!(
+                            "duplicate instance id {:?}",
+                            persisted.id
+                        )));
+                    }
+                    let config = widgets.get(&persisted.widget_id).ok_or_else(|| {
                         InstanceError::InvalidState(format!(
-                            "instance {:?} has invalid options: {error}",
+                            "instance {:?} references unknown widget {:?}",
+                            persisted.id, persisted.widget_id
+                        ))
+                    })?;
+                    let variant = config.variant(&persisted.variant_id).ok_or_else(|| {
+                        InstanceError::InvalidState(format!(
+                            "instance {:?} references unknown variant {:?}",
+                            persisted.id, persisted.variant_id
+                        ))
+                    })?;
+                    let options = config
+                        .normalize_options(&persisted.variant_id, &persisted.options)
+                        .map_err(|error| {
+                            InstanceError::InvalidState(format!(
+                                "instance {:?} has invalid options: {error}",
+                                persisted.id
+                            ))
+                        })?;
+                    let instance_layout = InstanceLayout {
+                        column: persisted.position.column,
+                        row: persisted.position.row,
+                        width: variant.width,
+                        height: variant.height,
+                    };
+                    validate_layout(layout, &instance_layout, layouts.iter()).map_err(|error| {
+                        InstanceError::InvalidState(format!(
+                            "instance {:?} has invalid position: {error}",
                             persisted.id
                         ))
                     })?;
-                let instance_layout = InstanceLayout {
-                    column: persisted.position.column,
-                    row: persisted.position.row,
-                    width: variant.width,
-                    height: variant.height,
-                };
-                validate_layout(layout, &instance_layout, layouts.iter()).map_err(|error| {
-                    InstanceError::InvalidState(format!(
-                        "instance {:?} has invalid position: {error}",
-                        persisted.id
-                    ))
-                })?;
-                layouts.push(instance_layout.clone());
-                next_id = next_id.max(sequence_after(&persisted.id));
-                restored.push((
-                    Instance {
-                        id: persisted.id,
-                        widget_id: persisted.widget_id,
-                        variant_id: persisted.variant_id,
-                        layout: instance_layout,
-                        options,
-                    },
-                    config,
-                ));
+                    layouts.push(instance_layout.clone());
+                    next_id = next_id.max(sequence_after(&persisted.id));
+                    restored.push((
+                        dashboard.id.clone(),
+                        Instance {
+                            dashboard_id: dashboard.id.clone(),
+                            id: persisted.id,
+                            widget_id: persisted.widget_id,
+                            variant_id: persisted.variant_id,
+                            layout: instance_layout,
+                            options,
+                        },
+                        config,
+                    ));
+                }
+                restored_links.extend(dashboard.links);
             }
         }
         let instances = restored
             .into_iter()
-            .map(|(resource, config)| {
-                let health = HealthTracker::new(resource.id.clone(), events.clone());
+            .map(|(dashboard_id, resource, config)| {
+                let health =
+                    HealthTracker::new(dashboard_id.clone(), resource.id.clone(), events.clone());
                 let backend = WidgetBackend::start(
+                    dashboard_id.clone(),
                     config.clone(),
                     resource.id.clone(),
                     resource.variant_id.clone(),
@@ -253,6 +310,7 @@ impl InstanceManager {
                 (
                     resource.id.clone(),
                     ManagedInstance {
+                        dashboard_id,
                         resource,
                         config,
                         backend,
@@ -265,19 +323,15 @@ impl InstanceManager {
             InstanceError::InvalidState(format!("dashboard has invalid links: {error}"))
         })?;
         if had_saved_state {
-            let mut normalized = instances
-                .values()
-                .map(|instance| PersistedInstance::from(&instance.resource))
-                .collect::<Vec<_>>();
-            normalized.sort_by(|left, right| left.id.cmp(&right.id));
-            sort_links(&mut restored_links);
             store
-                .save(
-                    &DashboardStateFile::new(normalized, restored_links.clone())
-                        .with_widget_state(restored_widget_state.clone()),
-                )
+                .save(&state_from_runtime(
+                    &restored_dashboards,
+                    instances.values(),
+                    &restored_links,
+                    restored_widget_state.clone(),
+                ))
                 .map_err(|error| {
-                    InstanceError::InvalidState(format!("could not migrate state: {error}"))
+                    InstanceError::InvalidState(format!("could not normalize state: {error}"))
                 })?;
         }
         Ok(Self {
@@ -285,8 +339,10 @@ impl InstanceManager {
                 layout,
                 instances: Mutex::new(instances),
                 links: RwLock::new(restored_links),
+                dashboards: RwLock::new(restored_dashboards),
                 events,
                 next_id: AtomicU64::new(next_id),
+                next_dashboard_id: AtomicU64::new(next_dashboard_id),
                 store: Some(store),
                 widget_state_revisions: RwLock::new(
                     restored_widget_state
@@ -311,6 +367,315 @@ impl InstanceManager {
         let _ = self.inner.events.send(event);
     }
 
+    pub async fn list_dashboards(&self) -> Vec<Dashboard> {
+        let dashboards = self
+            .inner
+            .dashboards
+            .read()
+            .expect("dashboards lock is poisoned")
+            .clone();
+        let instances = self.inner.instances.lock().await;
+        dashboards
+            .into_iter()
+            .map(|(id, name)| dashboard_resource(&id, name, instances.values()))
+            .collect()
+    }
+
+    pub async fn dashboard(&self, dashboard_id: &str) -> Result<Dashboard, InstanceError> {
+        let name = self
+            .inner
+            .dashboards
+            .read()
+            .expect("dashboards lock is poisoned")
+            .get(dashboard_id)
+            .cloned()
+            .ok_or(InstanceError::UnknownDashboard)?;
+        let instances = self.inner.instances.lock().await;
+        Ok(dashboard_resource(dashboard_id, name, instances.values()))
+    }
+
+    pub async fn create_dashboard(&self, name: &str) -> Result<Dashboard, InstanceError> {
+        let name = normalize_dashboard_name(name)?;
+        let instances = self.inner.instances.lock().await;
+        let mut dashboards = self
+            .inner
+            .dashboards
+            .write()
+            .expect("dashboards lock is poisoned");
+        if dashboards.len() >= 32 {
+            return Err(InstanceError::DashboardLimit);
+        }
+        let sequence = self.inner.next_dashboard_id.fetch_add(1, Ordering::Relaxed);
+        let id = format!("dashboard-{sequence}");
+        let mut proposed = dashboards.clone();
+        proposed.insert(id.clone(), name.clone());
+        self.persist_with_dashboards(&proposed, instances.values(), &self.list_links())?;
+        dashboards.insert(id.clone(), name.clone());
+        drop(instances);
+        drop(dashboards);
+        let dashboard = Dashboard {
+            id,
+            name,
+            instances: Vec::new(),
+            health: Vec::new(),
+        };
+        let _ = self.inner.events.send(DashboardEvent::DashboardCreated {
+            dashboard: dashboard.clone(),
+        });
+        Ok(dashboard)
+    }
+
+    pub async fn rename_dashboard(
+        &self,
+        dashboard_id: &str,
+        name: &str,
+    ) -> Result<Dashboard, InstanceError> {
+        let name = normalize_dashboard_name(name)?;
+        let instances = self.inner.instances.lock().await;
+        let mut dashboards = self
+            .inner
+            .dashboards
+            .write()
+            .expect("dashboards lock is poisoned");
+        if !dashboards.contains_key(dashboard_id) {
+            return Err(InstanceError::UnknownDashboard);
+        }
+        let mut proposed = dashboards.clone();
+        proposed.insert(dashboard_id.into(), name.clone());
+        self.persist_with_dashboards(&proposed, instances.values(), &self.list_links())?;
+        dashboards.insert(dashboard_id.into(), name.clone());
+        let dashboard = dashboard_resource(dashboard_id, name, instances.values());
+        drop(instances);
+        drop(dashboards);
+        let _ = self.inner.events.send(DashboardEvent::DashboardUpdated {
+            dashboard: dashboard.clone(),
+        });
+        Ok(dashboard)
+    }
+
+    pub async fn duplicate_dashboard(
+        &self,
+        dashboard_id: &str,
+    ) -> Result<Dashboard, InstanceError> {
+        let mut instances = self.inner.instances.lock().await;
+        let mut dashboards = self
+            .inner
+            .dashboards
+            .write()
+            .expect("dashboards lock is poisoned");
+        let source_name = dashboards
+            .get(dashboard_id)
+            .cloned()
+            .ok_or(InstanceError::UnknownDashboard)?;
+        if dashboards.len() >= 32 {
+            return Err(InstanceError::DashboardLimit);
+        }
+        let name = duplicate_dashboard_name(&source_name, dashboards.values());
+        let sequence = self.inner.next_dashboard_id.fetch_add(1, Ordering::Relaxed);
+        let new_dashboard_id = format!("dashboard-{sequence}");
+        let mut id_map = HashMap::new();
+        let mut copies = Vec::new();
+        for instance in instances
+            .values()
+            .filter(|instance| instance.dashboard_id == dashboard_id)
+        {
+            let sequence = self.inner.next_id.fetch_add(1, Ordering::Relaxed);
+            let id = format!("{}-{sequence}", instance.resource.widget_id);
+            id_map.insert(instance.resource.id.clone(), id.clone());
+            let mut resource = instance.resource.clone();
+            resource.dashboard_id.clone_from(&new_dashboard_id);
+            resource.id = id;
+            copies.push((resource, instance.config.clone()));
+        }
+        let copied_links = self
+            .list_links()
+            .into_iter()
+            .filter(|link| id_map.contains_key(&link.target_instance_id))
+            .map(|mut link| {
+                link.source_instance_id = id_map[&link.source_instance_id].clone();
+                link.target_instance_id = id_map[&link.target_instance_id].clone();
+                link
+            })
+            .collect::<Vec<_>>();
+        let mut proposed_dashboards = dashboards.clone();
+        proposed_dashboards.insert(new_dashboard_id.clone(), name.clone());
+        let mut proposed_links = self.list_links();
+        proposed_links.extend(copied_links.iter().cloned());
+        let widget_state = self
+            .inner
+            .widget_state
+            .read()
+            .expect("widget state lock is poisoned")
+            .clone();
+        let resources = instances
+            .values()
+            .map(|instance| &instance.resource)
+            .chain(copies.iter().map(|(resource, _)| resource));
+        if let Some(store) = &self.inner.store {
+            store
+                .save(&state_from_resources(
+                    &proposed_dashboards,
+                    resources,
+                    &proposed_links,
+                    widget_state,
+                )?)
+                .map_err(|_| InstanceError::PersistenceFailed)?;
+        }
+        dashboards.insert(new_dashboard_id.clone(), name.clone());
+        for (resource, config) in copies {
+            let health = HealthTracker::new(
+                new_dashboard_id.clone(),
+                resource.id.clone(),
+                self.inner.events.clone(),
+            );
+            let backend = WidgetBackend::start(
+                new_dashboard_id.clone(),
+                config.clone(),
+                resource.id.clone(),
+                resource.variant_id.clone(),
+                resource.options.clone(),
+                self.inner.events.clone(),
+                health.clone(),
+            );
+            instances.insert(
+                resource.id.clone(),
+                ManagedInstance {
+                    dashboard_id: new_dashboard_id.clone(),
+                    resource,
+                    config,
+                    backend,
+                    health,
+                },
+            );
+        }
+        self.inner
+            .links
+            .write()
+            .expect("links lock is poisoned")
+            .extend(copied_links);
+        let dashboard = dashboard_resource(&new_dashboard_id, name, instances.values());
+        drop(instances);
+        drop(dashboards);
+        let _ = self.inner.events.send(DashboardEvent::DashboardCreated {
+            dashboard: dashboard.clone(),
+        });
+        Ok(dashboard)
+    }
+
+    pub async fn delete_dashboard(&self, dashboard_id: &str) -> Result<(), InstanceError> {
+        let removed = {
+            let mut instances = self.inner.instances.lock().await;
+            let mut dashboards = self
+                .inner
+                .dashboards
+                .write()
+                .expect("dashboards lock is poisoned");
+            if !dashboards.contains_key(dashboard_id) {
+                return Err(InstanceError::UnknownDashboard);
+            }
+            let removed_ids = instances
+                .values()
+                .filter(|instance| instance.dashboard_id == dashboard_id)
+                .map(|instance| instance.resource.id.clone())
+                .collect::<std::collections::HashSet<_>>();
+            let retained_links = self
+                .list_links()
+                .into_iter()
+                .filter(|link| !removed_ids.contains(&link.target_instance_id))
+                .collect::<Vec<_>>();
+            let mut proposed = dashboards.clone();
+            proposed.remove(dashboard_id);
+            self.persist_with_dashboards(
+                &proposed,
+                instances
+                    .values()
+                    .filter(|instance| instance.dashboard_id != dashboard_id),
+                &retained_links,
+            )?;
+            dashboards.remove(dashboard_id);
+            *self.inner.links.write().expect("links lock is poisoned") = retained_links;
+            removed_ids
+                .into_iter()
+                .filter_map(|id| instances.remove(&id))
+                .collect::<Vec<_>>()
+        };
+        for mut instance in removed {
+            instance.backend.shutdown().await;
+        }
+        let _ = self.inner.events.send(DashboardEvent::DashboardDestroyed {
+            dashboard_id: dashboard_id.into(),
+        });
+        Ok(())
+    }
+
+    pub async fn list_for(&self, dashboard_id: &str) -> Result<Vec<Instance>, InstanceError> {
+        self.ensure_dashboard(dashboard_id)?;
+        Ok(self
+            .list()
+            .await
+            .into_iter()
+            .filter(|instance| instance.dashboard_id == dashboard_id)
+            .collect())
+    }
+
+    pub async fn list_health_for(
+        &self,
+        dashboard_id: &str,
+    ) -> Result<Vec<InstanceHealth>, InstanceError> {
+        self.ensure_dashboard(dashboard_id)?;
+        let instances = self.inner.instances.lock().await;
+        let mut health = instances
+            .values()
+            .filter(|instance| instance.dashboard_id == dashboard_id)
+            .map(|instance| instance.health.snapshot())
+            .collect::<Vec<_>>();
+        health.sort_by(|left, right| left.instance_id.cmp(&right.instance_id));
+        Ok(health)
+    }
+
+    pub async fn list_links_for(
+        &self,
+        dashboard_id: &str,
+    ) -> Result<Vec<DashboardLink>, InstanceError> {
+        self.ensure_dashboard(dashboard_id)?;
+        let instances = self.inner.instances.lock().await;
+        let ids = instances
+            .values()
+            .filter(|instance| instance.dashboard_id == dashboard_id)
+            .map(|instance| instance.resource.id.as_str())
+            .collect::<std::collections::HashSet<_>>();
+        Ok(self
+            .list_links()
+            .into_iter()
+            .filter(|link| ids.contains(link.target_instance_id.as_str()))
+            .collect())
+    }
+
+    fn ensure_dashboard(&self, dashboard_id: &str) -> Result<(), InstanceError> {
+        self.inner
+            .dashboards
+            .read()
+            .expect("dashboards lock is poisoned")
+            .contains_key(dashboard_id)
+            .then_some(())
+            .ok_or(InstanceError::UnknownDashboard)
+    }
+
+    pub async fn ensure_instance_dashboard(
+        &self,
+        dashboard_id: &str,
+        instance_id: &str,
+    ) -> Result<(), InstanceError> {
+        self.inner
+            .instances
+            .lock()
+            .await
+            .get(instance_id)
+            .filter(|instance| instance.dashboard_id == dashboard_id)
+            .map(|_| ())
+            .ok_or(InstanceError::UnknownInstance)
+    }
+
     pub async fn list(&self) -> Vec<Instance> {
         let instances = self.inner.instances.lock().await;
         let mut resources: Vec<_> = instances
@@ -319,16 +684,6 @@ impl InstanceManager {
             .collect();
         resources.sort_by(|left, right| left.id.cmp(&right.id));
         resources
-    }
-
-    pub async fn list_health(&self) -> Vec<InstanceHealth> {
-        let instances = self.inner.instances.lock().await;
-        let mut health = instances
-            .values()
-            .map(|instance| instance.health.snapshot())
-            .collect::<Vec<_>>();
-        health.sort_by(|left, right| left.instance_id.cmp(&right.instance_id));
-        health
     }
 
     pub async fn health(&self, instance_id: &str) -> Result<InstanceHealth, InstanceError> {
@@ -361,13 +716,19 @@ impl InstanceManager {
 
     pub async fn create(
         &self,
+        dashboard_id: &str,
         config: Arc<WidgetConfig>,
-        variant_id: String,
-        column: u32,
-        row: u32,
-        supplied_options: BTreeMap<String, Value>,
-        supplied_links: Vec<NewInstanceLink>,
+        spec: CreateInstanceSpec,
     ) -> Result<Instance, InstanceError> {
+        if !self
+            .inner
+            .dashboards
+            .read()
+            .expect("dashboards lock is poisoned")
+            .contains_key(dashboard_id)
+        {
+            return Err(InstanceError::UnknownDashboard);
+        }
         if !config.backend.is_file() {
             tracing::warn!(
                 widget_id = %config.descriptor.id,
@@ -379,14 +740,14 @@ impl InstanceManager {
 
         let widget_id = &config.descriptor.id;
         let variant = config
-            .variant(&variant_id)
+            .variant(&spec.variant_id)
             .ok_or(InstanceError::UnknownVariant)?;
         let options = config
-            .normalize_options(&variant_id, &supplied_options)
+            .normalize_options(&spec.variant_id, &spec.options)
             .map_err(InstanceError::InvalidOptions)?;
         let layout = InstanceLayout {
-            column,
-            row,
+            column: spec.column,
+            row: spec.row,
             width: variant.width,
             height: variant.height,
         };
@@ -394,18 +755,22 @@ impl InstanceManager {
         validate_layout(
             self.inner.layout,
             &layout,
-            instances.values().map(|instance| &instance.resource.layout),
+            instances
+                .values()
+                .filter(|instance| instance.dashboard_id == dashboard_id)
+                .map(|instance| &instance.resource.layout),
         )?;
 
         let mut resource = Instance {
+            dashboard_id: dashboard_id.into(),
             id: String::new(),
             widget_id: widget_id.clone(),
-            variant_id,
+            variant_id: spec.variant_id,
             layout,
             options,
         };
         let mut new_links =
-            validate_new_instance_links(&instances, &resource, &config, supplied_links)?;
+            validate_new_instance_links(&instances, &resource, &config, spec.links)?;
         let sequence = self.inner.next_id.fetch_add(1, Ordering::Relaxed);
         resource.id = format!("{widget_id}-{sequence}");
         for link in &mut new_links {
@@ -425,8 +790,13 @@ impl InstanceManager {
             widget_id = %resource.widget_id,
             "creating widget instance"
         );
-        let health = HealthTracker::new(resource.id.clone(), self.inner.events.clone());
+        let health = HealthTracker::new(
+            dashboard_id.into(),
+            resource.id.clone(),
+            self.inner.events.clone(),
+        );
         let backend = WidgetBackend::start(
+            dashboard_id.into(),
             config.clone(),
             resource.id.clone(),
             resource.variant_id.clone(),
@@ -437,6 +807,7 @@ impl InstanceManager {
         instances.insert(
             resource.id.clone(),
             ManagedInstance {
+                dashboard_id: dashboard_id.into(),
                 resource: resource.clone(),
                 config,
                 backend,
@@ -453,11 +824,15 @@ impl InstanceManager {
         drop(instances);
 
         let _ = self.inner.events.send(DashboardEvent::InstanceCreated {
+            dashboard_id: dashboard_id.into(),
             instance: resource.clone(),
         });
         health.publish();
         for link in new_links {
-            let _ = self.inner.events.send(DashboardEvent::LinkUpdated { link });
+            let _ = self.inner.events.send(DashboardEvent::LinkUpdated {
+                dashboard_id: dashboard_id.into(),
+                link,
+            });
         }
         Ok(resource)
     }
@@ -472,6 +847,7 @@ impl InstanceManager {
         if !instances.contains_key(instance_id) {
             return Err(InstanceError::UnknownInstance);
         }
+        let dashboard_id = instances[instance_id].dashboard_id.clone();
         let current = &instances[instance_id].resource.layout;
         let layout = InstanceLayout {
             column,
@@ -484,7 +860,9 @@ impl InstanceManager {
             &layout,
             instances
                 .iter()
-                .filter(|(id, _)| id.as_str() != instance_id)
+                .filter(|(id, instance)| {
+                    id.as_str() != instance_id && instance.dashboard_id == dashboard_id
+                })
                 .map(|(_, instance)| &instance.resource.layout),
         )?;
         let mut resource = instances[instance_id].resource.clone();
@@ -505,6 +883,7 @@ impl InstanceManager {
 
         tracing::info!(instance_id, ?resource.layout, "updated widget instance");
         let _ = self.inner.events.send(DashboardEvent::InstanceUpdated {
+            dashboard_id,
             instance: resource.clone(),
         });
         Ok(resource)
@@ -523,6 +902,10 @@ impl InstanceManager {
             return Err(InstanceError::UnknownInstance);
         }
 
+        let dashboard_id = instances[source_id].dashboard_id.clone();
+        if instances[target_id].dashboard_id != dashboard_id {
+            return Err(InstanceError::UnknownInstance);
+        }
         let source_layout = instances[source_id].resource.layout.clone();
         let target_layout = instances[target_id].resource.layout.clone();
         let mut source_next = source_layout.clone();
@@ -537,7 +920,11 @@ impl InstanceManager {
             &source_next,
             instances
                 .iter()
-                .filter(|(id, _)| id.as_str() != source_id && id.as_str() != target_id)
+                .filter(|(id, instance)| {
+                    instance.dashboard_id == dashboard_id
+                        && id.as_str() != source_id
+                        && id.as_str() != target_id
+                })
                 .map(|(_, instance)| &instance.resource.layout),
         )?;
         validate_layout(
@@ -545,7 +932,11 @@ impl InstanceManager {
             &target_next,
             instances
                 .iter()
-                .filter(|(id, _)| id.as_str() != source_id && id.as_str() != target_id)
+                .filter(|(id, instance)| {
+                    instance.dashboard_id == dashboard_id
+                        && id.as_str() != source_id
+                        && id.as_str() != target_id
+                })
                 .map(|(_, instance)| &instance.resource.layout),
         )?;
         if layouts_overlap(&source_next, &target_next) {
@@ -583,6 +974,7 @@ impl InstanceManager {
 
         for instance in &updated {
             let _ = self.inner.events.send(DashboardEvent::InstanceUpdated {
+                dashboard_id: dashboard_id.clone(),
                 instance: instance.clone(),
             });
         }
@@ -604,11 +996,12 @@ impl InstanceManager {
         )?;
         sort_links(&mut proposed);
         *self.inner.links.write().expect("links lock is poisoned") = proposed;
+        let dashboard_id = instances[&link.target_instance_id].dashboard_id.clone();
         drop(instances);
-        let _ = self
-            .inner
-            .events
-            .send(DashboardEvent::LinkUpdated { link: link.clone() });
+        let _ = self.inner.events.send(DashboardEvent::LinkUpdated {
+            dashboard_id,
+            link: link.clone(),
+        });
         Ok(link)
     }
 
@@ -631,8 +1024,10 @@ impl InstanceManager {
             &proposed,
         )?;
         *self.inner.links.write().expect("links lock is poisoned") = proposed;
+        let dashboard_id = instances[target_instance_id].dashboard_id.clone();
         drop(instances);
         let _ = self.inner.events.send(DashboardEvent::LinkDestroyed {
+            dashboard_id,
             target_instance_id: target_instance_id.into(),
             target_port: target_port.into(),
         });
@@ -659,21 +1054,47 @@ impl InstanceManager {
         let mut instance = instances
             .remove(instance_id)
             .expect("instance existence is checked");
+        let dashboard_id = instance.dashboard_id.clone();
         *self.inner.links.write().expect("links lock is poisoned") = retained_links;
         drop(instances);
 
         tracing::info!(instance_id, "destroying widget instance");
         let _ = self.inner.events.send(DashboardEvent::InstanceDestroyed {
+            dashboard_id: dashboard_id.clone(),
             instance_id: instance_id.into(),
         });
         for link in removed_links {
             let _ = self.inner.events.send(DashboardEvent::LinkDestroyed {
+                dashboard_id: dashboard_id.clone(),
                 target_instance_id: link.target_instance_id,
                 target_port: link.target_port,
             });
         }
         instance.backend.shutdown().await;
         Ok(())
+    }
+
+    fn persist_with_dashboards<'a>(
+        &self,
+        dashboards: &BTreeMap<DashboardId, String>,
+        instances: impl Iterator<Item = &'a ManagedInstance>,
+        links: &[DashboardLink],
+    ) -> Result<(), InstanceError> {
+        let widget_state = self
+            .inner
+            .widget_state
+            .read()
+            .expect("widget state lock is poisoned")
+            .clone();
+        let Some(store) = &self.inner.store else {
+            return Ok(());
+        };
+        store
+            .save(&state_from_runtime(dashboards, instances, links, widget_state))
+            .map_err(|error| {
+                tracing::error!(%error, path = %store.path().display(), "failed to persist dashboards");
+                InstanceError::PersistenceFailed
+            })
     }
 
     fn persist<'a>(
@@ -707,16 +1128,16 @@ impl InstanceManager {
         let Some(store) = &self.inner.store else {
             return Ok(());
         };
-        let mut instances = resources.map(PersistedInstance::from).collect::<Vec<_>>();
-        instances.sort_by(|left, right| left.id.cmp(&right.id));
-        let mut links = links.to_vec();
-        sort_links(&mut links);
-        store
-            .save(&DashboardStateFile::new(instances, links).with_widget_state(widget_state))
-            .map_err(|error| {
-                tracing::error!(%error, path = %store.path().display(), "failed to persist dashboard composition");
-                InstanceError::PersistenceFailed
-            })
+        let dashboards = self
+            .inner
+            .dashboards
+            .read()
+            .expect("dashboards lock is poisoned");
+        let state = state_from_resources(&dashboards, resources, links, widget_state)?;
+        store.save(&state).map_err(|error| {
+            tracing::error!(%error, path = %store.path().display(), "failed to persist dashboard composition");
+            InstanceError::PersistenceFailed
+        })
     }
 
     pub fn get_widget_state(&self, widget_id: &str) -> (u64, Value) {
@@ -817,6 +1238,7 @@ impl InstanceManager {
         instance.backend.shutdown().await;
         instance.health.restarted();
         instance.backend = WidgetBackend::start(
+            instance.dashboard_id.clone(),
             instance.config.clone(),
             instance.resource.id.clone(),
             instance.resource.variant_id.clone(),
@@ -856,6 +1278,118 @@ impl From<&Instance> for PersistedInstance {
             options: instance.options.clone(),
         }
     }
+}
+
+fn dashboard_resource<'a>(
+    dashboard_id: &str,
+    name: String,
+    instances: impl Iterator<Item = &'a ManagedInstance>,
+) -> Dashboard {
+    let mut resources = Vec::new();
+    let mut health = Vec::new();
+    for instance in instances.filter(|instance| instance.dashboard_id == dashboard_id) {
+        resources.push(instance.resource.clone());
+        health.push(instance.health.snapshot());
+    }
+    resources.sort_by(|left, right| left.id.cmp(&right.id));
+    health.sort_by(|left, right| left.instance_id.cmp(&right.instance_id));
+    Dashboard {
+        id: dashboard_id.into(),
+        name,
+        instances: resources,
+        health,
+    }
+}
+
+fn normalize_dashboard_name(name: &str) -> Result<String, InstanceError> {
+    let name = name.trim();
+    let length = name.chars().count();
+    if length == 0 || length > 64 || name.chars().any(char::is_control) {
+        return Err(InstanceError::InvalidDashboardName);
+    }
+    Ok(name.into())
+}
+
+fn duplicate_dashboard_name<'a>(
+    source: &str,
+    existing: impl Iterator<Item = &'a String>,
+) -> String {
+    let existing = existing
+        .map(String::as_str)
+        .collect::<std::collections::HashSet<_>>();
+    for index in 1_u64.. {
+        let suffix = format!(" ({index})");
+        let maximum = 64_usize.saturating_sub(suffix.chars().count());
+        let base = source.chars().take(maximum).collect::<String>();
+        let candidate = format!("{base}{suffix}");
+        if !existing.contains(candidate.as_str()) {
+            return candidate;
+        }
+    }
+    unreachable!()
+}
+
+fn state_from_runtime<'a>(
+    dashboards: &BTreeMap<DashboardId, String>,
+    instances: impl Iterator<Item = &'a ManagedInstance>,
+    links: &[DashboardLink],
+    widget_state: BTreeMap<WidgetId, Value>,
+) -> DashboardStateFile {
+    state_from_resources(
+        dashboards,
+        instances.map(|instance| &instance.resource),
+        links,
+        widget_state,
+    )
+    .expect("runtime composition is internally consistent")
+}
+
+fn state_from_resources<'a>(
+    dashboards: &BTreeMap<DashboardId, String>,
+    resources: impl Iterator<Item = &'a Instance>,
+    links: &[DashboardLink],
+    widget_state: BTreeMap<WidgetId, Value>,
+) -> Result<DashboardStateFile, InstanceError> {
+    let mut records = dashboards
+        .iter()
+        .map(|(id, name)| {
+            (
+                id.clone(),
+                PersistedDashboard {
+                    id: id.clone(),
+                    name: name.clone(),
+                    instances: Vec::new(),
+                    links: Vec::new(),
+                },
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let mut owners = HashMap::new();
+    for resource in resources {
+        let record = records
+            .get_mut(&resource.dashboard_id)
+            .ok_or(InstanceError::UnknownDashboard)?;
+        owners.insert(resource.id.clone(), resource.dashboard_id.clone());
+        record.instances.push(PersistedInstance::from(resource));
+    }
+    for link in links {
+        let dashboard_id = owners
+            .get(&link.target_instance_id)
+            .ok_or_else(|| InstanceError::InvalidLink("target instance was not found".into()))?;
+        records
+            .get_mut(dashboard_id)
+            .expect("instance owner dashboard exists")
+            .links
+            .push(link.clone());
+    }
+    let mut records = records.into_values().collect::<Vec<_>>();
+    for record in &mut records {
+        record
+            .instances
+            .sort_by(|left, right| left.id.cmp(&right.id));
+        sort_links(&mut record.links);
+    }
+    Ok(DashboardStateFile::new(records).with_widget_state(widget_state))
 }
 
 fn initial_state(
@@ -915,7 +1449,12 @@ fn initial_state(
             options,
         });
     }
-    Ok(DashboardStateFile::new(instances, Vec::new()))
+    Ok(DashboardStateFile::new(vec![PersistedDashboard {
+        id: "dashboard-1".into(),
+        name: "Main".into(),
+        instances,
+        links: Vec::new(),
+    }]))
 }
 
 fn validate_widget_state(value: &Value) -> Result<(), InstanceError> {
@@ -1024,6 +1563,9 @@ fn validate_link_parts(
             link.source_instance_id
         )
     })?;
+    if source.dashboard_id != target.dashboard_id {
+        return Err("links cannot cross dashboards".into());
+    }
     let output = source
         .config
         .output(&source.resource.variant_id, &link.source_port)
@@ -1081,6 +1623,7 @@ impl Default for InstanceManager {
 
 impl WidgetBackend {
     fn start(
+        dashboard_id: DashboardId,
         config: Arc<WidgetConfig>,
         instance_id: InstanceId,
         variant_id: String,
@@ -1092,8 +1635,8 @@ impl WidgetBackend {
         let task_instance_id = instance_id.clone();
         let task = tokio::spawn(async move {
             if let Err(error) = run_backend(
+                (&dashboard_id, &task_instance_id),
                 &config,
-                &task_instance_id,
                 &variant_id,
                 options,
                 &events,
@@ -1159,14 +1702,15 @@ impl Drop for WidgetBackend {
 }
 
 async fn run_backend(
+    identity: (&str, &str),
     config: &WidgetConfig,
-    instance_id: &str,
     variant_id: &str,
     options: BTreeMap<String, Value>,
     events: &broadcast::Sender<DashboardEvent>,
     mut commands: mpsc::UnboundedReceiver<ServerToWidget>,
     health: &HealthTracker,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let (_, instance_id) = identity;
     tracing::info!(
         instance_id,
         widget_id = %config.descriptor.id,
@@ -1223,8 +1767,8 @@ async fn run_backend(
             line = lines.next_line() => {
                 let Some(line) = line? else { break };
                 handle_backend_message(
+                    identity,
                     config,
-                    instance_id,
                     events,
                     health,
                     &line,
@@ -1269,14 +1813,15 @@ async fn write_backend_message(
 }
 
 fn handle_backend_message(
+    identity: (&str, &str),
     config: &WidgetConfig,
-    expected_instance_id: &str,
     events: &broadcast::Sender<DashboardEvent>,
     health: &HealthTracker,
     line: &str,
     ready: &mut bool,
     pending_probe: &mut Option<u64>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let (dashboard_id, expected_instance_id) = identity;
     match dashboard_protocol::parse::<WidgetToServer>(line)? {
         WidgetToServer::Ready { widget_id } if widget_id == config.descriptor.id => {
             *ready = true;
@@ -1294,6 +1839,7 @@ fn handle_backend_message(
             health.update();
             tracing::debug!(%instance_id, "received widget telemetry");
             let _ = events.send(DashboardEvent::WidgetUpdate {
+                dashboard_id: dashboard_id.into(),
                 instance_id,
                 payload,
             });
@@ -1321,6 +1867,7 @@ fn handle_backend_message(
                 "widget backend reported an unscoped error"
             );
             let _ = events.send(DashboardEvent::InstanceError {
+                dashboard_id: Some(dashboard_id.into()),
                 instance_id: None,
                 error: error.into(),
             });
@@ -1375,9 +1922,10 @@ mod tests {
         let store = Arc::new(StateStore::new(state_path.clone()));
         store
             .save(
-                &DashboardStateFile::new(Vec::new(), Vec::new()).with_widget_state(BTreeMap::from(
-                    [("projects".into(), serde_json::json!({"pins": []}))],
-                )),
+                &DashboardStateFile::new(Vec::new()).with_widget_state(BTreeMap::from([(
+                    "projects".into(),
+                    serde_json::json!({"pins": []}),
+                )])),
             )
             .unwrap();
         let manager = InstanceManager::restore(
@@ -1434,6 +1982,21 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn dashboard_collection_enforces_its_limit() {
+        let manager = InstanceManager::default();
+        for index in 0..32 {
+            manager
+                .create_dashboard(&format!("Dashboard {index}"))
+                .await
+                .unwrap();
+        }
+        assert!(matches!(
+            manager.create_dashboard("One too many").await,
+            Err(InstanceError::DashboardLimit)
+        ));
+    }
+
+    #[tokio::test]
     async fn swap_rejects_missing_instances() {
         let manager = InstanceManager::default();
 
@@ -1474,9 +2037,9 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(state.instances[0].id, "cpu-1");
-        assert_eq!(state.instances[0].position.column, 0);
-        assert_eq!(state.instances[0].position.row, 1);
+        assert_eq!(state.dashboards[0].instances[0].id, "cpu-1");
+        assert_eq!(state.dashboards[0].instances[0].position.column, 0);
+        assert_eq!(state.dashboards[0].instances[0].position.row, 1);
         assert!(
             initial_state(
                 DashboardLayout::default(),
@@ -1531,10 +2094,12 @@ mod tests {
             target_port: "task".into(),
         };
         store
-            .save(&DashboardStateFile::new(
-                instances.clone(),
-                vec![link.clone()],
-            ))
+            .save(&DashboardStateFile::new(vec![PersistedDashboard {
+                id: "dashboard-1".into(),
+                name: "Main".into(),
+                instances: instances.clone(),
+                links: vec![link.clone()],
+            }]))
             .unwrap();
 
         let manager = InstanceManager::restore(
@@ -1546,18 +2111,71 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(manager.list_links(), vec![link.clone()]);
+        let duplicate = manager.duplicate_dashboard("dashboard-1").await.unwrap();
+        assert_eq!(duplicate.name, "Main (1)");
+        assert_eq!(duplicate.instances.len(), 2);
+        assert!(
+            duplicate
+                .instances
+                .iter()
+                .all(|instance| instance.dashboard_id == duplicate.id)
+        );
+        let duplicate_ids = duplicate
+            .instances
+            .iter()
+            .map(|instance| instance.id.as_str())
+            .collect::<std::collections::HashSet<_>>();
+        let duplicate_links = manager.list_links_for(&duplicate.id).await.unwrap();
+        assert_eq!(duplicate_links.len(), 1);
+        assert!(duplicate_ids.contains(duplicate_links[0].source_instance_id.as_str()));
+        assert!(duplicate_ids.contains(duplicate_links[0].target_instance_id.as_str()));
+        let cross_dashboard = DashboardLink {
+            source_instance_id: link.source_instance_id.clone(),
+            source_port: link.source_port.clone(),
+            target_instance_id: duplicate_links[0].target_instance_id.clone(),
+            target_port: link.target_port.clone(),
+        };
+        assert!(matches!(
+            manager.set_link(cross_dashboard).await,
+            Err(InstanceError::InvalidLink(_))
+        ));
+        manager.delete_dashboard(&duplicate.id).await.unwrap();
+        assert_eq!(manager.list_links(), vec![link.clone()]);
         drop(manager);
 
         let mut invalid = link;
         invalid.source_port = "missing".into();
         store
-            .save(&DashboardStateFile::new(instances, vec![invalid]))
+            .save(&DashboardStateFile::new(vec![PersistedDashboard {
+                id: "dashboard-1".into(),
+                name: "Main".into(),
+                instances,
+                links: vec![invalid],
+            }]))
             .unwrap();
         assert!(matches!(
             InstanceManager::restore(DashboardLayout::default(), widgets, store, &[],).await,
             Err(InstanceError::InvalidState(_))
         ));
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn dashboard_names_are_bounded_and_duplicates_use_numbered_suffixes() {
+        assert_eq!(normalize_dashboard_name("  System  ").unwrap(), "System");
+        assert!(normalize_dashboard_name("").is_err());
+        assert!(normalize_dashboard_name(&"x".repeat(65)).is_err());
+        assert_eq!(
+            duplicate_dashboard_name(
+                "System",
+                ["System".to_string(), "System (1)".to_string()].iter()
+            ),
+            "System (2)"
+        );
+        assert_eq!(
+            duplicate_dashboard_name(&"x".repeat(64), std::iter::empty()),
+            format!("{} (1)", "x".repeat(60))
+        );
     }
 
     #[test]

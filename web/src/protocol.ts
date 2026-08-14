@@ -86,6 +86,7 @@ export type DashboardLink = {
 };
 
 export type Instance = {
+  dashboard_id: string;
   id: string;
   widget_id: string;
   variant_id: string;
@@ -93,6 +94,14 @@ export type Instance = {
   options: Record<string, boolean | number | string>;
 };
 
+export type Dashboard = {
+  id: string;
+  name: string;
+  instances: Instance[];
+  health: InstanceHealth[];
+};
+
+export type DashboardList = { dashboards: Dashboard[] };
 export type WidgetList = { widgets: WidgetDescriptor[] };
 export type InstanceList = { instances: Instance[] };
 export type InstanceHealthList = { instances: InstanceHealth[] };
@@ -104,35 +113,55 @@ export type WidgetStateResource = {
   value: unknown;
 };
 
+type DashboardCreatedEvent = {
+  version: typeof EVENT_VERSION;
+  kind: "dashboard_created";
+  data: { dashboard: Dashboard };
+};
+type DashboardUpdatedEvent = {
+  version: typeof EVENT_VERSION;
+  kind: "dashboard_updated";
+  data: { dashboard: Dashboard };
+};
+type DashboardDestroyedEvent = {
+  version: typeof EVENT_VERSION;
+  kind: "dashboard_destroyed";
+  data: { dashboard_id: string };
+};
 type InstanceCreatedEvent = {
   version: typeof EVENT_VERSION;
   kind: "instance_created";
-  data: { instance: Instance };
+  data: { dashboard_id: string; instance: Instance };
 };
 type InstanceUpdatedEvent = {
   version: typeof EVENT_VERSION;
   kind: "instance_updated";
-  data: { instance: Instance };
+  data: { dashboard_id: string; instance: Instance };
 };
 type InstanceDestroyedEvent = {
   version: typeof EVENT_VERSION;
   kind: "instance_destroyed";
-  data: { instance_id: string };
+  data: { dashboard_id: string; instance_id: string };
 };
 type LinkUpdatedEvent = {
   version: typeof EVENT_VERSION;
   kind: "link_updated";
-  data: { link: DashboardLink };
+  data: { dashboard_id: string; link: DashboardLink };
 };
 type LinkDestroyedEvent = {
   version: typeof EVENT_VERSION;
   kind: "link_destroyed";
-  data: { target_instance_id: string; target_port: string };
+  data: {
+    dashboard_id: string;
+    target_instance_id: string;
+    target_port: string;
+  };
 };
 type InstanceErrorEvent = {
   version: typeof EVENT_VERSION;
   kind: "instance_error";
   data: {
+    dashboard_id: string | null;
     instance_id: string | null;
     error: { code: string; message: string };
   };
@@ -140,12 +169,12 @@ type InstanceErrorEvent = {
 type InstanceHealthUpdatedEvent = {
   version: typeof EVENT_VERSION;
   kind: "instance_health_updated";
-  data: { health: InstanceHealth };
+  data: { dashboard_id: string; health: InstanceHealth };
 };
 type WidgetUpdateEvent = {
   version: typeof EVENT_VERSION;
   kind: "widget_update";
-  data: { instance_id: string; payload: unknown };
+  data: { dashboard_id: string; instance_id: string; payload: unknown };
 };
 type WidgetStateUpdatedEvent = {
   version: typeof EVENT_VERSION;
@@ -164,6 +193,9 @@ type ConfigurationErrorEvent = {
 };
 
 export type DashboardEvent =
+  | DashboardCreatedEvent
+  | DashboardUpdatedEvent
+  | DashboardDestroyedEvent
   | InstanceCreatedEvent
   | InstanceUpdatedEvent
   | InstanceDestroyedEvent
@@ -180,6 +212,29 @@ export function parseDashboardLayout(value: unknown): DashboardLayout {
   if (!isRecord(value) || !isPositiveInteger(value.columns))
     throw new Error("invalid dashboard layout");
   return { columns: value.columns };
+}
+
+export function parseDashboardList(value: unknown): DashboardList {
+  if (!isRecord(value) || !Array.isArray(value.dashboards))
+    throw new Error("invalid dashboard list");
+  return { dashboards: value.dashboards.map(parseDashboard) };
+}
+
+export function parseDashboard(value: unknown): Dashboard {
+  if (
+    !isRecord(value) ||
+    typeof value.id !== "string" ||
+    typeof value.name !== "string" ||
+    !Array.isArray(value.instances) ||
+    !Array.isArray(value.health)
+  )
+    throw new Error("invalid dashboard");
+  return {
+    id: value.id,
+    name: value.name,
+    instances: value.instances.map(parseInstance),
+    health: value.health.map(parseInstanceHealth),
+  };
 }
 
 export function parseWidgetList(value: unknown): WidgetList {
@@ -225,6 +280,7 @@ export function parseLinkList(value: unknown): LinkList {
 export function parseInstance(value: unknown): Instance {
   if (
     !isRecord(value) ||
+    typeof value.dashboard_id !== "string" ||
     typeof value.id !== "string" ||
     typeof value.widget_id !== "string" ||
     typeof value.variant_id !== "string" ||
@@ -237,6 +293,7 @@ export function parseInstance(value: unknown): Instance {
   )
     throw new Error("invalid instance");
   return {
+    dashboard_id: value.dashboard_id,
     id: value.id,
     widget_id: value.widget_id,
     variant_id: value.variant_id,
@@ -303,30 +360,63 @@ export function parseDashboardEvent(value: unknown): DashboardEvent {
     !isRecord(value.data)
   )
     throw new Error("invalid dashboard event");
+  const dashboardId = value.data.dashboard_id;
   switch (value.kind) {
-    case "instance_created":
-    case "instance_updated":
+    case "dashboard_created":
+    case "dashboard_updated":
       return {
         version: EVENT_VERSION,
         kind: value.kind,
-        data: { instance: parseInstance(value.data.instance) },
+        data: { dashboard: parseDashboard(value.data.dashboard) },
       };
-    case "instance_destroyed":
-      if (typeof value.data.instance_id === "string")
+    case "dashboard_destroyed":
+      if (typeof dashboardId === "string")
         return {
           version: EVENT_VERSION,
           kind: value.kind,
-          data: { instance_id: value.data.instance_id },
+          data: { dashboard_id: dashboardId },
+        };
+      break;
+    case "instance_created":
+    case "instance_updated":
+      if (typeof dashboardId === "string")
+        return {
+          version: EVENT_VERSION,
+          kind: value.kind,
+          data: {
+            dashboard_id: dashboardId,
+            instance: parseInstance(value.data.instance),
+          },
+        };
+      break;
+    case "instance_destroyed":
+      if (
+        typeof dashboardId === "string" &&
+        typeof value.data.instance_id === "string"
+      )
+        return {
+          version: EVENT_VERSION,
+          kind: value.kind,
+          data: {
+            dashboard_id: dashboardId,
+            instance_id: value.data.instance_id,
+          },
         };
       break;
     case "link_updated":
-      return {
-        version: EVENT_VERSION,
-        kind: value.kind,
-        data: { link: parseLink(value.data.link) },
-      };
+      if (typeof dashboardId === "string")
+        return {
+          version: EVENT_VERSION,
+          kind: value.kind,
+          data: {
+            dashboard_id: dashboardId,
+            link: parseLink(value.data.link),
+          },
+        };
+      break;
     case "link_destroyed":
       if (
+        typeof dashboardId === "string" &&
         typeof value.data.target_instance_id === "string" &&
         typeof value.data.target_port === "string"
       )
@@ -334,6 +424,7 @@ export function parseDashboardEvent(value: unknown): DashboardEvent {
           version: EVENT_VERSION,
           kind: value.kind,
           data: {
+            dashboard_id: dashboardId,
             target_instance_id: value.data.target_instance_id,
             target_port: value.data.target_port,
           },
@@ -341,6 +432,7 @@ export function parseDashboardEvent(value: unknown): DashboardEvent {
       break;
     case "instance_error":
       if (
+        (dashboardId === null || typeof dashboardId === "string") &&
         (value.data.instance_id === null ||
           typeof value.data.instance_id === "string") &&
         isError(value.data.error)
@@ -349,23 +441,33 @@ export function parseDashboardEvent(value: unknown): DashboardEvent {
           version: EVENT_VERSION,
           kind: value.kind,
           data: {
+            dashboard_id: dashboardId,
             instance_id: value.data.instance_id,
             error: value.data.error,
           },
         };
       break;
     case "instance_health_updated":
-      return {
-        version: EVENT_VERSION,
-        kind: value.kind,
-        data: { health: parseInstanceHealth(value.data.health) },
-      };
-    case "widget_update":
-      if (typeof value.data.instance_id === "string")
+      if (typeof dashboardId === "string")
         return {
           version: EVENT_VERSION,
           kind: value.kind,
           data: {
+            dashboard_id: dashboardId,
+            health: parseInstanceHealth(value.data.health),
+          },
+        };
+      break;
+    case "widget_update":
+      if (
+        typeof dashboardId === "string" &&
+        typeof value.data.instance_id === "string"
+      )
+        return {
+          version: EVENT_VERSION,
+          kind: value.kind,
+          data: {
+            dashboard_id: dashboardId,
             instance_id: value.data.instance_id,
             payload: value.data.payload,
           },

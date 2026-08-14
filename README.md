@@ -58,10 +58,13 @@ Set `RUST_LOG=dashboardd=debug,tower_http=debug` for backend lifecycle,
 telemetry, widget discovery, and HTTP request logs. The browser console also
 reports connection, reconciliation, event, and widget mount activity.
 
-Open `/` for the widget-only Zen dashboard and `/edit` for the layout editor.
-Variants that opt in show a `Focus` control in Zen mode. Focus uses the
-route `/focus/<instance-id>`, preserves the mounted frontend, fills the viewport,
-and closes with its button, Escape, or browser Back. The editor shows
+Open `/` for the dashboard home. Each dashboard card provides a metadata-only
+layout preview plus Open, Edit, Rename, Duplicate, and Delete actions. Create an
+empty dashboard from the home or the dashboard switcher. Dashboard routes are
+`/d/<dashboard-id>` for Zen and `/d/<dashboard-id>/edit` for the editor.
+Variants that opt in show a `Focus` control in Zen mode. Focus uses
+`/d/<dashboard-id>/focus/<instance-id>`, preserves the mounted frontend, fills
+the viewport, and closes with its button, Escape, or browser Back. The editor shows
 server-owned backend health for each widget. Health diagnostics
 include liveness, the last update and error, and a confirmed manual restart.
 Dashboardd probes backends every 10 seconds and marks them stale after 30 seconds
@@ -102,10 +105,13 @@ symlinks, active HTML, embedded local assets, and unsupported binaries remain
 unavailable. Its Focus presentation provides a larger document and image
 surface while retaining the selected artifact.
 
-Dashboard composition persists in `$XDG_STATE_HOME/scufris/dashboard.json`, or
+Dashboard compositions persist in `$XDG_STATE_HOME/scufris/dashboard.json`, or
 `$HOME/.local/state/scufris/dashboard.json` when `XDG_STATE_HOME` is unset.
-`DASHBOARDD_STATE_FILE` overrides both paths. An invalid saved composition stops
-startup instead of discarding state.
+`DASHBOARDD_STATE_FILE` overrides both paths. Each dashboard owns independent
+instances, placement, options, and links. All dashboards remain running for
+immediate switching and use globally unique instance IDs. Package shared state
+remains global. Version 1 state migrates into a dashboard named `Main`. An
+invalid saved composition stops startup instead of discarding state.
 
 ## User configuration
 

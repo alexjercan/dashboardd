@@ -9,7 +9,7 @@ use axum::{
         StatusCode,
         header::{CACHE_CONTROL, CONTENT_TYPE},
     },
-    response::{IntoResponse, Redirect, Response, Sse, sse::Event, sse::KeepAlive},
+    response::{IntoResponse, Response, Sse, sse::Event, sse::KeepAlive},
     routing::{get, post},
 };
 use dashboard_protocol::{InstanceId, WidgetId};
@@ -28,8 +28,11 @@ use crate::{
     configuration::Theme,
     event::{self, DashboardError, DashboardEvent},
     health::InstanceHealth,
-    instance::{DashboardLayout, Instance, InstanceError, InstanceLayout, NewInstanceLink},
-    state::DashboardLink,
+    instance::{
+        CreateInstanceSpec, Dashboard, DashboardLayout, Instance, InstanceError, InstanceLayout,
+        NewInstanceLink,
+    },
+    state::{DashboardId, DashboardLink},
     widget::{WidgetDescriptor, WidgetLinkPort, WidgetVariant},
 };
 
@@ -38,6 +41,21 @@ const WEB_DIST: &str = "web/dist";
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct WidgetList {
     pub widgets: Vec<WidgetDescriptor>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct DashboardList {
+    pub dashboards: Vec<Dashboard>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct CreateDashboard {
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct RenameDashboard {
+    pub name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -120,6 +138,12 @@ pub struct SetWidgetState {
         get_theme,
         list_widgets,
         get_widget,
+        list_dashboards,
+        get_dashboard,
+        create_dashboard,
+        rename_dashboard,
+        duplicate_dashboard,
+        delete_dashboard,
         list_instances,
         list_instance_health,
         get_instance_health,
@@ -138,6 +162,10 @@ pub struct SetWidgetState {
         dashboard_events,
     ),
     components(schemas(
+        CreateDashboard,
+        RenameDashboard,
+        Dashboard,
+        DashboardList,
         CreateInstance,
         DashboardError,
         DashboardEvent,
@@ -177,7 +205,6 @@ pub fn build_router(state: AppState) -> Router {
         .route("/health", get(health))
         .route("/api/v1/layout", get(get_layout))
         .route("/api/v1/theme", get(get_theme))
-        .route("/api/v1/layout/swap", post(swap_instances))
         .route("/api/v1/widgets", get(list_widgets))
         .route("/api/v1/widgets/{widget_id}", get(get_widget))
         .route(
@@ -185,38 +212,65 @@ pub fn build_router(state: AppState) -> Router {
             get(get_widget_state).put(set_widget_state),
         )
         .route(
-            "/api/v1/instances",
+            "/api/v1/dashboards",
+            get(list_dashboards).post(create_dashboard),
+        )
+        .route(
+            "/api/v1/dashboards/{dashboard_id}",
+            get(get_dashboard)
+                .patch(rename_dashboard)
+                .delete(delete_dashboard),
+        )
+        .route(
+            "/api/v1/dashboards/{dashboard_id}/duplicate",
+            post(duplicate_dashboard),
+        )
+        .route(
+            "/api/v1/dashboards/{dashboard_id}/instances",
             get(list_instances).post(create_instance),
         )
-        .route("/api/v1/instance-health", get(list_instance_health))
-        .route("/api/v1/links", get(list_links))
         .route(
-            "/api/v1/links/{target_instance_id}/{target_port}",
+            "/api/v1/dashboards/{dashboard_id}/instance-health",
+            get(list_instance_health),
+        )
+        .route("/api/v1/dashboards/{dashboard_id}/links", get(list_links))
+        .route(
+            "/api/v1/dashboards/{dashboard_id}/links/{target_instance_id}/{target_port}",
             axum::routing::put(set_link).delete(delete_link),
         )
         .route(
-            "/api/v1/instances/{instance_id}",
+            "/api/v1/dashboards/{dashboard_id}/instances/{instance_id}",
             get(get_instance)
                 .patch(update_instance)
                 .delete(delete_instance),
         )
         .route(
-            "/api/v1/instances/{instance_id}/health",
+            "/api/v1/dashboards/{dashboard_id}/instances/{instance_id}/health",
             get(get_instance_health),
         )
         .route(
-            "/api/v1/instances/{instance_id}/restart",
+            "/api/v1/dashboards/{dashboard_id}/instances/{instance_id}/restart",
             post(restart_instance),
         )
         .route(
-            "/api/v1/instances/{instance_id}/messages",
+            "/api/v1/dashboards/{dashboard_id}/instances/{instance_id}/messages",
             post(send_widget_message),
         )
+        .route(
+            "/api/v1/dashboards/{dashboard_id}/layout/swap",
+            post(swap_instances),
+        )
         .route("/api/v1/events", get(dashboard_events))
-        .route_service("/edit", ServeFile::new(format!("{WEB_DIST}/index.html")))
-        .route("/edit/", get(redirect_edit))
         .route_service(
-            "/focus/{instance_id}",
+            "/d/{dashboard_id}",
+            ServeFile::new(format!("{WEB_DIST}/index.html")),
+        )
+        .route_service(
+            "/d/{dashboard_id}/edit",
+            ServeFile::new(format!("{WEB_DIST}/index.html")),
+        )
+        .route_service(
+            "/d/{dashboard_id}/focus/{instance_id}",
             ServeFile::new(format!("{WEB_DIST}/index.html")),
         )
         .route(
@@ -238,10 +292,6 @@ async fn health() -> StatusCode {
     StatusCode::OK
 }
 
-async fn redirect_edit() -> Redirect {
-    Redirect::permanent("/edit")
-}
-
 #[utoipa::path(
     get,
     path = "/api/v1/layout",
@@ -258,6 +308,78 @@ async fn get_layout(State(state): State<AppState>) -> Json<DashboardLayout> {
 )]
 async fn get_theme(State(state): State<AppState>) -> Json<Theme> {
     Json(state.themes.current())
+}
+
+#[utoipa::path(get, path = "/api/v1/dashboards", responses((status = 200, body = DashboardList)))]
+async fn list_dashboards(State(state): State<AppState>) -> Json<DashboardList> {
+    Json(DashboardList {
+        dashboards: state.instances.list_dashboards().await,
+    })
+}
+
+#[utoipa::path(get, path = "/api/v1/dashboards/{dashboard_id}", responses((status = 200, body = Dashboard), (status = 404, body = ErrorResponse)))]
+async fn get_dashboard(
+    AxumPath(dashboard_id): AxumPath<DashboardId>,
+    State(state): State<AppState>,
+) -> Result<Json<Dashboard>, ApiError> {
+    Ok(Json(state.instances.dashboard(&dashboard_id).await?))
+}
+
+#[utoipa::path(post, path = "/api/v1/dashboards", request_body = CreateDashboard, responses((status = 201, body = Dashboard), (status = 400, body = ErrorResponse), (status = 409, body = ErrorResponse)))]
+async fn create_dashboard(
+    State(state): State<AppState>,
+    ApiJson(request): ApiJson<CreateDashboard>,
+) -> Result<Response, ApiError> {
+    let dashboard = state.instances.create_dashboard(&request.name).await?;
+    Ok((
+        StatusCode::CREATED,
+        [(
+            axum::http::header::LOCATION,
+            format!("/api/v1/dashboards/{}", dashboard.id),
+        )],
+        Json(dashboard),
+    )
+        .into_response())
+}
+
+#[utoipa::path(patch, path = "/api/v1/dashboards/{dashboard_id}", request_body = RenameDashboard, responses((status = 200, body = Dashboard), (status = 400, body = ErrorResponse), (status = 404, body = ErrorResponse)))]
+async fn rename_dashboard(
+    AxumPath(dashboard_id): AxumPath<DashboardId>,
+    State(state): State<AppState>,
+    ApiJson(request): ApiJson<RenameDashboard>,
+) -> Result<Json<Dashboard>, ApiError> {
+    Ok(Json(
+        state
+            .instances
+            .rename_dashboard(&dashboard_id, &request.name)
+            .await?,
+    ))
+}
+
+#[utoipa::path(post, path = "/api/v1/dashboards/{dashboard_id}/duplicate", responses((status = 201, body = Dashboard), (status = 404, body = ErrorResponse), (status = 409, body = ErrorResponse)))]
+async fn duplicate_dashboard(
+    AxumPath(dashboard_id): AxumPath<DashboardId>,
+    State(state): State<AppState>,
+) -> Result<Response, ApiError> {
+    let dashboard = state.instances.duplicate_dashboard(&dashboard_id).await?;
+    Ok((
+        StatusCode::CREATED,
+        [(
+            axum::http::header::LOCATION,
+            format!("/api/v1/dashboards/{}", dashboard.id),
+        )],
+        Json(dashboard),
+    )
+        .into_response())
+}
+
+#[utoipa::path(delete, path = "/api/v1/dashboards/{dashboard_id}", responses((status = 204), (status = 404, body = ErrorResponse)))]
+async fn delete_dashboard(
+    AxumPath(dashboard_id): AxumPath<DashboardId>,
+    State(state): State<AppState>,
+) -> Result<StatusCode, ApiError> {
+    state.instances.delete_dashboard(&dashboard_id).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[utoipa::path(
@@ -352,31 +474,37 @@ async fn set_widget_state(
 
 #[utoipa::path(
     get,
-    path = "/api/v1/instances",
+    path = "/api/v1/dashboards/{dashboard_id}/instances",
     tag = "instances",
     responses((status = 200, description = "Running instances", body = InstanceList))
 )]
-async fn list_instances(State(state): State<AppState>) -> Json<InstanceList> {
-    Json(InstanceList {
-        instances: state.instances.list().await,
-    })
+async fn list_instances(
+    AxumPath(dashboard_id): AxumPath<DashboardId>,
+    State(state): State<AppState>,
+) -> Result<Json<InstanceList>, ApiError> {
+    Ok(Json(InstanceList {
+        instances: state.instances.list_for(&dashboard_id).await?,
+    }))
 }
 
 #[utoipa::path(
     get,
-    path = "/api/v1/instance-health",
+    path = "/api/v1/dashboards/{dashboard_id}/instance-health",
     tag = "instances",
     responses((status = 200, description = "Runtime health for all widget instances", body = InstanceHealthList))
 )]
-async fn list_instance_health(State(state): State<AppState>) -> Json<InstanceHealthList> {
-    Json(InstanceHealthList {
-        instances: state.instances.list_health().await,
-    })
+async fn list_instance_health(
+    AxumPath(dashboard_id): AxumPath<DashboardId>,
+    State(state): State<AppState>,
+) -> Result<Json<InstanceHealthList>, ApiError> {
+    Ok(Json(InstanceHealthList {
+        instances: state.instances.list_health_for(&dashboard_id).await?,
+    }))
 }
 
 #[utoipa::path(
     get,
-    path = "/api/v1/instances/{instance_id}/health",
+    path = "/api/v1/dashboards/{dashboard_id}/instances/{instance_id}/health",
     tag = "instances",
     params(("instance_id" = String, Path, description = "Running instance ID")),
     responses(
@@ -385,15 +513,19 @@ async fn list_instance_health(State(state): State<AppState>) -> Json<InstanceHea
     )
 )]
 async fn get_instance_health(
-    AxumPath(instance_id): AxumPath<InstanceId>,
+    AxumPath((dashboard_id, instance_id)): AxumPath<(DashboardId, InstanceId)>,
     State(state): State<AppState>,
 ) -> Result<Json<InstanceHealth>, ApiError> {
+    state
+        .instances
+        .ensure_instance_dashboard(&dashboard_id, &instance_id)
+        .await?;
     Ok(Json(state.instances.health(&instance_id).await?))
 }
 
 #[utoipa::path(
     post,
-    path = "/api/v1/instances/{instance_id}/restart",
+    path = "/api/v1/dashboards/{dashboard_id}/instances/{instance_id}/restart",
     tag = "instances",
     params(("instance_id" = String, Path, description = "Running instance ID")),
     responses(
@@ -402,27 +534,34 @@ async fn get_instance_health(
     )
 )]
 async fn restart_instance(
-    AxumPath(instance_id): AxumPath<InstanceId>,
+    AxumPath((dashboard_id, instance_id)): AxumPath<(DashboardId, InstanceId)>,
     State(state): State<AppState>,
 ) -> Result<Json<InstanceHealth>, ApiError> {
+    state
+        .instances
+        .ensure_instance_dashboard(&dashboard_id, &instance_id)
+        .await?;
     Ok(Json(state.instances.restart(&instance_id).await?))
 }
 
 #[utoipa::path(
     get,
-    path = "/api/v1/links",
+    path = "/api/v1/dashboards/{dashboard_id}/links",
     tag = "instances",
     responses((status = 200, description = "Dashboard widget links", body = LinkList))
 )]
-async fn list_links(State(state): State<AppState>) -> Json<LinkList> {
-    Json(LinkList {
-        links: state.instances.list_links(),
-    })
+async fn list_links(
+    AxumPath(dashboard_id): AxumPath<DashboardId>,
+    State(state): State<AppState>,
+) -> Result<Json<LinkList>, ApiError> {
+    Ok(Json(LinkList {
+        links: state.instances.list_links_for(&dashboard_id).await?,
+    }))
 }
 
 #[utoipa::path(
     put,
-    path = "/api/v1/links/{target_instance_id}/{target_port}",
+    path = "/api/v1/dashboards/{dashboard_id}/links/{target_instance_id}/{target_port}",
     tag = "instances",
     params(
         ("target_instance_id" = String, Path, description = "Target instance ID"),
@@ -436,10 +575,22 @@ async fn list_links(State(state): State<AppState>) -> Json<LinkList> {
     )
 )]
 async fn set_link(
-    AxumPath((target_instance_id, target_port)): AxumPath<(InstanceId, String)>,
+    AxumPath((dashboard_id, target_instance_id, target_port)): AxumPath<(
+        DashboardId,
+        InstanceId,
+        String,
+    )>,
     State(state): State<AppState>,
     ApiJson(request): ApiJson<SetLink>,
 ) -> Result<Json<DashboardLink>, ApiError> {
+    state
+        .instances
+        .ensure_instance_dashboard(&dashboard_id, &target_instance_id)
+        .await?;
+    state
+        .instances
+        .ensure_instance_dashboard(&dashboard_id, &request.source_instance_id)
+        .await?;
     Ok(Json(
         state
             .instances
@@ -455,7 +606,7 @@ async fn set_link(
 
 #[utoipa::path(
     delete,
-    path = "/api/v1/links/{target_instance_id}/{target_port}",
+    path = "/api/v1/dashboards/{dashboard_id}/links/{target_instance_id}/{target_port}",
     tag = "instances",
     params(
         ("target_instance_id" = String, Path, description = "Target instance ID"),
@@ -467,9 +618,17 @@ async fn set_link(
     )
 )]
 async fn delete_link(
-    AxumPath((target_instance_id, target_port)): AxumPath<(InstanceId, String)>,
+    AxumPath((dashboard_id, target_instance_id, target_port)): AxumPath<(
+        DashboardId,
+        InstanceId,
+        String,
+    )>,
     State(state): State<AppState>,
 ) -> Result<StatusCode, ApiError> {
+    state
+        .instances
+        .ensure_instance_dashboard(&dashboard_id, &target_instance_id)
+        .await?;
     state
         .instances
         .delete_link(&target_instance_id, &target_port)
@@ -479,7 +638,7 @@ async fn delete_link(
 
 #[utoipa::path(
     get,
-    path = "/api/v1/instances/{instance_id}",
+    path = "/api/v1/dashboards/{dashboard_id}/instances/{instance_id}",
     tag = "instances",
     params(("instance_id" = String, Path, description = "Running instance ID")),
     responses(
@@ -488,15 +647,19 @@ async fn delete_link(
     )
 )]
 async fn get_instance(
-    AxumPath(instance_id): AxumPath<InstanceId>,
+    AxumPath((dashboard_id, instance_id)): AxumPath<(DashboardId, InstanceId)>,
     State(state): State<AppState>,
 ) -> Result<Json<Instance>, ApiError> {
+    state
+        .instances
+        .ensure_instance_dashboard(&dashboard_id, &instance_id)
+        .await?;
     Ok(Json(state.instances.get(&instance_id).await?))
 }
 
 #[utoipa::path(
     post,
-    path = "/api/v1/instances",
+    path = "/api/v1/dashboards/{dashboard_id}/instances",
     tag = "instances",
     request_body = CreateInstance,
     responses(
@@ -508,6 +671,7 @@ async fn get_instance(
     )
 )]
 async fn create_instance(
+    AxumPath(dashboard_id): AxumPath<DashboardId>,
     State(state): State<AppState>,
     ApiJson(request): ApiJson<CreateInstance>,
 ) -> Result<Response, ApiError> {
@@ -518,19 +682,25 @@ async fn create_instance(
     let instance = state
         .instances
         .create(
+            &dashboard_id,
             config,
-            request.variant_id,
-            request.position.column,
-            request.position.row,
-            request.options,
-            request.links,
+            CreateInstanceSpec {
+                variant_id: request.variant_id,
+                column: request.position.column,
+                row: request.position.row,
+                options: request.options,
+                links: request.links,
+            },
         )
         .await?;
     Ok((
         StatusCode::CREATED,
         [(
             axum::http::header::LOCATION,
-            format!("/api/v1/instances/{}", instance.id),
+            format!(
+                "/api/v1/dashboards/{dashboard_id}/instances/{}",
+                instance.id
+            ),
         )],
         Json(instance),
     )
@@ -539,7 +709,7 @@ async fn create_instance(
 
 #[utoipa::path(
     patch,
-    path = "/api/v1/instances/{instance_id}",
+    path = "/api/v1/dashboards/{dashboard_id}/instances/{instance_id}",
     tag = "instances",
     params(("instance_id" = String, Path, description = "Running instance ID")),
     request_body = UpdateInstance,
@@ -550,10 +720,14 @@ async fn create_instance(
     )
 )]
 async fn update_instance(
-    AxumPath(instance_id): AxumPath<InstanceId>,
+    AxumPath((dashboard_id, instance_id)): AxumPath<(DashboardId, InstanceId)>,
     State(state): State<AppState>,
     ApiJson(request): ApiJson<UpdateInstance>,
 ) -> Result<Json<Instance>, ApiError> {
+    state
+        .instances
+        .ensure_instance_dashboard(&dashboard_id, &instance_id)
+        .await?;
     Ok(Json(
         state
             .instances
@@ -564,7 +738,7 @@ async fn update_instance(
 
 #[utoipa::path(
     post,
-    path = "/api/v1/layout/swap",
+    path = "/api/v1/dashboards/{dashboard_id}/layout/swap",
     tag = "instances",
     request_body = SwapInstances,
     responses(
@@ -575,9 +749,18 @@ async fn update_instance(
     )
 )]
 async fn swap_instances(
+    AxumPath(dashboard_id): AxumPath<DashboardId>,
     State(state): State<AppState>,
     ApiJson(request): ApiJson<SwapInstances>,
 ) -> Result<Json<SwapResult>, ApiError> {
+    state
+        .instances
+        .ensure_instance_dashboard(&dashboard_id, &request.source_instance_id)
+        .await?;
+    state
+        .instances
+        .ensure_instance_dashboard(&dashboard_id, &request.target_instance_id)
+        .await?;
     Ok(Json(SwapResult {
         instances: state
             .instances
@@ -588,7 +771,7 @@ async fn swap_instances(
 
 #[utoipa::path(
     delete,
-    path = "/api/v1/instances/{instance_id}",
+    path = "/api/v1/dashboards/{dashboard_id}/instances/{instance_id}",
     tag = "instances",
     params(("instance_id" = String, Path, description = "Running instance ID")),
     responses(
@@ -597,16 +780,20 @@ async fn swap_instances(
     )
 )]
 async fn delete_instance(
-    AxumPath(instance_id): AxumPath<InstanceId>,
+    AxumPath((dashboard_id, instance_id)): AxumPath<(DashboardId, InstanceId)>,
     State(state): State<AppState>,
 ) -> Result<StatusCode, ApiError> {
+    state
+        .instances
+        .ensure_instance_dashboard(&dashboard_id, &instance_id)
+        .await?;
     state.instances.destroy(&instance_id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 #[utoipa::path(
     post,
-    path = "/api/v1/instances/{instance_id}/messages",
+    path = "/api/v1/dashboards/{dashboard_id}/instances/{instance_id}/messages",
     tag = "instances",
     params(("instance_id" = String, Path, description = "Running instance ID")),
     request_body(content = Value, description = "Widget-owned command payload"),
@@ -618,10 +805,14 @@ async fn delete_instance(
     )
 )]
 async fn send_widget_message(
-    AxumPath(instance_id): AxumPath<InstanceId>,
+    AxumPath((dashboard_id, instance_id)): AxumPath<(DashboardId, InstanceId)>,
     State(state): State<AppState>,
     ApiJson(payload): ApiJson<Value>,
 ) -> Result<StatusCode, ApiError> {
+    state
+        .instances
+        .ensure_instance_dashboard(&dashboard_id, &instance_id)
+        .await?;
     state.instances.send(&instance_id, payload).await?;
     Ok(StatusCode::ACCEPTED)
 }
@@ -736,6 +927,11 @@ impl ApiError {
 impl From<InstanceError> for ApiError {
     fn from(error: InstanceError) -> Self {
         let (status, code) = match error {
+            InstanceError::UnknownDashboard => (StatusCode::NOT_FOUND, "unknown_dashboard"),
+            InstanceError::DashboardLimit => (StatusCode::CONFLICT, "dashboard_limit"),
+            InstanceError::InvalidDashboardName => {
+                (StatusCode::BAD_REQUEST, "invalid_dashboard_name")
+            }
             InstanceError::UnknownInstance => (StatusCode::NOT_FOUND, "unknown_instance"),
             InstanceError::UnknownVariant => (StatusCode::NOT_FOUND, "unknown_variant"),
             InstanceError::InvalidOptions(_) => (StatusCode::BAD_REQUEST, "invalid_options"),
@@ -908,14 +1104,82 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn redirects_the_trailing_edit_route() {
+    async fn lists_zero_dashboards() {
         let response = test_app()
-            .oneshot(Request::get("/edit/").body(Body::empty()).unwrap())
+            .oneshot(
+                Request::get("/api/v1/dashboards")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
 
-        assert_eq!(response.status(), StatusCode::PERMANENT_REDIRECT);
-        assert_eq!(response.headers()[axum::http::header::LOCATION], "/edit");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(body.as_ref(), br#"{"dashboards":[]}"#);
+    }
+
+    #[tokio::test]
+    async fn creates_renames_duplicates_and_deletes_dashboards() {
+        let app = test_app();
+        let create = |name: &str| {
+            Request::post("/api/v1/dashboards")
+                .header(CONTENT_TYPE, "application/json")
+                .body(Body::from(format!(r#"{{"name":"{name}"}}"#)))
+                .unwrap()
+        };
+        let response = app.clone().oneshot(create("System")).await.unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let dashboard: Dashboard = serde_json::from_slice(&body).unwrap();
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::patch(format!("/api/v1/dashboards/{}", dashboard.id))
+                    .header(CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"name":"Projects"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::post(format!("/api/v1/dashboards/{}/duplicate", dashboard.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let duplicate: Dashboard = serde_json::from_slice(&body).unwrap();
+        assert_eq!(duplicate.name, "Projects (1)");
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::delete(format!("/api/v1/dashboards/{}", dashboard.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        let response = app
+            .oneshot(
+                Request::get("/api/v1/dashboards")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let dashboards: DashboardList = serde_json::from_slice(&body).unwrap();
+        assert_eq!(dashboards.dashboards, vec![duplicate]);
     }
 
     #[tokio::test]
@@ -934,22 +1198,20 @@ mod tests {
     async fn exposes_runtime_instance_health_resources() {
         let response = test_app()
             .oneshot(
-                Request::get("/api/v1/instance-health")
+                Request::get("/api/v1/dashboards/missing/instance-health")
                     .body(Body::empty())
                     .unwrap(),
             )
             .await
             .unwrap();
 
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        assert_eq!(body.as_ref(), br#"{"instances":[]}"#);
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
         for request in [
-            Request::get("/api/v1/instances/missing/health")
+            Request::get("/api/v1/dashboards/missing/instances/missing/health")
                 .body(Body::empty())
                 .unwrap(),
-            Request::post("/api/v1/instances/missing/restart")
+            Request::post("/api/v1/dashboards/missing/instances/missing/restart")
                 .body(Body::empty())
                 .unwrap(),
         ] {
@@ -962,7 +1224,7 @@ mod tests {
     async fn returns_consistent_not_found_errors() {
         let response = test_app()
             .oneshot(
-                Request::get("/api/v1/instances/missing")
+                Request::get("/api/v1/dashboards/missing/instances/missing")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -981,7 +1243,7 @@ mod tests {
     async fn returns_json_for_invalid_request_bodies() {
         let response = test_app()
             .oneshot(
-                Request::post("/api/v1/instances")
+                Request::post("/api/v1/dashboards/missing/instances")
                     .header(CONTENT_TYPE, "application/json")
                     .body(Body::from("{"))
                     .unwrap(),
@@ -1014,7 +1276,8 @@ mod tests {
             "object"
         );
         assert!(document["paths"]["/api/v1/layout"].is_object());
-        assert!(document["paths"]["/api/v1/instances"].is_object());
+        assert!(document["paths"]["/api/v1/dashboards"].is_object());
+        assert!(document["paths"]["/api/v1/dashboards/{dashboard_id}/instances"].is_object());
         assert!(document["paths"]["/api/v1/widget-state/{widget_id}"].is_object());
         assert!(document["paths"]["/api/v1/events"].is_object());
     }
