@@ -20,17 +20,21 @@ const app = document.querySelector<HTMLElement>("#app")!;
 app.innerHTML = `
   <section class="dashboard-shell">
     <div class="dashboard-content">
-      <header class="dashboard-header">
-        <h1>Scufris Dashboard</h1>
-        <button id="edit-layout" class="button" type="button">Edit</button>
-        <button id="finish-editing" class="button primary" type="button" hidden>Done</button>
+      <h1 id="zen-heading" class="sr-only">Scufris Dashboard</h1>
+      <header id="editor-header" class="dashboard-header" hidden>
+        <h1 id="editor-heading" tabindex="-1">Edit dashboard</h1>
+        <a id="finish-editing" class="button primary" href="/">Done</a>
       </header>
       <div id="dashboard-error" class="dashboard-error" role="alert" hidden></div>
       <div id="dashboard-announcement" class="sr-only" aria-live="polite"></div>
+      <section id="empty-dashboard" class="empty-dashboard" hidden>
+        <span>No widgets</span>
+        <a class="empty-edit" href="/edit">Edit dashboard</a>
+      </section>
       <main id="widgets" class="dashboard-grid" aria-label="Dashboard widgets"></main>
       <footer class="dashboard-footer">
-        <span id="connection-indicator" class="status-dot" aria-hidden="true"></span>
-        <span id="connection-status">Connecting...</span>
+        <span class="connection-state"><span id="connection-indicator" class="status-dot" aria-hidden="true"></span><span id="connection-status">Connecting...</span></span>
+        <a id="edit-layout" class="zen-edit" href="/edit">Edit</a>
       </footer>
     </div>
   </section>
@@ -65,8 +69,11 @@ const indicatorElement = required<HTMLElement>("#connection-indicator");
 const widgetsElement = required<HTMLElement>("#widgets");
 const errorElement = required<HTMLElement>("#dashboard-error");
 const announcementElement = required<HTMLElement>("#dashboard-announcement");
-const editButton = required<HTMLButtonElement>("#edit-layout");
-const doneButton = required<HTMLButtonElement>("#finish-editing");
+const editorHeader = required<HTMLElement>("#editor-header");
+const editorHeading = required<HTMLElement>("#editor-heading");
+const emptyDashboard = required<HTMLElement>("#empty-dashboard");
+const editButton = required<HTMLAnchorElement>("#edit-layout");
+const doneButton = required<HTMLAnchorElement>("#finish-editing");
 const addDialog = required<HTMLDialogElement>("#add-widget");
 const removeDialog = required<HTMLDialogElement>("#remove-widget");
 const catalogElement = required<HTMLElement>("#widget-catalog");
@@ -93,7 +100,7 @@ const frontends = new Map<string, WidgetFrontend>();
 const containers = new Map<string, HTMLElement>();
 const mounting = new Map<string, Promise<void>>();
 const pendingUpdates = new Map<string, unknown>();
-let editing = false;
+let editing = window.location.pathname === "/edit";
 let dashboardLayout: DashboardLayout = { columns: 1 };
 let selectedSlot: { column: number; row: number } | null = null;
 let selectedWidget: {
@@ -117,8 +124,13 @@ type DragState = {
     | null;
 };
 
-editButton.addEventListener("click", () => setEditing(true));
-doneButton.addEventListener("click", () => setEditing(false));
+for (const link of [
+  editButton,
+  doneButton,
+  required<HTMLAnchorElement>(".empty-edit"),
+])
+  link.addEventListener("click", navigateDashboard);
+window.addEventListener("popstate", () => syncRoute(true));
 confirmAddButton.addEventListener("click", () => void createSelectedWidget());
 backToWidgetsButton.addEventListener("click", showWidgetCatalog);
 confirmRemoveButton.addEventListener(
@@ -193,7 +205,6 @@ function applySnapshot(
     if (!currentIds.has(instanceId)) removeInstance(instanceId);
   }
   for (const instance of instances) upsertInstance(instance);
-  if (instances.length === 0) editing = true;
   renderCanvas();
 }
 
@@ -271,17 +282,37 @@ async function mountWidget(instance: Instance): Promise<void> {
   }
 }
 
-function setEditing(value: boolean): void {
-  if (!value) cancelDrag();
-  editing = value;
+function navigateDashboard(event: MouseEvent): void {
+  if (
+    event.button !== 0 ||
+    event.metaKey ||
+    event.ctrlKey ||
+    event.shiftKey ||
+    event.altKey
+  )
+    return;
+  event.preventDefault();
+  const link = event.currentTarget as HTMLAnchorElement;
+  window.history.pushState(null, "", link.href);
+  syncRoute(true);
+}
+
+function syncRoute(focus: boolean): void {
+  const nextEditing = window.location.pathname === "/edit";
+  if (!nextEditing) cancelDrag();
+  editing = nextEditing;
+  document.title = editing ? "Edit dashboard - Scufris" : "Scufris Dashboard";
   renderCanvas();
+  if (focus) (editing ? editorHeading : editButton).focus();
 }
 
 function renderCanvas(): void {
   widgetsElement.classList.toggle("editing", editing);
-  for (const frame of containers.values()) frame.tabIndex = editing ? 0 : -1;
+  document.body.classList.toggle("editing", editing);
+  editorHeader.hidden = !editing;
   editButton.hidden = editing;
-  doneButton.hidden = !editing;
+  emptyDashboard.hidden = editing || resources.size > 0;
+  for (const frame of containers.values()) frame.tabIndex = editing ? 0 : -1;
   const instances = [...resources.values()].sort(
     (left, right) =>
       left.layout.row - right.layout.row ||
@@ -768,7 +799,6 @@ function removeInstance(instanceId: string): void {
   frontends.delete(instanceId);
   containers.get(instanceId)?.remove();
   containers.delete(instanceId);
-  if (resources.size === 0) editing = true;
   renderCanvas();
 }
 
@@ -810,6 +840,8 @@ function required<T extends Element>(selector: string): T {
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
+
+syncRoute(false);
 
 connection = connectDashboard({
   onStatus: renderStatus,

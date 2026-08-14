@@ -20,7 +20,7 @@ button {
 
 .dashboard-shell {
   min-height: 100vh;
-  padding: 20px;
+  padding: 20px 20px 36px;
 }
 
 .dashboard-content {
@@ -32,12 +32,22 @@ button {
 }
 
 .dashboard-header {
+  position: sticky;
+  z-index: 20;
+  top: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 20px;
-  padding-bottom: 12px;
+  padding: 10px 0 12px;
   border-bottom: 1px solid var(--scufris-color-selection);
+  background: var(--scufris-color-canvas);
+}
+
+.dashboard-header .button {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
 }
 
 h1 {
@@ -98,6 +108,30 @@ h1 {
   background: var(--scufris-color-surface);
   color: var(--scufris-color-danger);
   font-size: 14px;
+}
+
+.empty-dashboard {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  flex: 1;
+  gap: 7px;
+  color: var(--scufris-color-text-muted);
+  font-size: 12px;
+}
+
+.empty-edit,
+.zen-edit {
+  color: var(--scufris-color-text-muted);
+  text-decoration: none;
+}
+
+.empty-edit:hover,
+.empty-edit:focus-visible,
+.zen-edit:hover,
+.zen-edit:focus-visible {
+  color: var(--scufris-color-accent);
+  outline: none;
 }
 
 .dashboard-grid {
@@ -254,19 +288,32 @@ h1 {
 }
 
 .dashboard-footer {
+  position: fixed;
+  z-index: 30;
+  right: 12px;
+  bottom: 8px;
+  left: 12px;
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-top: auto;
-  padding-top: 28px;
+  justify-content: space-between;
   color: var(--scufris-color-text-muted);
   font-family: var(--scufris-font-mono);
-  font-size: 11px;
+  font-size: 9px;
+}
+
+.connection-state {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.zen-edit {
+  font-size: 9px;
 }
 
 .status-dot {
-  width: 8px;
-  height: 8px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
   background: var(--scufris-color-accent);
 }
@@ -562,7 +609,7 @@ h1 {
 
 @media (max-width: 580px) {
   .dashboard-shell {
-    padding: 14px 12px;
+    padding: 14px 12px 34px;
   }
 
   .dashboard-content {

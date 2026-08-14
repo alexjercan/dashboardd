@@ -45,7 +45,9 @@ Set `RUST_LOG=dashboardd=debug,tower_http=debug` for backend lifecycle,
 telemetry, widget discovery, and HTTP request logs. The browser console also
 reports connection, reconciliation, event, and widget mount activity.
 
-Open the Swagger API documentation at the logged `/docs` URL.
+Open `/` for the widget-only Zen dashboard and `/edit` for the layout editor.
+The fixed Zen controls keep connection status and Edit available without
+scrolling. Open the Swagger API documentation at the logged `/docs` URL.
 
 Dashboard composition persists in `$XDG_STATE_HOME/scufris/dashboard.json`, or
 `$HOME/.local/state/scufris/dashboard.json` when `XDG_STATE_HOME` is unset.

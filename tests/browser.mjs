@@ -54,20 +54,49 @@ try {
   assert.deepEqual(await layoutResponse.json(), { columns: 9 });
   assert.equal(await instanceCount(page, baseUrl), 0, "startup is empty");
   assert.equal(
-    await page.locator("#finish-editing").isVisible(),
+    await page.locator("#editor-header").isHidden(),
     true,
-    "empty dashboard enters edit mode",
+    "Zen mode hides the editor header",
+  );
+  assert.equal(await page.locator("#empty-dashboard").isVisible(), true);
+  assert.equal(await page.locator(".dashboard-slot").count(), 0);
+  assert.equal(await page.locator("#edit-layout").isVisible(), true);
+  assert.equal(
+    await page
+      .locator(".dashboard-footer")
+      .evaluate((element) => getComputedStyle(element).position),
+    "fixed",
+    "Zen controls remain in the viewport",
+  );
+  await page.locator("#edit-layout").click();
+  await page.waitForURL(`${baseUrl}/edit`);
+  assert.equal(await page.locator("#finish-editing").isVisible(), true);
+  assert.equal(
+    await page
+      .locator("#editor-heading")
+      .evaluate((element) => element === document.activeElement),
+    true,
   );
   assert.equal(
     await page.locator(".dashboard-slot").count(),
     54,
-    "empty edit canvas is 9x6",
+    "empty editor canvas is 9x6",
   );
+  await page.locator("#finish-editing").click();
+  await page.waitForURL(baseUrl + "/");
   assert.equal(
-    await page.locator(".dashboard-footer").isVisible(),
+    await page
+      .locator("#edit-layout")
+      .evaluate((element) => element === document.activeElement),
     true,
-    "connection status is in footer",
   );
+  await page.goBack();
+  await page.waitForURL(`${baseUrl}/edit`);
+  assert.equal(await page.locator("#editor-header").isVisible(), true);
+  await page.goForward();
+  await page.waitForURL(baseUrl + "/");
+  await page.locator("#edit-layout").click();
+  await page.waitForURL(`${baseUrl}/edit`);
   assert.equal(
     await page.evaluate(() =>
       getComputedStyle(document.documentElement).getPropertyValue(
@@ -245,6 +274,11 @@ try {
     "normal mode hides empty slots",
   );
   assert.equal(await page.locator("#edit-layout").isVisible(), true);
+  assert.equal(await page.locator("#editor-header").isHidden(), true);
+  await page.screenshot({
+    path: path.join(artifacts, "dashboard-zen-wide.png"),
+    fullPage: true,
+  });
   const boxes = await Promise.all(
     [cpuOne, cpuTwo, memory].map((id) =>
       page.locator(`[data-instance-id="${id}"]`).boundingBox(),
@@ -261,11 +295,22 @@ try {
     "refresh retains composed dashboard",
   );
 
+  const directEditPage = await context.newPage();
+  await directEditPage.goto(`${baseUrl}/edit`);
+  await directEditPage.locator("#editor-header").waitFor();
+  assert.equal(
+    await directEditPage.locator("#finish-editing").isVisible(),
+    true,
+  );
+  await directEditPage.close();
+
   const secondPage = await context.newPage();
   pages.push(secondPage);
   await secondPage.goto(baseUrl);
   await secondPage.locator(`[data-instance-id="${memory}"]`).waitFor();
   await page.locator("#edit-layout").click();
+  assert.equal(await secondPage.locator("#editor-header").isHidden(), true);
+  assert.equal(await secondPage.locator("#edit-layout").isVisible(), true);
   await page.locator(`[data-instance-id="${cpuTwo}"] .remove-widget`).click();
   assert.match(await page.locator("#remove-title").textContent(), /Remove CPU/);
   await page.locator("#remove-widget .button[value=cancel]").click();

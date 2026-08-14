@@ -9,14 +9,17 @@ use axum::{
         StatusCode,
         header::{CACHE_CONTROL, CONTENT_TYPE},
     },
-    response::{IntoResponse, Response, Sse, sse::Event, sse::KeepAlive},
+    response::{IntoResponse, Redirect, Response, Sse, sse::Event, sse::KeepAlive},
     routing::{get, post},
 };
 use dashboard_protocol::{InstanceId, WidgetId};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use tokio_stream::{Stream, StreamExt, wrappers::BroadcastStream};
-use tower_http::{services::ServeDir, trace::TraceLayer};
+use tower_http::{
+    services::{ServeDir, ServeFile},
+    trace::TraceLayer,
+};
 use utoipa::{OpenApi, ToSchema};
 use utoipa_swagger_ui::SwaggerUi;
 
@@ -142,6 +145,8 @@ pub fn build_router(state: AppState) -> Router {
             post(send_widget_message),
         )
         .route("/api/v1/events", get(dashboard_events))
+        .route_service("/edit", ServeFile::new(format!("{WEB_DIST}/index.html")))
+        .route("/edit/", get(redirect_edit))
         .route(
             "/widgets/{widget_id}/variants/{variant_id}/frontend.js",
             get(widget_frontend),
@@ -159,6 +164,10 @@ pub fn build_router(state: AppState) -> Router {
 )]
 async fn health() -> StatusCode {
     StatusCode::OK
+}
+
+async fn redirect_edit() -> Redirect {
+    Redirect::permanent("/edit")
 }
 
 #[utoipa::path(
@@ -557,6 +566,17 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         assert_eq!(body.as_ref(), br#"{"columns":9}"#);
+    }
+
+    #[tokio::test]
+    async fn redirects_the_trailing_edit_route() {
+        let response = test_app()
+            .oneshot(Request::get("/edit/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::PERMANENT_REDIRECT);
+        assert_eq!(response.headers()[axum::http::header::LOCATION], "/edit");
     }
 
     #[tokio::test]
