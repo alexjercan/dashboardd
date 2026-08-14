@@ -23,7 +23,8 @@ use utoipa::ToSchema;
 
 use crate::{
     configuration::InitialWidget,
-    event::{DashboardError, DashboardEvent},
+    event::DashboardEvent,
+    health::{HealthTracker, InstanceHealth, PROBE_INTERVAL},
     state::{DashboardLink, DashboardStateFile, PersistedInstance, Position, StateStore},
     widget::{WidgetConfig, WidgetsManager},
 };
@@ -92,6 +93,7 @@ struct ManagedInstance {
     resource: Instance,
     config: Arc<WidgetConfig>,
     backend: WidgetBackend,
+    health: HealthTracker,
 }
 
 struct WidgetBackend {
@@ -224,12 +226,14 @@ impl InstanceManager {
         let instances = restored
             .into_iter()
             .map(|(resource, config)| {
+                let health = HealthTracker::new(resource.id.clone(), events.clone());
                 let backend = WidgetBackend::start(
                     config.clone(),
                     resource.id.clone(),
                     resource.variant_id.clone(),
                     resource.options.clone(),
                     events.clone(),
+                    health.clone(),
                 );
                 (
                     resource.id.clone(),
@@ -237,6 +241,7 @@ impl InstanceManager {
                         resource,
                         config,
                         backend,
+                        health,
                     },
                 )
             })
@@ -289,6 +294,26 @@ impl InstanceManager {
             .collect();
         resources.sort_by(|left, right| left.id.cmp(&right.id));
         resources
+    }
+
+    pub async fn list_health(&self) -> Vec<InstanceHealth> {
+        let instances = self.inner.instances.lock().await;
+        let mut health = instances
+            .values()
+            .map(|instance| instance.health.snapshot())
+            .collect::<Vec<_>>();
+        health.sort_by(|left, right| left.instance_id.cmp(&right.instance_id));
+        health
+    }
+
+    pub async fn health(&self, instance_id: &str) -> Result<InstanceHealth, InstanceError> {
+        self.inner
+            .instances
+            .lock()
+            .await
+            .get(instance_id)
+            .map(|instance| instance.health.snapshot())
+            .ok_or(InstanceError::UnknownInstance)
     }
 
     pub fn list_links(&self) -> Vec<DashboardLink> {
@@ -375,12 +400,14 @@ impl InstanceManager {
             widget_id = %resource.widget_id,
             "creating widget instance"
         );
+        let health = HealthTracker::new(resource.id.clone(), self.inner.events.clone());
         let backend = WidgetBackend::start(
             config.clone(),
             resource.id.clone(),
             resource.variant_id.clone(),
             resource.options.clone(),
             self.inner.events.clone(),
+            health.clone(),
         );
         instances.insert(
             resource.id.clone(),
@@ -388,6 +415,7 @@ impl InstanceManager {
                 resource: resource.clone(),
                 config,
                 backend,
+                health: health.clone(),
             },
         );
         if !new_links.is_empty() {
@@ -402,6 +430,7 @@ impl InstanceManager {
         let _ = self.inner.events.send(DashboardEvent::InstanceCreated {
             instance: resource.clone(),
         });
+        health.publish();
         for link in new_links {
             let _ = self.inner.events.send(DashboardEvent::LinkUpdated { link });
         }
@@ -602,7 +631,7 @@ impl InstanceManager {
                 .map(|(_, instance)| &instance.resource),
             &retained_links,
         )?;
-        let instance = instances
+        let mut instance = instances
             .remove(instance_id)
             .expect("instance existence is checked");
         *self.inner.links.write().expect("links lock is poisoned") = retained_links;
@@ -665,6 +694,25 @@ impl InstanceManager {
             .map_err(|_| InstanceError::BackendUnavailable)
     }
 
+    pub async fn restart(&self, instance_id: &str) -> Result<InstanceHealth, InstanceError> {
+        let mut instances = self.inner.instances.lock().await;
+        let instance = instances
+            .get_mut(instance_id)
+            .ok_or(InstanceError::UnknownInstance)?;
+        tracing::info!(instance_id, "restarting widget backend");
+        instance.backend.shutdown().await;
+        instance.health.restarted();
+        instance.backend = WidgetBackend::start(
+            instance.config.clone(),
+            instance.resource.id.clone(),
+            instance.resource.variant_id.clone(),
+            instance.resource.options.clone(),
+            self.inner.events.clone(),
+            instance.health.clone(),
+        );
+        Ok(instance.health.snapshot())
+    }
+
     pub async fn shutdown_all(&self) {
         let instances = {
             let mut guard = self.inner.instances.lock().await;
@@ -675,7 +723,7 @@ impl InstanceManager {
         };
 
         tracing::info!(count = instances.len(), "shutting down widget instances");
-        for instance in instances {
+        for mut instance in instances {
             instance.backend.shutdown().await;
         }
     }
@@ -914,6 +962,7 @@ impl WidgetBackend {
         variant_id: String,
         options: BTreeMap<String, Value>,
         events: broadcast::Sender<DashboardEvent>,
+        health: HealthTracker,
     ) -> Self {
         let (commands_tx, commands_rx) = mpsc::unbounded_channel();
         let task_instance_id = instance_id.clone();
@@ -925,6 +974,7 @@ impl WidgetBackend {
                 options,
                 &events,
                 commands_rx,
+                &health,
             )
             .await
             {
@@ -934,13 +984,7 @@ impl WidgetBackend {
                     widget_id = %config.descriptor.id,
                     "widget backend failed"
                 );
-                let _ = events.send(DashboardEvent::InstanceError {
-                    instance_id: Some(task_instance_id),
-                    error: DashboardError {
-                        code: "backend_failed".into(),
-                        message: error.to_string(),
-                    },
-                });
+                health.failed();
             }
         });
 
@@ -955,7 +999,7 @@ impl WidgetBackend {
         self.commands.send(message).map_err(|error| error.0)
     }
 
-    async fn shutdown(mut self) {
+    async fn shutdown(&mut self) {
         tracing::debug!(instance_id = %self.instance_id, "sending shutdown to widget backend");
         let _ = self.commands.send(ServerToWidget::Shutdown {});
         if let Some(mut task) = self.task.take() {
@@ -997,6 +1041,7 @@ async fn run_backend(
     options: BTreeMap<String, Value>,
     events: &broadcast::Sender<DashboardEvent>,
     mut commands: mpsc::UnboundedReceiver<ServerToWidget>,
+    health: &HealthTracker,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     tracing::info!(
         instance_id,
@@ -1023,6 +1068,12 @@ async fn run_backend(
         .take()
         .ok_or("widget backend stdout is unavailable")?;
     let mut lines = BufReader::new(stdout).lines();
+    let mut probes =
+        tokio::time::interval_at(tokio::time::Instant::now() + PROBE_INTERVAL, PROBE_INTERVAL);
+    let mut next_nonce = 1_u64;
+    let mut pending_probe = None;
+    let mut requested_shutdown = false;
+    let mut ready = false;
 
     write_backend_message(
         &mut stdin,
@@ -1039,21 +1090,41 @@ async fn run_backend(
         tokio::select! {
             command = commands.recv() => {
                 let Some(command) = command else { break };
-                let shutdown = matches!(command, ServerToWidget::Shutdown {});
+                requested_shutdown = matches!(command, ServerToWidget::Shutdown {});
                 write_backend_message(&mut stdin, command).await?;
-                if shutdown {
+                if requested_shutdown {
                     break;
                 }
             }
             line = lines.next_line() => {
                 let Some(line) = line? else { break };
-                handle_backend_message(config, instance_id, events, &line)?;
+                handle_backend_message(
+                    config,
+                    instance_id,
+                    events,
+                    health,
+                    &line,
+                    &mut ready,
+                    &mut pending_probe,
+                )?;
+            }
+            _ = probes.tick() => {
+                health.check_stale();
+                if pending_probe.is_none() {
+                    let nonce = next_nonce;
+                    next_nonce = next_nonce.wrapping_add(1);
+                    write_backend_message(&mut stdin, ServerToWidget::Ping { nonce }).await?;
+                    pending_probe = Some(nonce);
+                }
             }
         }
     }
 
     drop(stdin);
     let status = child.wait().await?;
+    if !requested_shutdown {
+        return Err(format!("widget backend exited unexpectedly with {status}").into());
+    }
     if !status.success() {
         return Err(format!("widget backend exited with {status}").into());
     }
@@ -1077,10 +1148,15 @@ fn handle_backend_message(
     config: &WidgetConfig,
     expected_instance_id: &str,
     events: &broadcast::Sender<DashboardEvent>,
+    health: &HealthTracker,
     line: &str,
+    ready: &mut bool,
+    pending_probe: &mut Option<u64>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     match dashboard_protocol::parse::<WidgetToServer>(line)? {
         WidgetToServer::Ready { widget_id } if widget_id == config.descriptor.id => {
+            *ready = true;
+            health.ready();
             tracing::info!(
                 instance_id = expected_instance_id,
                 %widget_id,
@@ -1090,27 +1166,57 @@ fn handle_backend_message(
         WidgetToServer::Update {
             instance_id,
             payload,
-        } => {
+        } if *ready && instance_id == expected_instance_id => {
+            health.update();
             tracing::debug!(%instance_id, "received widget telemetry");
             let _ = events.send(DashboardEvent::WidgetUpdate {
                 instance_id,
                 payload,
             });
         }
-        WidgetToServer::Error { instance_id, error } => {
+        WidgetToServer::Error {
+            instance_id: Some(instance_id),
+            error,
+        } if instance_id == expected_instance_id => {
+            health.reported_error(&error.code, &error.message);
             tracing::warn!(
-                instance_id = ?instance_id,
+                %instance_id,
                 code = %error.code,
                 message = %error.message,
                 "widget backend reported an error"
             );
+        }
+        WidgetToServer::Error {
+            instance_id: None,
+            error,
+        } => {
+            health.activity();
+            tracing::warn!(
+                code = %error.code,
+                message = %error.message,
+                "widget backend reported an unscoped error"
+            );
             let _ = events.send(DashboardEvent::InstanceError {
-                instance_id,
+                instance_id: None,
                 error: error.into(),
             });
         }
+        WidgetToServer::Pong { nonce } if *pending_probe == Some(nonce) => {
+            *pending_probe = None;
+            health.activity();
+        }
         WidgetToServer::Ready { widget_id } => {
             return Err(format!("backend announced unexpected widget id {widget_id}").into());
+        }
+        WidgetToServer::Update { instance_id, .. }
+        | WidgetToServer::Error {
+            instance_id: Some(instance_id),
+            ..
+        } => {
+            return Err(format!("backend used unexpected instance id {instance_id}").into());
+        }
+        WidgetToServer::Pong { nonce } => {
+            return Err(format!("backend answered unexpected probe {nonce}").into());
         }
     }
     Ok(())

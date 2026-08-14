@@ -62,6 +62,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     Ok(ServerToWidget::Initialize { instance_id: id, widget_id, variant_id: _, options: _ }) if widget_id == WIDGET_ID => {
                         instance_id = Some(id);
                     }
+                    Ok(ServerToWidget::Ping { nonce }) => write_message(
+                        &mut stdout,
+                        WidgetToServer::Pong { nonce },
+                    ).await?,
                     Ok(ServerToWidget::Shutdown {}) => break,
                     Ok(_) => {}
                     Err(error) => write_message(

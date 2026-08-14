@@ -78,6 +78,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             Err(error) => write_error(&mut stdout, instance_id.clone(), "invalid_command", &error.to_string()).await?,
                         }
                     }
+                    Ok(ServerToWidget::Ping { nonce }) => write_message(
+                        &mut stdout,
+                        WidgetToServer::Pong { nonce },
+                    ).await?,
                     Ok(ServerToWidget::Shutdown {}) => break,
                     Ok(_) => {}
                     Err(error) => write_error(&mut stdout, instance_id.clone(), "invalid_message", &error.to_string()).await?,

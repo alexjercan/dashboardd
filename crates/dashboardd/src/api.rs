@@ -27,6 +27,7 @@ use crate::{
     AppState,
     configuration::Theme,
     event::{self, DashboardError, DashboardEvent},
+    health::InstanceHealth,
     instance::{DashboardLayout, Instance, InstanceError, InstanceLayout, NewInstanceLink},
     state::DashboardLink,
     widget::{WidgetDescriptor, WidgetLinkPort, WidgetVariant},
@@ -42,6 +43,11 @@ pub struct WidgetList {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct InstanceList {
     pub instances: Vec<Instance>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct InstanceHealthList {
+    pub instances: Vec<InstanceHealth>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -102,6 +108,9 @@ pub struct ErrorResponse {
         list_widgets,
         get_widget,
         list_instances,
+        list_instance_health,
+        get_instance_health,
+        restart_instance,
         list_links,
         set_link,
         delete_link,
@@ -123,6 +132,8 @@ pub struct ErrorResponse {
         Instance,
         InstanceLayout,
         InstanceList,
+        InstanceHealth,
+        InstanceHealthList,
         LinkList,
         NewInstanceLink,
         DashboardLink,
@@ -156,6 +167,7 @@ pub fn build_router(state: AppState) -> Router {
             "/api/v1/instances",
             get(list_instances).post(create_instance),
         )
+        .route("/api/v1/instance-health", get(list_instance_health))
         .route("/api/v1/links", get(list_links))
         .route(
             "/api/v1/links/{target_instance_id}/{target_port}",
@@ -166,6 +178,14 @@ pub fn build_router(state: AppState) -> Router {
             get(get_instance)
                 .patch(update_instance)
                 .delete(delete_instance),
+        )
+        .route(
+            "/api/v1/instances/{instance_id}/health",
+            get(get_instance_health),
+        )
+        .route(
+            "/api/v1/instances/{instance_id}/restart",
+            post(restart_instance),
         )
         .route(
             "/api/v1/instances/{instance_id}/messages",
@@ -258,6 +278,52 @@ async fn list_instances(State(state): State<AppState>) -> Json<InstanceList> {
     Json(InstanceList {
         instances: state.instances.list().await,
     })
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/instance-health",
+    tag = "instances",
+    responses((status = 200, description = "Runtime health for all widget instances", body = InstanceHealthList))
+)]
+async fn list_instance_health(State(state): State<AppState>) -> Json<InstanceHealthList> {
+    Json(InstanceHealthList {
+        instances: state.instances.list_health().await,
+    })
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/instances/{instance_id}/health",
+    tag = "instances",
+    params(("instance_id" = String, Path, description = "Running instance ID")),
+    responses(
+        (status = 200, description = "Runtime health for one widget instance", body = InstanceHealth),
+        (status = 404, description = "Instance was not found", body = ErrorResponse)
+    )
+)]
+async fn get_instance_health(
+    AxumPath(instance_id): AxumPath<InstanceId>,
+    State(state): State<AppState>,
+) -> Result<Json<InstanceHealth>, ApiError> {
+    Ok(Json(state.instances.health(&instance_id).await?))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/instances/{instance_id}/restart",
+    tag = "instances",
+    params(("instance_id" = String, Path, description = "Running instance ID")),
+    responses(
+        (status = 200, description = "Backend restarted", body = InstanceHealth),
+        (status = 404, description = "Instance was not found", body = ErrorResponse)
+    )
+)]
+async fn restart_instance(
+    AxumPath(instance_id): AxumPath<InstanceId>,
+    State(state): State<AppState>,
+) -> Result<Json<InstanceHealth>, ApiError> {
+    Ok(Json(state.instances.restart(&instance_id).await?))
 }
 
 #[utoipa::path(
@@ -688,6 +754,34 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         assert_eq!(body.as_ref(), br#"{"widgets":[]}"#);
+    }
+
+    #[tokio::test]
+    async fn exposes_runtime_instance_health_resources() {
+        let response = test_app()
+            .oneshot(
+                Request::get("/api/v1/instance-health")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(body.as_ref(), br#"{"instances":[]}"#);
+
+        for request in [
+            Request::get("/api/v1/instances/missing/health")
+                .body(Body::empty())
+                .unwrap(),
+            Request::post("/api/v1/instances/missing/restart")
+                .body(Body::empty())
+                .unwrap(),
+        ] {
+            let response = test_app().oneshot(request).await.unwrap();
+            assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        }
     }
 
     #[tokio::test]

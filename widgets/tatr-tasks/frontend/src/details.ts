@@ -18,7 +18,7 @@ export function mount(
     `Tatr task details for ${context.instanceId}`,
   );
   let hasDetails = false;
-  const viewId = crypto.randomUUID();
+  const viewId = createViewId();
 
   const unsubscribe = context.links.subscribe("task", (payload) => {
     const selection = parseSelection(payload);
@@ -90,6 +90,17 @@ function renderDetails(shadow: ShadowRoot, details: Details): void {
       link.removeAttribute("href");
     }
   }
+}
+
+function createViewId(): string {
+  const values = new Uint32Array(4);
+  if (globalThis.crypto?.getRandomValues) {
+    globalThis.crypto.getRandomValues(values);
+    return [...values]
+      .map((value) => value.toString(16).padStart(8, "0"))
+      .join("");
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
 function parseSelection(value: unknown): TaskSelection | null {

@@ -51,8 +51,12 @@ telemetry, widget discovery, and HTTP request logs. The browser console also
 reports connection, reconciliation, event, and widget mount activity.
 
 Open `/` for the widget-only Zen dashboard and `/edit` for the layout editor.
-The fixed Zen controls keep connection status and Edit available without
-scrolling. Open the Swagger API documentation at the logged `/docs` URL.
+The editor shows server-owned backend health for each widget. Health diagnostics
+include liveness, the last update and error, and a confirmed manual restart.
+Dashboardd probes backends every 10 seconds and marks them stale after 30 seconds
+without protocol activity. Zen mode does not show health controls. The fixed Zen
+controls keep connection status and Edit available without scrolling. Open the
+Swagger API documentation at the logged `/docs` URL.
 
 The 6x3 Tatr Tasks widget reads `TASK.md` records directly without executing
 `tatr`. It defaults to recursive discovery under `~/personal`, filters to open

@@ -184,6 +184,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             ).await?;
                         }
                     }
+                    Ok(ServerToWidget::Ping { nonce }) => write_message(
+                        &mut stdout,
+                        WidgetToServer::Pong { nonce },
+                    ).await?,
                     Ok(ServerToWidget::Shutdown {}) => break,
                     Ok(_) => {}
                     Err(error) => write_error(

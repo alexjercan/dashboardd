@@ -1,6 +1,8 @@
 import {
   parseDashboardEvent,
   parseDashboardLayout,
+  parseInstanceHealth,
+  parseInstanceHealthList,
   parseInstanceList,
   parseLinkList,
   parseTheme,
@@ -9,6 +11,7 @@ import {
   type ErrorResponse,
   type DashboardLink,
   type Instance,
+  type InstanceHealth,
   type Theme,
   type WidgetDescriptor,
 } from "./protocol";
@@ -24,11 +27,13 @@ export type DashboardEvents = {
     layout: DashboardLayout,
     widgets: WidgetDescriptor[],
     instances: Instance[],
+    health: InstanceHealth[],
     links: DashboardLink[],
   ): void;
   onInstanceCreated(instance: Instance): void;
   onInstanceUpdated(instance: Instance): void;
   onInstanceDestroyed(instanceId: string): void;
+  onInstanceHealth(health: InstanceHealth): void;
   onLinkUpdated(link: DashboardLink): void;
   onLinkDestroyed(targetInstanceId: string, targetPort: string): void;
   onWidgetUpdate(instanceId: string, payload: unknown): void;
@@ -37,6 +42,7 @@ export type DashboardEvents = {
 
 export type DashboardConnection = {
   sendWidget(instanceId: string, payload: unknown): Promise<void>;
+  restartWidget(instanceId: string): Promise<InstanceHealth>;
   close(): void;
 };
 
@@ -83,7 +89,11 @@ export function connectDashboard(events: DashboardEvents): DashboardConnection {
           );
           break;
         case "instance_error":
-          events.onError(event.data.error.message);
+          if (event.data.instance_id === null)
+            events.onError(event.data.error.message);
+          break;
+        case "instance_health_updated":
+          events.onInstanceHealth(event.data.health);
           break;
         case "widget_update":
           events.onWidgetUpdate(event.data.instance_id, event.data.payload);
@@ -118,6 +128,13 @@ export function connectDashboard(events: DashboardEvents): DashboardConnection {
         },
       );
     },
+    async restartWidget(instanceId) {
+      return requestJson(
+        `/api/v1/instances/${encodeURIComponent(instanceId)}/restart`,
+        parseInstanceHealth,
+        { method: "POST" },
+      );
+    },
     close() {
       closed = true;
       source.close();
@@ -127,20 +144,21 @@ export function connectDashboard(events: DashboardEvents): DashboardConnection {
 
 async function reconcile(events: DashboardEvents): Promise<void> {
   console.debug("Reconciling dashboard state");
-  const [layout, theme, widgetList, instanceList, linkList] = await Promise.all(
-    [
+  const [layout, theme, widgetList, instanceList, healthList, linkList] =
+    await Promise.all([
       requestJson("/api/v1/layout", parseDashboardLayout),
       requestJson("/api/v1/theme", parseTheme),
       requestJson("/api/v1/widgets", parseWidgetList),
       requestJson("/api/v1/instances", parseInstanceList),
+      requestJson("/api/v1/instance-health", parseInstanceHealthList),
       requestJson("/api/v1/links", parseLinkList),
-    ],
-  );
+    ]);
   events.onTheme(theme);
   events.onSnapshot(
     layout,
     widgetList.widgets,
     instanceList.instances,
+    healthList.instances,
     linkList.links,
   );
 }

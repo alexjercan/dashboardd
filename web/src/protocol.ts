@@ -65,6 +65,18 @@ export type InstanceLayout = {
   height: number;
 };
 
+export type HealthStatus =
+  "starting" | "healthy" | "stale" | "degraded" | "failed";
+
+export type InstanceHealth = {
+  instance_id: string;
+  status: HealthStatus;
+  started_at: string;
+  last_update_at: string | null;
+  last_error: { code: string; message: string; at: string } | null;
+  restart_count: number;
+};
+
 export type DashboardLink = {
   source_instance_id: string;
   source_port: string;
@@ -82,6 +94,7 @@ export type Instance = {
 
 export type WidgetList = { widgets: WidgetDescriptor[] };
 export type InstanceList = { instances: Instance[] };
+export type InstanceHealthList = { instances: InstanceHealth[] };
 export type LinkList = { links: DashboardLink[] };
 export type ErrorResponse = { error: { code: string; message: string } };
 
@@ -118,6 +131,11 @@ type InstanceErrorEvent = {
     error: { code: string; message: string };
   };
 };
+type InstanceHealthUpdatedEvent = {
+  version: typeof EVENT_VERSION;
+  kind: "instance_health_updated";
+  data: { health: InstanceHealth };
+};
 type WidgetUpdateEvent = {
   version: typeof EVENT_VERSION;
   kind: "widget_update";
@@ -141,6 +159,7 @@ export type DashboardEvent =
   | LinkUpdatedEvent
   | LinkDestroyedEvent
   | InstanceErrorEvent
+  | InstanceHealthUpdatedEvent
   | WidgetUpdateEvent
   | ThemeUpdatedEvent
   | ConfigurationErrorEvent;
@@ -161,6 +180,28 @@ export function parseInstanceList(value: unknown): InstanceList {
   if (!isRecord(value) || !Array.isArray(value.instances))
     throw new Error("invalid instance list");
   return { instances: value.instances.map(parseInstance) };
+}
+
+export function parseInstanceHealthList(value: unknown): InstanceHealthList {
+  if (!isRecord(value) || !Array.isArray(value.instances))
+    throw new Error("invalid instance health list");
+  return { instances: value.instances.map(parseInstanceHealth) };
+}
+
+export function parseInstanceHealth(value: unknown): InstanceHealth {
+  if (
+    !isRecord(value) ||
+    typeof value.instance_id !== "string" ||
+    !isHealthStatus(value.status) ||
+    typeof value.started_at !== "string" ||
+    (value.last_update_at !== null &&
+      typeof value.last_update_at !== "string") ||
+    (value.last_error !== null && !isHealthError(value.last_error)) ||
+    !Number.isSafeInteger(value.restart_count) ||
+    (value.restart_count as number) < 0
+  )
+    throw new Error("invalid instance health");
+  return value as InstanceHealth;
 }
 
 export function parseLinkList(value: unknown): LinkList {
@@ -285,6 +326,12 @@ export function parseDashboardEvent(value: unknown): DashboardEvent {
           },
         };
       break;
+    case "instance_health_updated":
+      return {
+        version: EVENT_VERSION,
+        kind: value.kind,
+        data: { health: parseInstanceHealth(value.data.health) },
+      };
     case "widget_update":
       if (typeof value.data.instance_id === "string")
         return {
@@ -460,6 +507,23 @@ function isOptions(
         typeof option === "string" ||
         (typeof option === "number" && Number.isFinite(option)),
     )
+  );
+}
+
+function isHealthStatus(value: unknown): value is HealthStatus {
+  return ["starting", "healthy", "stale", "degraded", "failed"].includes(
+    value as string,
+  );
+}
+
+function isHealthError(
+  value: unknown,
+): value is NonNullable<InstanceHealth["last_error"]> {
+  return (
+    isRecord(value) &&
+    typeof value.code === "string" &&
+    typeof value.message === "string" &&
+    typeof value.at === "string"
   );
 }
 

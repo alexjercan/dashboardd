@@ -173,6 +173,7 @@ h1 {
 
 .drag-handle,
 .remove-widget,
+.widget-health-button,
 .widget-link-controls {
   display: none;
 }
@@ -213,10 +214,10 @@ h1 {
 }
 
 .dashboard-widget[data-layout="1x1"] .drag-handle {
-  left: 6px;
+  left: 50%;
   min-width: 34px;
   padding-inline: 5px;
-  transform: none;
+  transform: translateX(-50%);
 }
 
 .dashboard-widget[data-layout="1x1"] .remove-widget {
@@ -268,6 +269,65 @@ h1 {
   display: block;
 }
 
+.editing .widget-health-button {
+  position: absolute;
+  z-index: 2;
+  top: 8px;
+  left: 8px;
+  display: flex;
+  min-height: 30px;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  background: var(--scufris-color-canvas);
+  color: var(--scufris-color-text-muted);
+  cursor: pointer;
+  font-family: var(--scufris-font-mono);
+  font-size: 9px;
+}
+
+.widget-health-button[data-status="healthy"],
+#health-status[data-status="healthy"] {
+  color: var(--scufris-color-success);
+}
+
+.widget-health-button[data-status="stale"],
+#health-status[data-status="stale"] {
+  color: var(--scufris-color-secondary);
+}
+
+.widget-health-button[data-status="degraded"],
+#health-status[data-status="degraded"] {
+  color: var(--scufris-color-accent);
+}
+
+.widget-health-button[data-status="failed"],
+#health-status[data-status="failed"] {
+  color: var(--scufris-color-danger);
+}
+
+.widget-health-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 8px currentColor;
+}
+
+.dashboard-widget[data-layout="1x1"] .widget-health-button {
+  left: 6px;
+  width: 30px;
+  justify-content: center;
+  padding-inline: 5px;
+}
+
+.dashboard-widget[data-layout="1x1"] .widget-health-label {
+  display: none;
+}
+
 .editing .widget-link-controls {
   position: absolute;
   z-index: 2;
@@ -309,6 +369,38 @@ button.widget-link-badge {
 .editing .dashboard-widget.linked-highlight {
   outline: 3px solid var(--scufris-color-accent);
   outline-offset: 2px;
+}
+
+.health-details {
+  display: grid;
+  gap: 0;
+  margin: 18px 0 6px;
+}
+
+.health-details > div {
+  display: grid;
+  grid-template-columns: minmax(90px, 0.45fr) minmax(0, 1fr);
+  gap: 14px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--scufris-color-border);
+}
+
+.health-details dt {
+  color: var(--scufris-color-text-muted);
+  font-size: 11px;
+}
+
+.health-details dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--scufris-color-text-bright);
+  font-family: var(--scufris-font-mono);
+  font-size: 11px;
+}
+
+.health-error-row {
+  align-items: start;
 }
 
 .relink-control {

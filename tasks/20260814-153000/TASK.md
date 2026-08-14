@@ -1,6 +1,6 @@
 # Add linked Tatr task details
 
-- STATUS: IN_PROGRESS
+- STATUS: CLOSED
 - PRIORITY: 100
 - TAGS: widget, links, tatr, markdown
 

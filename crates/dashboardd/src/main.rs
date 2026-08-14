@@ -3,6 +3,7 @@
 mod api;
 mod configuration;
 mod event;
+mod health;
 mod instance;
 mod state;
 mod widget;

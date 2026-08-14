@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   openSync,
+  readFileSync,
   rmSync,
   unlinkSync,
   writeFileSync,
@@ -20,6 +21,7 @@ mkdirSync(artifacts, { recursive: true });
 run("cargo", ["build", "--workspace"]);
 run("npm", ["run", "build"]);
 run("cargo", ["xtask", "widget", "prepare", "--all"]);
+await verifyBackendHealthProbes();
 
 const dashboardPort = await reservePort();
 const browserPort = await reservePort();
@@ -62,6 +64,12 @@ try {
   });
   const page = await context.newPage();
   pages.push(page);
+  await page.addInitScript(() => {
+    Object.defineProperty(globalThis.crypto, "randomUUID", {
+      configurable: true,
+      value: undefined,
+    });
+  });
 
   await page.goto(baseUrl);
   await page.locator('#connection-status:text-is("Connected")').waitFor();
@@ -300,6 +308,46 @@ try {
   await memoryWidget.locator(".bar .fill").waitFor();
   assert.equal(await instanceCount(page, baseUrl), 3);
 
+  await waitForInstanceHealth(page, baseUrl, cpuOne, "healthy");
+  const healthResponse = await page.request.get(
+    `${baseUrl}/api/v1/instance-health`,
+  );
+  assert.equal(healthResponse.status(), 200);
+  assert.deepEqual(
+    (await healthResponse.json()).instances.map((health) => [
+      health.instance_id,
+      health.status,
+    ]),
+    [
+      [cpuOne, "healthy"],
+      [cpuTwo, "healthy"],
+      [memory, "healthy"],
+    ],
+  );
+  const cpuHealthButton = cpuOneFrame.locator(".widget-health-button");
+  await cpuHealthButton.click();
+  await page.locator("#widget-health").waitFor();
+  assert.equal(await page.locator("#health-status").textContent(), "Healthy");
+  assert.notEqual(await page.locator("#health-updated").textContent(), "Never");
+  assert.equal(await page.locator("#health-restarts").textContent(), "0");
+  await page.screenshot({
+    path: path.join(artifacts, "widget-health-dialog-wide.png"),
+  });
+  await page.locator("#restart-widget").click();
+  assert.equal(
+    await page.locator("#restart-widget").textContent(),
+    "Confirm restart",
+    "restart requires explicit confirmation",
+  );
+  await page.locator("#restart-widget").click();
+  await page
+    .locator('#dashboard-announcement:text-is("Widget backend restarted")')
+    .waitFor();
+  await waitForInstanceHealth(page, baseUrl, cpuOne, "healthy", 1);
+  assert.equal(await page.locator("#health-restarts").textContent(), "1");
+  await page.locator('#widget-health .button[value="cancel"]').click();
+  assert.equal(await instanceCount(page, baseUrl), 3);
+
   await page.locator("#finish-editing").click();
   assert.equal(
     await page.locator(".dashboard-slot").count(),
@@ -308,6 +356,11 @@ try {
   );
   assert.equal(await page.locator("#edit-layout").isVisible(), true);
   assert.equal(await page.locator("#editor-header").isHidden(), true);
+  assert.equal(
+    await page.locator(".widget-health-button:visible").count(),
+    0,
+    "Zen mode hides widget health controls",
+  );
   await page.screenshot({
     path: path.join(artifacts, "dashboard-zen-wide.png"),
     fullPage: true,
@@ -1128,6 +1181,79 @@ function networkProxy(listenPort, targetPort) {
   };
 }
 
+async function verifyBackendHealthProbes() {
+  for (const widgetId of [
+    "claude-usage",
+    "codex-usage",
+    "cpu",
+    "memory",
+    "tatr-tasks",
+  ]) {
+    const directory = path.join(root, ".build/widgets", widgetId);
+    const manifest = JSON.parse(
+      readFileSync(path.join(directory, "widget.json"), "utf8"),
+    );
+    const child = spawn(path.join(directory, manifest.backend), [], {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    const exited = new Promise((resolve) => child.once("exit", resolve));
+    let output = "";
+    const pong = new Promise((resolve, reject) => {
+      child.stdout.on("data", (chunk) => {
+        output += chunk;
+        const lines = output.split("\n");
+        output = lines.pop() ?? "";
+        for (const line of lines) {
+          const message = JSON.parse(line);
+          if (message.kind === "pong" && message.data?.nonce === 42) resolve();
+        }
+      });
+      child.once("error", reject);
+    });
+    child.stdin.write(
+      `${JSON.stringify({ version: 1, kind: "ping", data: { nonce: 42 } })}\n`,
+    );
+    try {
+      await withTimeout(pong, 3_000, `${widgetId} backend did not answer Ping`);
+    } catch (error) {
+      child.kill("SIGKILL");
+      await exited;
+      throw error;
+    }
+    child.stdin.write(
+      `${JSON.stringify({ version: 1, kind: "shutdown", data: {} })}\n`,
+    );
+    child.stdin.end();
+    let exitCode;
+    try {
+      exitCode = await withTimeout(
+        exited,
+        3_000,
+        `${widgetId} backend did not exit after Shutdown`,
+      );
+    } catch (error) {
+      child.kill("SIGKILL");
+      await exited;
+      throw error;
+    }
+    assert.equal(exitCode, 0, `${widgetId} backend exits after Shutdown`);
+  }
+}
+
+async function withTimeout(promise, milliseconds, message) {
+  let timeout;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => reject(new Error(message)), milliseconds);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function waitForHealth(baseUrl) {
   const deadline = Date.now() + 15_000;
   while (Date.now() < deadline) {
@@ -1138,6 +1264,29 @@ async function waitForHealth(baseUrl) {
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   throw new Error("dashboardd did not become healthy");
+}
+
+async function waitForInstanceHealth(
+  page,
+  baseUrl,
+  instanceId,
+  status,
+  restartCount = 0,
+) {
+  const deadline = Date.now() + 10_000;
+  let actual = null;
+  while (Date.now() < deadline) {
+    const response = await page.request.get(
+      `${baseUrl}/api/v1/instances/${encodeURIComponent(instanceId)}/health`,
+    );
+    if (response.ok()) {
+      const health = await response.json();
+      actual = [health.status, health.restart_count];
+      if (actual[0] === status && actual[1] === restartCount) return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  assert.deepEqual(actual, [status, restartCount]);
 }
 
 async function waitForTelemetry(widget) {

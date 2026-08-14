@@ -11,6 +11,7 @@ import {
   type DashboardLayout,
   type DashboardLink,
   type Instance,
+  type InstanceHealth,
   type Theme,
   type WidgetDescriptor,
   type WidgetOption,
@@ -65,6 +66,19 @@ app.innerHTML = `
       <footer><button class="button" value="cancel">Cancel</button><button id="confirm-link" class="button primary" type="button">Save link</button></footer>
     </form>
   </dialog>
+  <dialog id="widget-health" class="modal health-modal">
+    <form method="dialog">
+      <header><h2 id="health-title">Widget health</h2><button class="icon-button" value="cancel" aria-label="Close">x</button></header>
+      <dl class="health-details">
+        <div><dt>Status</dt><dd id="health-status"></dd></div>
+        <div><dt>Started</dt><dd id="health-started"></dd></div>
+        <div><dt>Last update</dt><dd id="health-updated"></dd></div>
+        <div><dt>Restarts</dt><dd id="health-restarts"></dd></div>
+        <div class="health-error-row"><dt>Last error</dt><dd id="health-error"></dd></div>
+      </dl>
+      <footer><button class="button" value="cancel">Close</button><button id="restart-widget" class="button danger" type="button">Restart backend</button></footer>
+    </form>
+  </dialog>
   <dialog id="remove-widget" class="modal confirm-modal">
     <form method="dialog">
       <header><h2 id="remove-title">Remove widget?</h2><button class="icon-button" value="cancel" aria-label="Close">x</button></header>
@@ -86,6 +100,7 @@ const editButton = required<HTMLAnchorElement>("#edit-layout");
 const doneButton = required<HTMLAnchorElement>("#finish-editing");
 const addDialog = required<HTMLDialogElement>("#add-widget");
 const removeDialog = required<HTMLDialogElement>("#remove-widget");
+const healthDialog = required<HTMLDialogElement>("#widget-health");
 const linkDialog = required<HTMLDialogElement>("#link-widget");
 const catalogElement = required<HTMLElement>("#widget-catalog");
 const selectionElement = required<HTMLElement>("#widget-selection");
@@ -104,13 +119,21 @@ const addPositionElement = required<HTMLElement>("#add-position");
 const confirmAddButton = required<HTMLButtonElement>("#confirm-add");
 const confirmRemoveButton = required<HTMLButtonElement>("#confirm-remove");
 const removeTitleElement = required<HTMLElement>("#remove-title");
-for (const dialog of [addDialog, linkDialog, removeDialog]) {
+const healthTitleElement = required<HTMLElement>("#health-title");
+const healthStatusElement = required<HTMLElement>("#health-status");
+const healthStartedElement = required<HTMLElement>("#health-started");
+const healthUpdatedElement = required<HTMLElement>("#health-updated");
+const healthRestartsElement = required<HTMLElement>("#health-restarts");
+const healthErrorElement = required<HTMLElement>("#health-error");
+const restartWidgetButton = required<HTMLButtonElement>("#restart-widget");
+for (const dialog of [addDialog, linkDialog, healthDialog, removeDialog]) {
   dialog.addEventListener("click", (event) => {
     if (event.target === dialog) dialog.close();
   });
 }
 const descriptors = new Map<string, WidgetDescriptor>();
 const resources = new Map<string, Instance>();
+const instanceHealth = new Map<string, InstanceHealth>();
 const frontends = new Map<string, WidgetFrontend>();
 const containers = new Map<string, HTMLElement>();
 const mounting = new Map<string, Promise<void>>();
@@ -130,6 +153,7 @@ let selectedWidget: {
   }>;
 } | null = null;
 let removeInstanceId: string | null = null;
+let healthInstanceId: string | null = null;
 let relinkTarget: { instanceId: string; input: string } | null = null;
 let drag: DragState | null = null;
 let connection: DashboardConnection;
@@ -160,6 +184,14 @@ confirmRemoveButton.addEventListener(
   () => void removeSelectedWidget(),
 );
 confirmLinkButton.addEventListener("click", () => void saveLink());
+restartWidgetButton.addEventListener(
+  "click",
+  () => void restartSelectedWidget(),
+);
+healthDialog.addEventListener("close", () => {
+  healthInstanceId = null;
+  resetRestartConfirmation();
+});
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && drag) cancelDrag();
 });
@@ -215,6 +247,7 @@ function applySnapshot(
   layout: DashboardLayout,
   widgets: WidgetDescriptor[],
   instances: Instance[],
+  health: InstanceHealth[],
   links: DashboardLink[],
 ): void {
   dashboardLayout = layout;
@@ -228,6 +261,8 @@ function applySnapshot(
   for (const instanceId of resources.keys()) {
     if (!currentIds.has(instanceId)) removeInstance(instanceId);
   }
+  instanceHealth.clear();
+  for (const record of health) instanceHealth.set(record.instance_id, record);
   for (const instance of instances) upsertInstance(instance);
   linkBus.replace(links);
   renderCanvas();
@@ -266,6 +301,12 @@ async function mountWidget(instance: Instance): Promise<void> {
   dragHandle.addEventListener("pointermove", updateDrag);
   dragHandle.addEventListener("pointerup", finishDrag);
   dragHandle.addEventListener("pointercancel", cancelDrag);
+  const healthButton = document.createElement("button");
+  healthButton.className = "widget-health-button";
+  healthButton.type = "button";
+  healthButton.innerHTML =
+    '<span class="widget-health-dot" aria-hidden="true"></span><span class="widget-health-label">Starting</span>';
+  healthButton.addEventListener("click", () => openHealthDialog(instance.id));
   const linkControls = document.createElement("div");
   linkControls.className = "widget-link-controls";
   const remove = document.createElement("button");
@@ -275,7 +316,7 @@ async function mountWidget(instance: Instance): Promise<void> {
   remove.setAttribute("aria-label", `Remove ${descriptor.name}`);
   remove.addEventListener("click", () => openRemoveDialog(instance.id));
   frame.addEventListener("keydown", moveWithKeyboard);
-  frame.append(mount, linkControls, dragHandle, remove);
+  frame.append(mount, healthButton, linkControls, dragHandle, remove);
   containers.set(instance.id, frame);
   renderCanvas();
 
@@ -342,6 +383,7 @@ function renderCanvas(): void {
   emptyDashboard.hidden = editing || resources.size > 0;
   for (const [instanceId, frame] of containers) {
     frame.tabIndex = editing ? 0 : -1;
+    renderHealthControl(instanceId, frame);
     renderLinkControls(instanceId, frame);
   }
   const instances = [...resources.values()].sort(
@@ -404,6 +446,33 @@ function renderCanvas(): void {
       widgetsElement.append(slot);
     }
   }
+}
+
+function renderHealthControl(instanceId: string, frame: HTMLElement): void {
+  const button = frame.querySelector<HTMLButtonElement>(
+    ".widget-health-button",
+  );
+  if (!button) return;
+  const health = instanceHealth.get(instanceId);
+  const status = health?.status ?? "starting";
+  const label = healthStatusLabel(status);
+  button.dataset.status = status;
+  button.hidden = !editing;
+  button.title = `Widget health: ${label}`;
+  button.setAttribute("aria-label", `Widget health: ${label}`);
+  const text = button.querySelector<HTMLElement>(".widget-health-label");
+  if (text) text.textContent = label;
+}
+
+function updateInstanceHealth(health: InstanceHealth): void {
+  instanceHealth.set(health.instance_id, health);
+  const frame = containers.get(health.instance_id);
+  if (frame) renderHealthControl(health.instance_id, frame);
+  if (healthInstanceId === health.instance_id) renderHealthDialog(health);
+}
+
+function healthStatusLabel(status: InstanceHealth["status"]): string {
+  return status[0].toUpperCase() + status.slice(1);
 }
 
 function renderLinkControls(instanceId: string, frame: HTMLElement): void {
@@ -1019,6 +1088,83 @@ async function createSelectedWidget(): Promise<void> {
   }
 }
 
+function openHealthDialog(instanceId: string): void {
+  const health = instanceHealth.get(instanceId);
+  const instance = resources.get(instanceId);
+  if (!health || !instance) return;
+  healthInstanceId = instanceId;
+  healthTitleElement.textContent = `${descriptors.get(instance.widget_id)?.name ?? "Widget"} health`;
+  renderHealthDialog(health);
+  resetRestartConfirmation();
+  healthDialog.showModal();
+}
+
+function renderHealthDialog(health: InstanceHealth): void {
+  healthStatusElement.textContent = healthStatusLabel(health.status);
+  healthStatusElement.dataset.status = health.status;
+  setHealthTime(healthStartedElement, health.started_at);
+  setHealthTime(healthUpdatedElement, health.last_update_at);
+  healthRestartsElement.textContent = String(health.restart_count);
+  if (health.last_error) {
+    healthErrorElement.textContent = `${health.last_error.code}: ${health.last_error.message}`;
+    healthErrorElement.title = new Date(health.last_error.at).toLocaleString();
+  } else {
+    healthErrorElement.textContent = "None";
+    healthErrorElement.removeAttribute("title");
+  }
+}
+
+function setHealthTime(element: HTMLElement, value: string | null): void {
+  if (!value) {
+    element.textContent = "Never";
+    element.removeAttribute("title");
+    return;
+  }
+  const date = new Date(value);
+  element.textContent = relativeTime(date);
+  element.title = date.toLocaleString();
+}
+
+function relativeTime(date: Date): string {
+  const seconds = Math.max(0, Math.round((Date.now() - date.getTime()) / 1000));
+  if (seconds < 5) return "just now";
+  if (seconds < 60) return `${seconds} seconds ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60)
+    return `${minutes} ${minutes === 1 ? "minute" : "minutes"} ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} ${hours === 1 ? "hour" : "hours"} ago`;
+  const days = Math.floor(hours / 24);
+  return `${days} ${days === 1 ? "day" : "days"} ago`;
+}
+
+async function restartSelectedWidget(): Promise<void> {
+  if (!healthInstanceId) return;
+  if (restartWidgetButton.dataset.confirm !== "true") {
+    restartWidgetButton.dataset.confirm = "true";
+    restartWidgetButton.textContent = "Confirm restart";
+    return;
+  }
+  const instanceId = healthInstanceId;
+  restartWidgetButton.disabled = true;
+  restartWidgetButton.textContent = "Restarting...";
+  clearError();
+  try {
+    await connection.restartWidget(instanceId);
+    announcementElement.textContent = "Widget backend restarted";
+  } catch (error) {
+    showError(errorMessage(error));
+  } finally {
+    restartWidgetButton.disabled = false;
+    resetRestartConfirmation();
+  }
+}
+
+function resetRestartConfirmation(): void {
+  delete restartWidgetButton.dataset.confirm;
+  restartWidgetButton.textContent = "Restart backend";
+}
+
 function openRemoveDialog(instanceId: string): void {
   const instance = resources.get(instanceId);
   if (!instance) return;
@@ -1047,6 +1193,8 @@ async function removeSelectedWidget(): Promise<void> {
 
 function removeInstance(instanceId: string): void {
   resources.delete(instanceId);
+  instanceHealth.delete(instanceId);
+  if (healthInstanceId === instanceId) healthDialog.close();
   linkBus.removeInstance(instanceId);
   pendingUpdates.delete(instanceId);
   frontends.get(instanceId)?.destroy();
@@ -1103,6 +1251,7 @@ connection = connectDashboard({
   onConfigurationError: showConfigurationError,
   onSnapshot: applySnapshot,
   onInstanceCreated: upsertInstance,
+  onInstanceHealth: updateInstanceHealth,
   onInstanceUpdated: upsertInstance,
   onInstanceDestroyed: removeInstance,
   onLinkUpdated(link) {

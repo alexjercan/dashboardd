@@ -91,6 +91,11 @@ pub enum WidgetToServer {
         /// Widget-owned JSON payload.
         payload: Value,
     },
+    /// Answers a dashboardd liveness probe.
+    Pong {
+        /// Probe identifier supplied by dashboardd.
+        nonce: u64,
+    },
     /// Reports a backend or instance error.
     Error {
         /// Affected instance, when one exists.
@@ -123,6 +128,11 @@ pub enum ServerToWidget {
         /// Widget-owned JSON payload.
         payload: Value,
     },
+    /// Probes whether the backend process can handle protocol messages.
+    Ping {
+        /// Probe identifier that the backend must return unchanged.
+        nonce: u64,
+    },
     /// Reports an error to the widget backend process.
     Error {
         /// Error details.
@@ -148,6 +158,21 @@ mod tests {
         let decoded: Envelope<WidgetToServer> = serde_json::from_str(&encoded).unwrap();
 
         assert_eq!(decoded, message);
+    }
+
+    #[test]
+    fn health_probes_round_trip() {
+        let ping = ServerToWidget::Ping { nonce: 42 };
+        let pong = WidgetToServer::Pong { nonce: 42 };
+
+        assert_eq!(
+            parse::<ServerToWidget>(&serialize(ping.clone()).unwrap()).unwrap(),
+            ping
+        );
+        assert_eq!(
+            parse::<WidgetToServer>(&serialize(pong.clone()).unwrap()).unwrap(),
+            pong
+        );
     }
 
     #[test]
