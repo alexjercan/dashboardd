@@ -45,6 +45,7 @@ pub struct WidgetOption {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum WidgetOptionKind {
     Boolean,
+    Text,
     Integer {
         minimum: i64,
         maximum: i64,
@@ -119,6 +120,7 @@ impl WidgetOption {
     fn validate_value(&self, value: &Value) -> Result<(), String> {
         let valid = match &self.kind {
             WidgetOptionKind::Boolean => value.is_boolean(),
+            WidgetOptionKind::Text => value.is_string(),
             WidgetOptionKind::Integer {
                 minimum,
                 maximum,
@@ -373,7 +375,7 @@ mod tests {
         fs::create_dir_all(&cpu).unwrap();
         fs::write(
             cpu.join("widget.json"),
-            r#"{"schema_version":2,"id":"cpu","name":"CPU","description":"Processor usage","backend":"backend","variants":[{"id":"full","name":"Full","width":3,"height":3,"frontend":"full.js"}],"options":[{"id":"history_points","name":"History length","description":"Retained samples","variants":["full"],"default":40,"type":"integer","minimum":20,"maximum":120,"step":10}]}"#,
+            r#"{"schema_version":2,"id":"cpu","name":"CPU","description":"Processor usage","backend":"backend","variants":[{"id":"full","name":"Full","width":3,"height":3,"frontend":"full.js"}],"options":[{"id":"root","name":"Root","description":"Project root","variants":["full"],"default":"~/personal","type":"text"},{"id":"history_points","name":"History length","description":"Retained samples","variants":["full"],"default":40,"type":"integer","minimum":20,"maximum":120,"step":10}]}"#,
         )
         .unwrap();
         fs::write(cpu.join("backend"), "executable").unwrap();
@@ -392,7 +394,10 @@ mod tests {
         assert_eq!(config.frontend("full"), Some(cpu.join("full.js").as_path()));
         assert_eq!(
             config.normalize_options("full", &BTreeMap::new()).unwrap(),
-            BTreeMap::from([("history_points".into(), Value::from(40))])
+            BTreeMap::from([
+                ("history_points".into(), Value::from(40)),
+                ("root".into(), Value::from("~/personal")),
+            ])
         );
         assert_eq!(
             config

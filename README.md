@@ -19,7 +19,7 @@ cargo run -p dashboardd
 into runtime bundles under `.build/widgets`. Development bundles use artifact
 symlinks. Use `--copy --release` to make a standalone packaging bundle.
 
-Widget manifests can declare Boolean, bounded integer, and static select
+Widget manifests can declare Boolean, text, bounded integer, and static select
 options. dashboardd validates submitted values, persists effective values, and
 provides active values to the backend initialization message and frontend
 `WidgetContext.options`. Option values are public instance configuration. Do
@@ -48,6 +48,12 @@ reports connection, reconciliation, event, and widget mount activity.
 Open `/` for the widget-only Zen dashboard and `/edit` for the layout editor.
 The fixed Zen controls keep connection status and Edit available without
 scrolling. Open the Swagger API documentation at the logged `/docs` URL.
+
+The 6x3 Tatr Tasks widget reads `TASK.md` records directly without executing
+`tatr`. It defaults to recursive discovery under `~/personal`, filters to open
+and in-progress tasks, and sorts by priority. Rows include the complete Task ID.
+Its root accepts absolute paths and `~/...`. Status and tag controls apply
+temporary browser-local filters.
 
 Dashboard composition persists in `$XDG_STATE_HOME/scufris/dashboard.json`, or
 `$HOME/.local/state/scufris/dashboard.json` when `XDG_STATE_HOME` is unset.

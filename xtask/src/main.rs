@@ -59,6 +59,10 @@ enum OptionKindSource {
         #[serde(rename = "boolean")]
         _boolean: EmptyTable,
     },
+    Text {
+        #[serde(rename = "text")]
+        _text: EmptyTable,
+    },
     Integer {
         integer: IntegerOptionSource,
     },
@@ -123,6 +127,7 @@ struct RuntimeOption<'a> {
 #[serde(tag = "type", rename_all = "snake_case")]
 enum RuntimeOptionKind<'a> {
     Boolean,
+    Text,
     Integer {
         minimum: i64,
         maximum: i64,
@@ -244,6 +249,7 @@ fn prepare(
             default: &option.default,
             kind: match &option.kind {
                 OptionKindSource::Boolean { .. } => RuntimeOptionKind::Boolean,
+                OptionKindSource::Text { .. } => RuntimeOptionKind::Text,
                 OptionKindSource::Integer { integer } => RuntimeOptionKind::Integer {
                     minimum: integer.minimum,
                     maximum: integer.maximum,
@@ -346,6 +352,9 @@ fn validate_manifest(
         match &option.kind {
             OptionKindSource::Boolean { .. } if !option.default.is_boolean() => {
                 return Err(format!("option {} requires a Boolean default", option.id).into());
+            }
+            OptionKindSource::Text { .. } if !option.default.is_string() => {
+                return Err(format!("option {} requires a text default", option.id).into());
             }
             OptionKindSource::Integer { integer } => {
                 let Some(default) = option.default.as_i64() else {

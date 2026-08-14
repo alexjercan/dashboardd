@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   openSync,
+  rmSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -24,6 +25,21 @@ const dashboardPort = await reservePort();
 const browserPort = await reservePort();
 const stateFile = path.join(artifacts, `dashboard-${process.pid}.json`);
 const configFile = path.join(artifacts, `config-${process.pid}.toml`);
+const tatrRoot = path.join(artifacts, `tatr-${process.pid}`);
+writeTatrTask(
+  "scufris",
+  "20260814-120000",
+  "Add Tatr widget",
+  "IN_PROGRESS",
+  100,
+  ["widget", "rust"],
+);
+writeTatrTask("tatr", "20260814-110000", "Document filters", "OPEN", 40, [
+  "docs",
+]);
+writeTatrTask("tatr", "20260814-100000", "Old task", "CLOSED", 200, [
+  "archive",
+]);
 writeConfiguration("#123456");
 const dashboardUrl = `http://127.0.0.1:${dashboardPort}`;
 const baseUrl = `http://127.0.0.1:${browserPort}`;
@@ -194,6 +210,7 @@ try {
       "codex-usage": "Codex Usage",
       cpu: "CPU",
       memory: "RAM",
+      "tatr-tasks": "Tatr Tasks",
     },
   );
   assert.deepEqual(
@@ -234,6 +251,7 @@ try {
         ["full", 3, 3],
         ["compact", 1, 1],
       ],
+      "tatr-tasks": [["full", 6, 3]],
     },
   );
 
@@ -409,7 +427,7 @@ try {
   assert.equal(invalidOptions.status(), 400);
 
   await page.locator('.dashboard-slot[data-column="3"][data-row="0"]').click();
-  assert.equal(await page.locator(".widget-choice").count(), 4);
+  assert.equal(await page.locator(".widget-choice").count(), 5);
   await page.locator(".widget-choice", { hasText: "CPU" }).click();
   await page.locator(".variant-choice", { hasText: "Full" }).click();
   await page.locator('.widget-option input[type="number"]').fill("20");
@@ -486,6 +504,99 @@ try {
     fullPage: true,
   });
 
+  await page.locator('.dashboard-slot[data-column="0"][data-row="3"]').click();
+  await page.locator(".widget-choice", { hasText: "Tatr Tasks" }).click();
+  const textOptions = page.locator('.widget-option input[type="text"]');
+  await textOptions.nth(0).fill(tatrRoot);
+  await textOptions.nth(1).fill(":status in [OPEN, IN_PROGRESS]");
+  const tatrResponsePromise = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/v1/instances") &&
+      response.request().method() === "POST",
+  );
+  await page.locator("#confirm-add").click();
+  const tatrResponse = await tatrResponsePromise;
+  assert.equal(tatrResponse.status(), 201);
+  const tatrInstance = await tatrResponse.json();
+  assert.deepEqual(tatrInstance.layout, {
+    column: 0,
+    row: 3,
+    width: 6,
+    height: 3,
+  });
+  assert.equal(tatrInstance.options.root, tatrRoot);
+  const tatrFrame = page.locator(`[data-instance-id="${tatrInstance.id}"]`);
+  await tatrFrame.locator(".task-row").first().waitFor();
+  await page.locator("#finish-editing").click();
+  await page.waitForURL(baseUrl + "/");
+  assert.equal(await tatrFrame.locator(".task-row").count(), 2);
+  assert.equal(
+    await tatrFrame.locator(".task-id").first().textContent(),
+    "20260814-120000",
+  );
+  assert.equal(await tatrFrame.locator(".table-head").isHidden(), true);
+  assert.equal(await tatrFrame.locator(".mobile-sort").isVisible(), true);
+  assert.equal(
+    await tatrFrame
+      .locator(".task-row")
+      .first()
+      .evaluate(
+        (element) =>
+          getComputedStyle(element).gridTemplateRows.split(" ").length,
+      ),
+    2,
+  );
+  await tatrFrame.locator(".status", { hasText: "In progress" }).click();
+  assert.equal(await tatrFrame.locator(".task-row").count(), 1);
+  await tatrFrame.locator(".clear").click();
+  assert.equal(await tatrFrame.locator(".task-row").count(), 2);
+  await tatrFrame.locator(".tags button", { hasText: "widget" }).click();
+  assert.equal(await tatrFrame.locator(".task-row").count(), 1);
+  await tatrFrame.locator(".clear").click();
+  await page.screenshot({
+    path: path.join(artifacts, "tatr-tasks-narrow.png"),
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  assert.equal(await tatrFrame.locator(".table-head").isVisible(), true);
+  assert.equal(await tatrFrame.locator(".mobile-sort").isHidden(), true);
+  await tatrFrame.locator('[data-sort="title"]').click();
+  assert.equal(
+    await tatrFrame.locator(".title").first().textContent(),
+    "Add Tatr widget",
+  );
+  await page.screenshot({
+    path: path.join(artifacts, "tatr-tasks-wide.png"),
+    fullPage: true,
+  });
+  assert.equal(
+    await tatrFrame
+      .locator(".dashboard-widget-mount")
+      .evaluate(
+        (element, rootPath) =>
+          element.shadowRoot?.textContent?.includes(rootPath) ?? false,
+        tatrRoot,
+      ),
+    false,
+    "task rendering does not expose the absolute root",
+  );
+  await page.reload();
+  await tatrFrame.locator(".task-row").first().waitFor();
+  assert.equal(
+    await tatrFrame.locator(".task-row").count(),
+    2,
+    "browser reload requests the unchanged task snapshot",
+  );
+  assert.equal(
+    await tatrFrame.locator(".task-id").first().textContent(),
+    "20260814-120000",
+  );
+  const deleteTatr = await page.request.delete(
+    `${baseUrl}/api/v1/instances/${tatrInstance.id}`,
+  );
+  assert.equal(deleteTatr.status(), 204);
+  await tatrFrame.waitFor({ state: "detached" });
+
   await proxy.stop();
   await page
     .locator('#connection-indicator[data-status="disconnected"]')
@@ -505,6 +616,7 @@ try {
     ["memory", ["full", "compact"]],
     ["claude-usage", ["full", "compact", "minimal"]],
     ["codex-usage", ["compact", "minimal"]],
+    ["tatr-tasks", ["full"]],
   ]) {
     for (const variantId of variants) {
       const response = await page.request.get(
@@ -610,6 +722,7 @@ position = [1, 1]
   closeSync(log);
   if (existsSync(stateFile)) unlinkSync(stateFile);
   if (existsSync(configFile)) unlinkSync(configFile);
+  rmSync(tatrRoot, { recursive: true, force: true });
 }
 
 async function exerciseUsageCommands(page, widgetId) {
@@ -680,6 +793,15 @@ async function exerciseUsageCommands(page, widgetId) {
     minimal.remove();
     return { commands, minimalHasRefresh };
   }, widgetId);
+}
+
+function writeTatrTask(project, id, title, status, priority, tags) {
+  const directory = path.join(tatrRoot, project, "tasks", id);
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(
+    path.join(directory, "TASK.md"),
+    `# ${title}\n\n- STATUS: ${status}\n- PRIORITY: ${priority}\n- TAGS: ${tags.join(", ")}\n\nFixture body\n`,
+  );
 }
 
 function writeConfiguration(accent, dashboard = "", font = "Iosevka") {

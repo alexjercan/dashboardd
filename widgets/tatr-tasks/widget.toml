@@ -1,0 +1,53 @@
+schema_version = 1
+id = "tatr-tasks"
+name = "Tatr Tasks"
+description = "Read-only tasks across local Tatr projects"
+
+[backend]
+package = "tatr-tasks"
+
+[frontend]
+workspace = "@scufris/tatr-tasks-widget"
+
+[[frontend.variants]]
+id = "full"
+name = "Full"
+size = [6, 3]
+entry = "src/full.ts"
+
+[[options]]
+id = "root"
+name = "Root"
+description = "Absolute path or ~/ path containing Tatr projects"
+default = "~/personal"
+
+[options.text]
+
+[[options]]
+id = "recursive"
+name = "Recursive"
+description = "Discover Tatr projects below the root"
+default = true
+
+[options.boolean]
+
+[[options]]
+id = "filter"
+name = "Filter"
+description = "Tatr query applied before tasks reach the dashboard"
+default = ":status in [OPEN, IN_PROGRESS]"
+
+[options.text]
+
+[[options]]
+id = "sort"
+name = "Sort"
+description = "Initial task order"
+default = "priority"
+
+[options.select]
+choices = [
+  { value = "created", name = "Created" },
+  { value = "priority", name = "Priority" },
+  { value = "title", name = "Title" },
+]

@@ -6,6 +6,7 @@ members = [
   "widgets/codex-usage",
   "widgets/cpu",
   "widgets/memory",
+  "widgets/tatr-tasks",
   "xtask",
 ]
 resolver = "2"

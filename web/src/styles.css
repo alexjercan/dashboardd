@@ -536,6 +536,7 @@ h1 {
 }
 
 .widget-option input[type="number"],
+.widget-option input[type="text"],
 .widget-option select {
   width: 106px;
   padding: 6px;
@@ -560,6 +561,15 @@ h1 {
 .widget-option.select span {
   grid-column: 1;
   grid-row: 1;
+}
+
+.widget-option.text {
+  grid-template-columns: 1fr;
+}
+
+.widget-option.text input {
+  grid-row: 2;
+  width: 100%;
 }
 
 .confirm-modal p {

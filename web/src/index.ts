@@ -715,6 +715,9 @@ function optionControl(
   if (option.type === "boolean") {
     input.type = "checkbox";
     input.checked = option.default === true;
+  } else if (option.type === "text") {
+    input.type = "text";
+    input.value = String(option.default);
   } else {
     input.type = "number";
     input.value = String(option.default);

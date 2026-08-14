@@ -1,0 +1,281 @@
+import type { WidgetContext, WidgetFrontend } from "@scufris/widget-sdk";
+import widgetReset from "@scufris/widget-sdk/widget.css";
+import styles from "./styles.css";
+
+type Status = "OPEN" | "IN_PROGRESS" | "CLOSED";
+type Task = {
+  id: string;
+  project: string;
+  title: string;
+  status: Status;
+  priority: number;
+  tags: string[];
+};
+type Snapshot = { tasks: Task[] };
+type Sort = "created" | "priority" | "title";
+type Direction = "ascending" | "descending";
+
+export function mount(
+  container: HTMLElement,
+  context: WidgetContext,
+): WidgetFrontend {
+  const shadow = container.attachShadow({ mode: "open" });
+  const state = {
+    tasks: [] as Task[],
+    statuses: new Set<Status>(),
+    tags: new Set<string>(),
+    sort: parseSort(context.options.sort),
+    direction: defaultDirection(parseSort(context.options.sort)),
+  };
+  shadow.innerHTML = `<style>${widgetReset}\n${styles}</style><article><header><div><h2>Tatr Tasks</h2><span class="summary">Waiting for tasks...</span></div><label class="mobile-sort">Sort<select aria-label="Sort tasks"><option value="priority">Priority</option><option value="created">Created</option><option value="title">Title</option></select></label></header><div class="filters" hidden><span class="filter-list"></span><button class="clear" type="button">Clear</button></div><div class="table"><div class="table-head"><span>Status</span><span>Project</span><span>Task ID</span><button type="button" data-sort="title">Title</button><span>Tags</span><button type="button" data-sort="priority">Priority</button></div><div class="rows"><div class="empty">Waiting for tasks...</div></div></div></article>`;
+  shadow.host.setAttribute(
+    "aria-label",
+    `Tatr tasks for ${context.instanceId}`,
+  );
+
+  for (const button of shadow.querySelectorAll<HTMLButtonElement>(
+    "[data-sort]",
+  ))
+    button.addEventListener("click", () => {
+      const sort = parseSort(button.dataset.sort);
+      if (state.sort === sort)
+        state.direction =
+          state.direction === "ascending" ? "descending" : "ascending";
+      else {
+        state.sort = sort;
+        state.direction = defaultDirection(sort);
+      }
+      render(shadow, state);
+    });
+  const select = required<HTMLSelectElement>(shadow, ".mobile-sort select");
+  select.value = state.sort;
+  select.addEventListener("change", () => {
+    state.sort = parseSort(select.value);
+    state.direction = defaultDirection(state.sort);
+    render(shadow, state);
+  });
+  required<HTMLButtonElement>(shadow, ".clear").addEventListener(
+    "click",
+    () => {
+      state.statuses.clear();
+      state.tags.clear();
+      render(shadow, state);
+    },
+  );
+
+  void context.send({ command: "refresh" }).catch(() => {});
+
+  return {
+    update(payload: unknown): void {
+      const snapshot = parseSnapshot(payload);
+      if (!snapshot) return;
+      state.tasks = snapshot.tasks;
+      render(shadow, state);
+    },
+    destroy(): void {
+      shadow.replaceChildren();
+    },
+  };
+}
+
+function render(
+  shadow: ShadowRoot,
+  state: {
+    tasks: Task[];
+    statuses: Set<Status>;
+    tags: Set<string>;
+    sort: Sort;
+    direction: Direction;
+  },
+): void {
+  const filtered = state.tasks.filter(
+    (task) =>
+      (state.statuses.size === 0 || state.statuses.has(task.status)) &&
+      [...state.tags].every((tag) => task.tags.includes(tag)),
+  );
+  const tasks = [...filtered].sort((left, right) => {
+    const order = compare(left, right, state.sort);
+    return state.direction === "ascending" ? order : -order;
+  });
+  required<HTMLElement>(shadow, ".summary").textContent = summary(
+    filtered.length,
+    state.tasks.length,
+  );
+  const select = required<HTMLSelectElement>(shadow, ".mobile-sort select");
+  select.value = state.sort;
+  for (const button of shadow.querySelectorAll<HTMLButtonElement>(
+    "[data-sort]",
+  )) {
+    const active = button.dataset.sort === state.sort;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-sort", active ? state.direction : "none");
+  }
+  renderFilters(shadow, state);
+  const rows = required<HTMLElement>(shadow, ".rows");
+  rows.replaceChildren();
+  if (tasks.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "empty";
+    empty.textContent =
+      state.tasks.length === 0 ? "No tasks" : "No matching tasks";
+    rows.append(empty);
+    return;
+  }
+  for (const task of tasks) rows.append(taskRow(task, state, shadow));
+}
+
+function taskRow(
+  task: Task,
+  state: {
+    tasks: Task[];
+    statuses: Set<Status>;
+    tags: Set<string>;
+    sort: Sort;
+    direction: Direction;
+  },
+  shadow: ShadowRoot,
+): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "task-row";
+  row.dataset.status = task.status.toLowerCase();
+
+  const status = document.createElement("button");
+  status.type = "button";
+  status.className = "status";
+  status.textContent = statusLabel(task.status);
+  status.title = `Filter by ${status.textContent}`;
+  status.addEventListener("click", () => {
+    toggle(state.statuses, task.status);
+    render(shadow, state);
+  });
+
+  const project = document.createElement("span");
+  project.className = "project";
+  project.textContent = task.project;
+  project.title = task.project;
+
+  const taskId = document.createElement("span");
+  taskId.className = "task-id";
+  taskId.textContent = task.id;
+
+  const title = document.createElement("strong");
+  title.className = "title";
+  title.textContent = task.title;
+  title.title = task.title;
+
+  const metadata = document.createElement("span");
+  metadata.className = "metadata";
+
+  const tags = document.createElement("span");
+  tags.className = "tags";
+  for (const value of task.tags) {
+    const tag = document.createElement("button");
+    tag.type = "button";
+    tag.textContent = value;
+    tag.classList.toggle("selected", state.tags.has(value));
+    tag.addEventListener("click", () => {
+      toggle(state.tags, value);
+      render(shadow, state);
+    });
+    tags.append(tag);
+  }
+
+  const priority = document.createElement("span");
+  priority.className = "priority";
+  priority.textContent = `P${task.priority}`;
+
+  metadata.append(taskId, tags);
+  row.append(status, project, metadata, title, priority);
+  return row;
+}
+
+function renderFilters(
+  shadow: ShadowRoot,
+  state: { statuses: Set<Status>; tags: Set<string> },
+): void {
+  const filters = required<HTMLElement>(shadow, ".filters");
+  const list = required<HTMLElement>(shadow, ".filter-list");
+  list.replaceChildren();
+  for (const status of state.statuses) {
+    const chip = document.createElement("span");
+    chip.textContent = statusLabel(status);
+    list.append(chip);
+  }
+  for (const tag of state.tags) {
+    const chip = document.createElement("span");
+    chip.textContent = `#${tag}`;
+    list.append(chip);
+  }
+  filters.hidden = state.statuses.size === 0 && state.tags.size === 0;
+}
+
+function compare(left: Task, right: Task, sort: Sort): number {
+  if (sort === "priority") return left.priority - right.priority;
+  if (sort === "title") return left.title.localeCompare(right.title);
+  return left.id.localeCompare(right.id);
+}
+
+function defaultDirection(sort: Sort): Direction {
+  return sort === "priority" ? "descending" : "ascending";
+}
+
+function parseSort(value: unknown): Sort {
+  return value === "created" || value === "title" ? value : "priority";
+}
+
+function summary(filtered: number, total: number): string {
+  if (filtered === total) return `${total} ${total === 1 ? "task" : "tasks"}`;
+  return `${filtered} of ${total} tasks`;
+}
+
+function statusLabel(status: Status): string {
+  if (status === "IN_PROGRESS") return "In progress";
+  return status === "OPEN" ? "Open" : "Closed";
+}
+
+function toggle<T>(values: Set<T>, value: T): void {
+  if (!values.delete(value)) values.add(value);
+}
+
+function parseSnapshot(value: unknown): Snapshot | null {
+  if (!isRecord(value) || !Array.isArray(value.tasks)) return null;
+  const tasks = value.tasks.map(parseTask);
+  return tasks.every((task): task is Task => task !== null) ? { tasks } : null;
+}
+
+function parseTask(value: unknown): Task | null {
+  if (
+    !isRecord(value) ||
+    typeof value.id !== "string" ||
+    typeof value.project !== "string" ||
+    typeof value.title !== "string" ||
+    !isStatus(value.status) ||
+    !Number.isInteger(value.priority) ||
+    (value.priority as number) < 0 ||
+    !Array.isArray(value.tags) ||
+    !value.tags.every((tag) => typeof tag === "string")
+  )
+    return null;
+  return {
+    id: value.id,
+    project: value.project,
+    title: value.title,
+    status: value.status,
+    priority: value.priority as number,
+    tags: value.tags as string[],
+  };
+}
+
+function isStatus(value: unknown): value is Status {
+  return value === "OPEN" || value === "IN_PROGRESS" || value === "CLOSED";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function required<T extends Element>(root: ParentNode, selector: string): T {
+  const element = root.querySelector<T>(selector);
+  if (!element) throw new Error(`missing widget element: ${selector}`);
+  return element;
+}
