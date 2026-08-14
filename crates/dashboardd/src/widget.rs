@@ -19,6 +19,7 @@ pub struct WidgetVariant {
     pub width: u32,
     pub height: u32,
     pub frontend_url: String,
+    pub focus: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -206,6 +207,8 @@ struct VariantFile {
     width: u32,
     height: u32,
     frontend: PathBuf,
+    #[serde(default)]
+    focus: bool,
 }
 
 impl WidgetsManager {
@@ -311,6 +314,7 @@ fn read_config(widget_directory: &Path) -> io::Result<WidgetConfig> {
             name: variant.name,
             width: variant.width,
             height: variant.height,
+            focus: variant.focus,
         });
         frontends.push(frontend);
     }
@@ -447,7 +451,7 @@ mod tests {
         fs::create_dir_all(&cpu).unwrap();
         fs::write(
             cpu.join("widget.json"),
-            r#"{"schema_version":2,"id":"cpu","name":"CPU","description":"Processor usage","backend":"backend","variants":[{"id":"full","name":"Full","width":3,"height":3,"frontend":"full.js"}],"options":[{"id":"root","name":"Root","description":"Project root","variants":["full"],"default":"~/personal","type":"text"},{"id":"history_points","name":"History length","description":"Retained samples","variants":["full"],"default":40,"type":"integer","minimum":20,"maximum":120,"step":10}],"inputs":[{"id":"task","name":"Task","type":"task/v1","variants":["full"],"required":true}],"outputs":[{"id":"selection","name":"Selection","type":"task/v1","variants":["full"],"required":false}]}"#,
+            r#"{"schema_version":2,"id":"cpu","name":"CPU","description":"Processor usage","backend":"backend","variants":[{"id":"full","name":"Full","width":3,"height":3,"frontend":"full.js","focus":true}],"options":[{"id":"root","name":"Root","description":"Project root","variants":["full"],"default":"~/personal","type":"text"},{"id":"history_points","name":"History length","description":"Retained samples","variants":["full"],"default":40,"type":"integer","minimum":20,"maximum":120,"step":10}],"inputs":[{"id":"task","name":"Task","type":"task/v1","variants":["full"],"required":true}],"outputs":[{"id":"selection","name":"Selection","type":"task/v1","variants":["full"],"required":false}]}"#,
         )
         .unwrap();
         fs::write(cpu.join("backend"), "executable").unwrap();
@@ -459,6 +463,7 @@ mod tests {
         assert_eq!(widgets.len(), 1);
         assert_eq!(config.descriptor.variants[0].id, "full");
         assert_eq!(config.descriptor.variants[0].width, 3);
+        assert!(config.descriptor.variants[0].focus);
         assert_eq!(
             config.descriptor.variants[0].frontend_url,
             "/widgets/cpu/variants/full/frontend.js"

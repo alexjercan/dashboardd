@@ -53,7 +53,10 @@ telemetry, widget discovery, and HTTP request logs. The browser console also
 reports connection, reconciliation, event, and widget mount activity.
 
 Open `/` for the widget-only Zen dashboard and `/edit` for the layout editor.
-The editor shows server-owned backend health for each widget. Health diagnostics
+Variants that opt in show a `Focus` control in Zen mode. Focus uses the
+route `/focus/<instance-id>`, preserves the mounted frontend, fills the viewport,
+and closes with its button, Escape, or browser Back. The editor shows
+server-owned backend health for each widget. Health diagnostics
 include liveness, the last update and error, and a confirmed manual restart.
 Dashboardd probes backends every 10 seconds and marks them stale after 30 seconds
 without protocol activity. Zen mode does not show health controls. The fixed Zen
@@ -73,7 +76,8 @@ temporary browser-local filters. The linked 3x3 Artifact variant defaults to
 `TASK.md` and can securely select task-local Markdown, sanitized HTML, UTF-8
 text, and raster images from its normal-mode identity menu. Absolute paths,
 symlinks, active HTML, embedded local assets, and unsupported binaries remain
-unavailable.
+unavailable. Its Focus presentation provides a larger document and image
+surface while retaining the selected artifact.
 
 Dashboard composition persists in `$XDG_STATE_HOME/scufris/dashboard.json`, or
 `$HOME/.local/state/scufris/dashboard.json` when `XDG_STATE_HOME` is unset.

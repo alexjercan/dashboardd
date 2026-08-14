@@ -41,6 +41,13 @@ app.innerHTML = `
       </footer>
     </div>
   </section>
+  <section id="focus-layer" class="focus-layer" aria-labelledby="focus-title" hidden>
+    <header class="focus-header">
+      <h1 id="focus-title" tabindex="-1">Widget Focus</h1>
+      <button id="close-focus" class="button" type="button">Close</button>
+    </header>
+    <div id="focus-stage" class="focus-stage"></div>
+  </section>
   <dialog id="add-widget" class="modal">
     <form method="dialog">
       <header><h2>Add widget</h2><button class="icon-button" value="cancel" aria-label="Close">x</button></header>
@@ -91,6 +98,11 @@ app.innerHTML = `
 const statusElement = required<HTMLElement>("#connection-status");
 const indicatorElement = required<HTMLElement>("#connection-indicator");
 const widgetsElement = required<HTMLElement>("#widgets");
+const dashboardShell = required<HTMLElement>(".dashboard-shell");
+const focusLayer = required<HTMLElement>("#focus-layer");
+const focusStage = required<HTMLElement>("#focus-stage");
+const focusTitle = required<HTMLElement>("#focus-title");
+const closeFocusButton = required<HTMLButtonElement>("#close-focus");
 const errorElement = required<HTMLElement>("#dashboard-error");
 const announcementElement = required<HTMLElement>("#dashboard-announcement");
 const editorHeader = required<HTMLElement>("#editor-header");
@@ -140,6 +152,9 @@ const mounting = new Map<string, Promise<void>>();
 const pendingUpdates = new Map<string, unknown>();
 const linkBus = new WidgetLinkBus();
 let editing = window.location.pathname === "/edit";
+let focusedInstanceId = parseFocusRoute(window.location.pathname);
+let previousFocusedInstanceId: string | null = null;
+let snapshotLoaded = false;
 let dashboardLayout: DashboardLayout = { columns: 1 };
 let selectedSlot: { column: number; row: number } | null = null;
 let selectedWidget: {
@@ -188,12 +203,17 @@ restartWidgetButton.addEventListener(
   "click",
   () => void restartSelectedWidget(),
 );
+closeFocusButton.addEventListener("click", closeFocus);
 healthDialog.addEventListener("close", () => {
   healthInstanceId = null;
   resetRestartConfirmation();
 });
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && drag) cancelDrag();
+  if (event.key !== "Escape") return;
+  if (focusedInstanceId) {
+    event.preventDefault();
+    closeFocus();
+  } else if (drag) cancelDrag();
 });
 
 function renderStatus(status: ConnectionStatus): void {
@@ -265,6 +285,7 @@ function applySnapshot(
   for (const record of health) instanceHealth.set(record.instance_id, record);
   for (const instance of instances) upsertInstance(instance);
   linkBus.replace(links);
+  snapshotLoaded = true;
   renderCanvas();
 }
 
@@ -292,6 +313,15 @@ async function mountWidget(instance: Instance): Promise<void> {
   applyLayout(frame, instance);
   const mount = document.createElement("div");
   mount.className = "dashboard-widget-mount";
+  const focusButton = document.createElement("button");
+  focusButton.className = "widget-focus-button";
+  focusButton.type = "button";
+  focusButton.textContent = "Focus";
+  focusButton.setAttribute(
+    "aria-label",
+    `Focus ${descriptor.name} ${variantFor(instance, descriptor).name}`,
+  );
+  focusButton.addEventListener("click", () => openFocus(instance.id));
   const dragHandle = document.createElement("button");
   dragHandle.className = "drag-handle";
   dragHandle.type = "button";
@@ -316,7 +346,14 @@ async function mountWidget(instance: Instance): Promise<void> {
   remove.setAttribute("aria-label", `Remove ${descriptor.name}`);
   remove.addEventListener("click", () => openRemoveDialog(instance.id));
   frame.addEventListener("keydown", moveWithKeyboard);
-  frame.append(mount, healthButton, linkControls, dragHandle, remove);
+  frame.append(
+    mount,
+    focusButton,
+    healthButton,
+    linkControls,
+    dragHandle,
+    remove,
+  );
   containers.set(instance.id, frame);
   renderCanvas();
 
@@ -340,6 +377,9 @@ async function mountWidget(instance: Instance): Promise<void> {
       return;
     }
     frontends.set(instance.id, frontend);
+    frontend.setPresentation?.(
+      focusedInstanceId === instance.id ? "focus" : "tile",
+    );
     if (pendingUpdates.has(instance.id)) {
       frontend.update(pendingUpdates.get(instance.id));
       pendingUpdates.delete(instance.id);
@@ -347,7 +387,11 @@ async function mountWidget(instance: Instance): Promise<void> {
   } catch (error) {
     frame.remove();
     containers.delete(instance.id);
-    showError(`Could not load ${descriptor.name}: ${errorMessage(error)}`);
+    if (focusedInstanceId === instance.id)
+      leaveInvalidFocus(
+        `Could not focus ${descriptor.name}: widget failed to load`,
+      );
+    else showError(`Could not load ${descriptor.name}: ${errorMessage(error)}`);
   }
 }
 
@@ -366,13 +410,63 @@ function navigateDashboard(event: MouseEvent): void {
   syncRoute(true);
 }
 
+function openFocus(instanceId: string): void {
+  if (!supportsFocus(instanceId) || editing) return;
+  window.history.pushState(
+    { scufrisFocus: true },
+    "",
+    `/focus/${encodeURIComponent(instanceId)}`,
+  );
+  syncRoute(true);
+}
+
+function closeFocus(): void {
+  if (!focusedInstanceId) return;
+  if (isFocusHistoryEntry()) window.history.back();
+  else {
+    window.history.replaceState(null, "", "/");
+    syncRoute(true);
+  }
+}
+
+function isFocusHistoryEntry(): boolean {
+  return (
+    typeof window.history.state === "object" &&
+    window.history.state !== null &&
+    window.history.state.scufrisFocus === true
+  );
+}
+
+function parseFocusRoute(pathname: string): string | null {
+  const match = /^\/focus\/([^/]+)$/.exec(pathname);
+  if (!match) return null;
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return null;
+  }
+}
+
 function syncRoute(focus: boolean): void {
+  previousFocusedInstanceId = focusedInstanceId;
+  focusedInstanceId = parseFocusRoute(window.location.pathname);
   const nextEditing = window.location.pathname === "/edit";
   if (!nextEditing) cancelDrag();
   editing = nextEditing;
-  document.title = editing ? "Edit dashboard - Scufris" : "Scufris Dashboard";
+  document.title = focusedInstanceId
+    ? "Widget Focus - Scufris"
+    : editing
+      ? "Edit dashboard - Scufris"
+      : "Scufris Dashboard";
   renderCanvas();
-  if (focus) (editing ? editorHeading : editButton).focus();
+  if (!focus) return;
+  if (focusedInstanceId) closeFocusButton.focus();
+  else if (previousFocusedInstanceId)
+    containers
+      .get(previousFocusedInstanceId)
+      ?.querySelector<HTMLButtonElement>(".widget-focus-button")
+      ?.focus();
+  else (editing ? editorHeading : editButton).focus();
 }
 
 function renderCanvas(): void {
@@ -383,6 +477,7 @@ function renderCanvas(): void {
   emptyDashboard.hidden = editing || resources.size > 0;
   for (const [instanceId, frame] of containers) {
     frame.tabIndex = editing ? 0 : -1;
+    renderFocusControl(instanceId, frame);
     renderHealthControl(instanceId, frame);
     renderLinkControls(instanceId, frame);
   }
@@ -399,6 +494,7 @@ function renderCanvas(): void {
       const frame = containers.get(instance.id);
       if (frame) widgetsElement.append(frame);
     }
+    renderFocusLayer();
     return;
   }
 
@@ -446,6 +542,89 @@ function renderCanvas(): void {
       widgetsElement.append(slot);
     }
   }
+  renderFocusLayer();
+}
+
+function renderFocusControl(instanceId: string, frame: HTMLElement): void {
+  const button = frame.querySelector<HTMLButtonElement>(".widget-focus-button");
+  if (!button) return;
+  button.hidden = editing || !supportsFocus(instanceId);
+}
+
+function supportsFocus(instanceId: string): boolean {
+  const instance = resources.get(instanceId);
+  const descriptor = instance && descriptors.get(instance.widget_id);
+  return Boolean(
+    instance && descriptor && variantFor(instance, descriptor).focus,
+  );
+}
+
+function renderFocusLayer(): void {
+  if (!focusedInstanceId) {
+    focusLayer.hidden = true;
+    focusStage.replaceChildren();
+    dashboardShell.inert = false;
+    dashboardShell.removeAttribute("aria-hidden");
+    document.body.classList.remove("focused");
+    for (const instanceId of containers.keys())
+      setWidgetPresentation(instanceId, "tile");
+    return;
+  }
+
+  const instance = resources.get(focusedInstanceId);
+  const descriptor = instance && descriptors.get(instance.widget_id);
+  const variant = instance && descriptor && variantFor(instance, descriptor);
+  const frame = containers.get(focusedInstanceId);
+  if (
+    snapshotLoaded &&
+    (!instance || !descriptor || !variant?.focus || !frame)
+  ) {
+    leaveInvalidFocus(
+      !instance
+        ? "Could not focus widget: instance was not found"
+        : "Could not focus widget: variant does not support Focus",
+    );
+    return;
+  }
+  if (!instance || !descriptor || !variant || !frame) return;
+
+  focusTitle.textContent = `${descriptor.name} - ${variant.name}`;
+  closeFocusButton.setAttribute(
+    "aria-label",
+    `Close ${descriptor.name} ${variant.name} Focus`,
+  );
+  focusLayer.hidden = false;
+  dashboardShell.inert = true;
+  dashboardShell.setAttribute("aria-hidden", "true");
+  document.body.classList.add("focused");
+  focusStage.replaceChildren(frame);
+  for (const instanceId of containers.keys())
+    setWidgetPresentation(
+      instanceId,
+      instanceId === focusedInstanceId ? "focus" : "tile",
+    );
+}
+
+function setWidgetPresentation(
+  instanceId: string,
+  presentation: "tile" | "focus",
+): void {
+  const frame = containers.get(instanceId);
+  if (!frame || frame.dataset.presentation === presentation) return;
+  frame.dataset.presentation = presentation;
+  try {
+    frontends.get(instanceId)?.setPresentation?.(presentation);
+  } catch (error) {
+    showError(`Could not update widget presentation: ${errorMessage(error)}`);
+  }
+}
+
+function leaveInvalidFocus(message: string): void {
+  previousFocusedInstanceId = focusedInstanceId;
+  focusedInstanceId = null;
+  window.history.replaceState(null, "", "/");
+  renderCanvas();
+  showError(message);
 }
 
 function renderHealthControl(instanceId: string, frame: HTMLElement): void {

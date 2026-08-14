@@ -668,6 +668,11 @@ try {
       target_port: "task",
     },
   ]);
+  assert.equal(
+    await detailsFrame.locator(".widget-focus-button").isHidden(),
+    true,
+    "Focus is unavailable in editor mode",
+  );
   await page.screenshot({
     path: path.join(artifacts, "tatr-linked-edit-narrow.png"),
     fullPage: true,
@@ -734,6 +739,17 @@ try {
     path: path.join(artifacts, "tatr-artifact-menu-narrow.png"),
     fullPage: true,
   });
+  await detailsFrame
+    .locator('.artifact-menu button:text-is("TASK.md")')
+    .click();
+  assert.equal(
+    await detailsFrame
+      .locator(".picker")
+      .evaluate((picker) => picker.hasAttribute("open")),
+    false,
+    "selecting the active artifact closes the menu",
+  );
+  await detailsFrame.locator(".identity").click();
   await detailsFrame
     .locator('.artifact-menu button:text-is("summary.txt")')
     .click();
@@ -823,11 +839,99 @@ try {
   await detailsFrame
     .locator(".markdown h1", { hasText: "Add Tatr widget" })
     .waitFor();
+  assert.equal(
+    await detailsFrame.locator(".widget-focus-button").isVisible(),
+    true,
+  );
+  assert.equal(
+    await tatrFrame.locator(".widget-focus-button").isHidden(),
+    true,
+    "variants must opt in to Focus",
+  );
+  await detailsFrame.locator(".widget-focus-button").click();
+  await page.waitForURL(`${baseUrl}/focus/${detailsInstance.id}`);
+  assert.equal(await page.locator("#focus-layer").isVisible(), true);
+  assert.equal(
+    await page.locator(".dashboard-shell").getAttribute("inert"),
+    "",
+  );
+  assert.equal(await detailsFrame.getAttribute("data-presentation"), "focus");
+  assert.equal(
+    await detailsFrame
+      .locator(".dashboard-widget-mount")
+      .evaluate(
+        (element) =>
+          element.shadowRoot?.host.getAttribute("data-presentation") ?? null,
+      ),
+    "focus",
+    "the mounted frontend receives the Focus lifecycle state",
+  );
+  const focusedBox = await detailsFrame.boundingBox();
+  assert.ok(focusedBox.width > 380 && focusedBox.height > 750);
+  await page.screenshot({
+    path: path.join(artifacts, "tatr-artifact-focus-markdown-narrow.png"),
+  });
+  await detailsFrame.locator(".identity").click();
+  await detailsFrame
+    .locator('.artifact-menu button:text-is("result.png")')
+    .click();
+  await detailsFrame.locator('.image-artifact img[alt="result.png"]').waitFor();
+  await page.screenshot({
+    path: path.join(artifacts, "tatr-artifact-focus-image-narrow.png"),
+  });
+  await page.locator("#close-focus").click();
+  await page.waitForURL(baseUrl + "/");
+  assert.match(
+    await detailsFrame.locator(".identity").textContent(),
+    /\/result\.png$/,
+    "Focus preserves widget selection when it closes",
+  );
+  assert.equal(await detailsFrame.getAttribute("data-presentation"), "tile");
+  await detailsFrame.locator(".widget-focus-button").click();
+  await page.waitForURL(`${baseUrl}/focus/${detailsInstance.id}`);
+  await page.keyboard.press("Escape");
+  await page.waitForURL(baseUrl + "/");
+  await detailsFrame.locator(".widget-focus-button").click();
+  await page.waitForURL(`${baseUrl}/focus/${detailsInstance.id}`);
+  await page.goBack();
+  await page.waitForURL(baseUrl + "/");
+  await detailsFrame.locator(".identity").click();
+  await detailsFrame
+    .locator('.artifact-menu button:text-is("TASK.md")')
+    .click();
+  await detailsFrame
+    .locator(".markdown h1", { hasText: "Add Tatr widget" })
+    .waitFor();
+  const directFocusPage = await context.newPage();
+  pages.push(directFocusPage);
+  await directFocusPage.goto(`${baseUrl}/focus/${detailsInstance.id}`);
+  await directFocusPage.locator("#focus-layer").waitFor();
+  assert.equal(
+    await directFocusPage.locator("#focus-title").textContent(),
+    "Tatr Tasks - Artifact",
+  );
+  await directFocusPage.locator("#close-focus").click();
+  await directFocusPage.waitForURL(baseUrl + "/");
+  await directFocusPage.goto(`${baseUrl}/focus/${tatrInstance.id}`);
+  await directFocusPage.waitForURL(baseUrl + "/");
+  await directFocusPage
+    .locator("#dashboard-error", {
+      hasText: "Could not focus widget: variant does not support Focus",
+    })
+    .waitFor();
+  await directFocusPage.close();
   await page.screenshot({
     path: path.join(artifacts, "tatr-tasks-narrow.png"),
     fullPage: true,
   });
   await page.setViewportSize({ width: 1440, height: 1000 });
+  await detailsFrame.locator(".widget-focus-button").click();
+  await page.waitForURL(`${baseUrl}/focus/${detailsInstance.id}`);
+  await page.screenshot({
+    path: path.join(artifacts, "tatr-artifact-focus-markdown-wide.png"),
+  });
+  await page.locator("#close-focus").click();
+  await page.waitForURL(baseUrl + "/");
   assert.equal(await tatrFrame.locator(".table-head").isVisible(), true);
   assert.equal(await tatrFrame.locator(".mobile-sort").isHidden(), true);
   await tatrFrame.locator('[data-sort="title"]').click();
@@ -882,11 +986,21 @@ try {
   await detailsFrame
     .locator(".widget-link-badge.input", { hasText: "Not linked" })
     .waitFor();
+  await page.locator("#finish-editing").click();
+  await detailsFrame.locator(".widget-focus-button").click();
+  await page.waitForURL(`${baseUrl}/focus/${detailsInstance.id}`);
   const deleteDetails = await page.request.delete(
     `${baseUrl}/api/v1/instances/${detailsInstance.id}`,
   );
   assert.equal(deleteDetails.status(), 204);
   await detailsFrame.waitFor({ state: "detached" });
+  await page.waitForURL(baseUrl + "/");
+  await page
+    .locator("#dashboard-error", {
+      hasText: "Could not focus widget: instance was not found",
+    })
+    .waitFor();
+  await page.locator("#edit-layout").click();
 
   const diskFull = await addWidget(page, "0", "3", "Disk", "Full");
   const networkFull = await addWidget(page, "3", "3", "Network", "Full");

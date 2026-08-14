@@ -60,6 +60,8 @@ struct VariantSource {
     name: String,
     size: [u32; 2],
     entry: PathBuf,
+    #[serde(default)]
+    focus: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -134,6 +136,7 @@ struct RuntimeVariant<'a> {
     width: u32,
     height: u32,
     frontend: String,
+    focus: bool,
 }
 
 #[derive(Serialize)]
@@ -259,6 +262,7 @@ fn prepare(
             width: variant.size[0],
             height: variant.size[1],
             frontend: relative,
+            focus: variant.focus,
         });
     }
 

@@ -24,6 +24,7 @@ export type WidgetVariant = {
   width: number;
   height: number;
   frontend_url: string;
+  focus: boolean;
 };
 
 export type WidgetOptionChoice = { value: string; name: string };
@@ -428,7 +429,8 @@ function parseVariant(value: unknown): WidgetVariant {
     typeof value.name !== "string" ||
     !isPositiveInteger(value.width) ||
     !isPositiveInteger(value.height) ||
-    typeof value.frontend_url !== "string"
+    typeof value.frontend_url !== "string" ||
+    typeof value.focus !== "boolean"
   )
     throw new Error("invalid widget variant");
   return {
@@ -437,6 +439,7 @@ function parseVariant(value: unknown): WidgetVariant {
     width: value.width,
     height: value.height,
     frontend_url: value.frontend_url,
+    focus: value.focus,
   };
 }
 

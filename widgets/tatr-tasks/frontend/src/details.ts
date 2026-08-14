@@ -1,6 +1,10 @@
 import DOMPurify from "dompurify";
 import { marked, Renderer } from "marked";
-import type { WidgetContext, WidgetFrontend } from "@scufris/widget-sdk";
+import type {
+  WidgetContext,
+  WidgetFrontend,
+  WidgetPresentation,
+} from "@scufris/widget-sdk";
 import widgetReset from "@scufris/widget-sdk/widget.css";
 import styles from "./details.css";
 
@@ -43,9 +47,9 @@ export function mount(
   let requestedArtifact = "TASK.md";
 
   const requestArtifact = (artifact: string): void => {
+    required<HTMLDetailsElement>(shadow, ".picker").open = false;
     if (!selection || artifact === requestedArtifact) return;
     requestedArtifact = artifact;
-    required<HTMLDetailsElement>(shadow, ".picker").open = false;
     renderIdentity(shadow, selection, artifact);
     void context
       .send({
@@ -93,6 +97,9 @@ export function mount(
       } else if (!hasDetails && isRecord(payload.error)) {
         renderState(shadow, "Task artifact unavailable");
       }
+    },
+    setPresentation(presentation: WidgetPresentation): void {
+      shadow.host.setAttribute("data-presentation", presentation);
     },
     destroy(): void {
       void context

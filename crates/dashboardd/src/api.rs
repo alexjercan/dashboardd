@@ -194,6 +194,10 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/events", get(dashboard_events))
         .route_service("/edit", ServeFile::new(format!("{WEB_DIST}/index.html")))
         .route("/edit/", get(redirect_edit))
+        .route_service(
+            "/focus/{instance_id}",
+            ServeFile::new(format!("{WEB_DIST}/index.html")),
+        )
         .route(
             "/widgets/{widget_id}/variants/{variant_id}/frontend.js",
             get(widget_frontend),

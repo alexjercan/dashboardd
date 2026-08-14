@@ -245,3 +245,60 @@
   border: 1px solid var(--scufris-color-selection);
   text-align: left;
 }
+
+:host([data-presentation="focus"]) .artifact-shell {
+  padding: 20px 24px;
+}
+
+:host([data-presentation="focus"]) .artifact-header {
+  padding-bottom: 13px;
+}
+
+:host([data-presentation="focus"]) .artifact-header h2 {
+  font-size: 18px;
+}
+
+:host([data-presentation="focus"]) .identity,
+:host([data-presentation="focus"]) .artifact-menu button,
+:host([data-presentation="focus"]) .text-artifact pre,
+:host([data-presentation="focus"]) .document-artifact code {
+  font-size: 11px;
+}
+
+:host([data-presentation="focus"]) .artifact-menu {
+  max-height: min(360px, 50vh);
+}
+
+:host([data-presentation="focus"]) .document-artifact,
+:host([data-presentation="focus"]) .text-artifact,
+:host([data-presentation="focus"]) .image-artifact {
+  padding: 20px 4px 8px 0;
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+:host([data-presentation="focus"]) .document-artifact h1 {
+  font-size: 24px;
+}
+
+:host([data-presentation="focus"]) .document-artifact h2 {
+  font-size: 19px;
+}
+
+:host([data-presentation="focus"]) .document-artifact h3,
+:host([data-presentation="focus"]) .document-artifact h4 {
+  font-size: 16px;
+}
+
+@media (max-width: 600px) {
+  :host([data-presentation="focus"]) .artifact-shell {
+    padding: 14px;
+  }
+
+  :host([data-presentation="focus"]) .document-artifact,
+  :host([data-presentation="focus"]) .text-artifact,
+  :host([data-presentation="focus"]) .image-artifact {
+    padding-top: 14px;
+    font-size: 12px;
+  }
+}

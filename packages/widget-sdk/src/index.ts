@@ -15,8 +15,11 @@ export interface WidgetContext {
   send(payload: unknown): Promise<void>;
 }
 
+export type WidgetPresentation = "tile" | "focus";
+
 export interface WidgetFrontend {
   update(payload: unknown): void;
+  setPresentation?(presentation: WidgetPresentation): void;
   destroy(): void;
 }
 

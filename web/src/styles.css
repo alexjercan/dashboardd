@@ -178,6 +178,45 @@ h1 {
   display: none;
 }
 
+.widget-focus-button {
+  position: absolute;
+  z-index: 3;
+  top: 8px;
+  right: 8px;
+  min-height: 26px;
+  padding: 4px 7px;
+  border: 1px solid var(--scufris-color-border);
+  border-radius: 3px;
+  background: var(--scufris-color-canvas);
+  color: var(--scufris-color-text-muted);
+  cursor: pointer;
+  font-size: 9px;
+  opacity: 0.18;
+  transition:
+    border-color 120ms ease,
+    color 120ms ease,
+    opacity 120ms ease;
+}
+
+.dashboard-widget:hover .widget-focus-button,
+.widget-focus-button:focus-visible {
+  border-color: var(--scufris-color-accent);
+  color: var(--scufris-color-text-bright);
+  opacity: 1;
+  outline: none;
+}
+
+@media (hover: none) {
+  .widget-focus-button {
+    opacity: 0.7;
+  }
+}
+
+.editing .widget-focus-button,
+.dashboard-widget[data-presentation="focus"] .widget-focus-button {
+  display: none;
+}
+
 .drag-handle,
 .remove-widget {
   display: none;
@@ -234,6 +273,64 @@ h1 {
   place-items: center;
   color: var(--scufris-color-danger);
   content: "x";
+}
+
+.focus-layer {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  display: flex;
+  min-width: 320px;
+  min-height: 100vh;
+  flex-direction: column;
+  padding: 12px;
+  background: var(--scufris-color-canvas);
+}
+
+.focus-header {
+  display: flex;
+  min-height: 44px;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 2px 10px;
+  border-bottom: 1px solid var(--scufris-color-selection);
+}
+
+.focus-header h1 {
+  overflow: hidden;
+  font-size: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.focus-stage {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  padding-top: 12px;
+}
+
+.focus-stage > .dashboard-widget {
+  width: 100%;
+  min-height: 0;
+  border-color: var(--scufris-color-border);
+  box-shadow: 0 18px 48px rgb(0 0 0 / 35%);
+}
+
+body.focused {
+  overflow: hidden;
+}
+
+@media (max-width: 600px) {
+  .focus-layer {
+    padding: 8px;
+  }
+
+  .focus-stage {
+    padding-top: 8px;
+  }
 }
 
 .editing .dashboard-widget {

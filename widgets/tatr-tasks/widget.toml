@@ -20,6 +20,7 @@ id = "details"
 name = "Artifact"
 size = [3, 3]
 entry = "src/details.ts"
+focus = true
 
 [[links.outputs]]
 id = "selected_task"
