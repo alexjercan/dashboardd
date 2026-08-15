@@ -438,6 +438,176 @@ try {
   assert.ok(boxes.every((box) => box.height > 120));
   assert.ok(boxes.every((box) => box.height === boxes[0].height));
 
+  const keyboardCursor = page.locator(".dashboard-keyboard-cursor");
+  await page.keyboard.press("g");
+  await page.keyboard.press("g");
+  assert.equal(
+    await keyboardCursor.evaluate((element) =>
+      element.style.getPropertyValue("--widget-column"),
+    ),
+    "1",
+  );
+  await page.keyboard.press("l");
+  assert.equal(
+    await keyboardCursor.evaluate((element) =>
+      element.style.getPropertyValue("--widget-column"),
+    ),
+    "2",
+  );
+  await page.keyboard.press("i");
+  assert.equal(await page.locator("#keyboard-mode").textContent(), "WIDGET");
+  await page.keyboard.press("e");
+  assert.equal(
+    await page.locator("#editor-header").isHidden(),
+    true,
+    "widget mode receives dashboard command keys",
+  );
+  await page.keyboard.press("Escape");
+  assert.equal(await page.locator("#keyboard-mode").textContent(), "DASHBOARD");
+  await page.keyboard.press("d");
+  const commandInput = page.locator(".command-input");
+  assert.equal(await commandInput.inputValue(), "dashboard ");
+  await commandInput.pressSequentially("Ma");
+  await commandInput.press("Tab");
+  assert.equal(await commandInput.inputValue(), "dashboard Main");
+  await commandInput.press("Escape");
+  await page.keyboard.press("l");
+  assert.equal(
+    await keyboardCursor.evaluate((element) =>
+      element.style.getPropertyValue("--widget-column"),
+    ),
+    "3",
+  );
+  await page.keyboard.press("?");
+  await page.locator("#keyboard-help").waitFor();
+  await page.locator("#keyboard-help .button.primary").click();
+  await page.keyboard.press(":");
+  await commandInput.fill("he");
+  assert.deepEqual(
+    await page.locator(".command-completions li").allTextContents(),
+    ["help"],
+  );
+  await commandInput.press("Tab");
+  await commandInput.press("Enter");
+  await page.locator("#keyboard-help").waitFor();
+  await page.locator("#keyboard-help .button.primary").click();
+  await page.keyboard.press("e");
+  await page.locator("#editor-header").waitFor();
+  assert.equal(
+    await keyboardCursor.evaluate((element) =>
+      element.style.getPropertyValue("--widget-column"),
+    ),
+    "3",
+    "Editor preserves the Zen cursor",
+  );
+  await page.keyboard.press("g");
+  await page.keyboard.press("g");
+  await page.keyboard.press("h");
+  assert.equal(
+    await keyboardCursor.evaluate((element) =>
+      element.style.getPropertyValue("--widget-column"),
+    ),
+    "1",
+    "cursor does not wrap past the canvas edge",
+  );
+  await page.keyboard.press("v");
+  assert.equal(await page.locator("#keyboard-mode").textContent(), "MOVE");
+  await page.keyboard.press("j");
+  assert.equal(
+    await keyboardCursor.evaluate((element) =>
+      element.style.getPropertyValue("--widget-row"),
+    ),
+    "2",
+  );
+  await page.screenshot({
+    path: path.join(artifacts, "dashboard-move-wide.png"),
+    fullPage: true,
+  });
+  await page.keyboard.press("Escape");
+  assert.equal(await page.locator("#keyboard-mode").textContent(), "EDITOR");
+  assert.equal(
+    await keyboardCursor.evaluate((element) =>
+      element.style.getPropertyValue("--widget-row"),
+    ),
+    "1",
+    "cancelling Move restores the original cursor",
+  );
+  await page.keyboard.press("v");
+  await page.keyboard.press("l");
+  await page.keyboard.press("Enter");
+  await page
+    .locator(`[data-instance-id="${cpuOne}"][data-column="1"]`)
+    .waitFor();
+  await page.keyboard.press("v");
+  await page.keyboard.press("h");
+  await page.keyboard.press("Enter");
+  await page
+    .locator(`[data-instance-id="${cpuOne}"][data-column="0"]`)
+    .waitFor();
+  await page.keyboard.press("x");
+  await page.locator("#remove-widget").waitFor();
+  await page.locator('#remove-widget .button[value="cancel"]').click();
+  await page.keyboard.press("l");
+  await page.keyboard.press("l");
+  await page.keyboard.press("l");
+  await page.keyboard.press("a");
+  await page.locator("#add-widget").waitFor();
+  await page.keyboard.press("?");
+  await page.locator("#add-keyboard-help").waitFor();
+  await page.locator("#add-keyboard-help .button.primary").click();
+  await page.keyboard.press("G");
+  assert.equal(
+    await page
+      .locator(".widget-choice.selected")
+      .getAttribute("data-widget-id"),
+    "tatr-tasks",
+  );
+  await page.keyboard.press("g");
+  await page.keyboard.press("g");
+  await page.keyboard.press("j");
+  await page.keyboard.press("j");
+  assert.equal(
+    await page
+      .locator(".widget-choice.selected")
+      .getAttribute("data-widget-id"),
+    "cpu",
+  );
+  await page.keyboard.press("l");
+  assert.match(
+    await page.locator(".variant-choice.selected").textContent(),
+    /Full/,
+  );
+  const keyboardOption = page.locator('.widget-option input[type="number"]');
+  await keyboardOption.focus();
+  await keyboardOption.press("j");
+  assert.match(
+    await page.locator(".variant-choice.selected").textContent(),
+    /Full/,
+    "option controls do not trigger Add Widget navigation",
+  );
+  await page.locator("#widget-selection").focus();
+  await page.keyboard.press("j");
+  assert.match(
+    await page.locator(".variant-choice.selected").textContent(),
+    /Compact/,
+  );
+  const keyboardAddResponse = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/instances") &&
+      response.request().method() === "POST",
+  );
+  await page.keyboard.press("a");
+  const keyboardAdded = await (await keyboardAddResponse).json();
+  await page.locator(`[data-instance-id="${keyboardAdded.id}"]`).waitFor();
+  await page.keyboard.press("x");
+  await page.locator("#remove-widget").waitFor();
+  await page.locator("#confirm-remove").click();
+  await page
+    .locator(`[data-instance-id="${keyboardAdded.id}"]`)
+    .waitFor({ state: "detached" });
+  await page.keyboard.press("Escape");
+  await page.locator("#edit-layout").waitFor();
+
   await page.reload();
   await page.locator(`[data-instance-id="${cpuOne}"]`).waitFor();
   assert.equal(
@@ -497,15 +667,16 @@ try {
     .waitFor();
 
   const cpuFrame = page.locator(`[data-instance-id="${cpuOne}"]`);
-  await cpuFrame.focus();
-  await cpuFrame.press("ArrowDown");
+  const cpuMoveHandle = cpuFrame.locator(".drag-handle");
+  await cpuMoveHandle.focus();
+  await cpuMoveHandle.press("ArrowDown");
   await page
     .locator('#dashboard-announcement:text-is("CPU moved to column 1, row 2")')
     .waitFor();
   await secondPage
     .locator(`[data-instance-id="${cpuOne}"][data-row="1"]`)
     .waitFor();
-  await cpuFrame.press("ArrowRight");
+  await cpuMoveHandle.press("ArrowRight");
   await page
     .locator('#dashboard-announcement:text-is("CPU swapped with RAM")')
     .waitFor();
@@ -578,6 +749,40 @@ try {
   const fullFrame = page.locator(`[data-instance-id="${fullInstance.id}"]`);
   await fullFrame.waitFor();
   await waitForTelemetry(fullFrame);
+  await fullFrame.locator(".drag-handle").focus();
+  const expandedCursor = page.locator(".dashboard-keyboard-cursor.expanded");
+  assert.deepEqual(
+    await expandedCursor.evaluate((element) => [
+      element.style.getPropertyValue("--widget-column"),
+      element.style.getPropertyValue("--widget-row"),
+      element.style.getPropertyValue("--widget-width"),
+      element.style.getPropertyValue("--widget-height"),
+    ]),
+    ["4", "1", "3", "3"],
+    "Editor cursor expands to the complete occupied widget",
+  );
+  await page.keyboard.press("l");
+  assert.equal(
+    await page
+      .locator(".dashboard-keyboard-cursor")
+      .evaluate((element) => element.style.getPropertyValue("--widget-column")),
+    "7",
+    "normal cursor skips the complete widget under it",
+  );
+  await page.keyboard.press("h");
+  await page.keyboard.press("h");
+  await page.keyboard.press("l");
+  await page.keyboard.press("v");
+  await page.keyboard.press("h");
+  await page.keyboard.press("h");
+  assert.equal(
+    await page
+      .locator(".dashboard-keyboard-cursor")
+      .evaluate((element) => element.style.getPropertyValue("--widget-column")),
+    "1",
+    "Move ghost skips completely beyond an overlapping widget",
+  );
+  await page.keyboard.press("Escape");
   const fullBox = await fullFrame.boundingBox();
   assert.ok(fullBox);
   assert.ok(fullBox.height > 350);
@@ -844,6 +1049,12 @@ try {
     "scufris",
     "tatr",
   ]);
+  await projectSearch.click();
+  await projectSearch.pressSequentially("iehjkl");
+  assert.equal(await projectSearch.inputValue(), "iehjkl");
+  assert.equal(page.url(), dashboardViewUrl);
+  assert.equal(await page.locator("#keyboard-mode").textContent(), "WIDGET");
+  await projectSearch.fill("");
   await projectSort.selectOption("recent");
   assert.deepEqual(await projectRows.locator("strong").allTextContents(), [
     "scufris",
@@ -1328,7 +1539,7 @@ try {
   assert.equal(await detailsFrame.getAttribute("data-presentation"), "tile");
   await detailsFrame.locator(".widget-focus-button").click();
   await page.waitForURL(`${dashboardViewUrl}/focus/${detailsInstance.id}`);
-  await page.keyboard.press("Escape");
+  await page.locator("#close-focus").click();
   await page.waitForURL(dashboardViewUrl);
   await detailsFrame.locator(".widget-focus-button").click();
   await page.waitForURL(`${dashboardViewUrl}/focus/${detailsInstance.id}`);
@@ -1389,8 +1600,17 @@ try {
   await page.screenshot({
     path: path.join(artifacts, "tatr-artifact-focus-markdown-wide.png"),
   });
-  await page.locator("#close-focus").click();
+  await page.keyboard.press("Escape");
+  assert.equal(await page.locator("#keyboard-mode").textContent(), "DASHBOARD");
+  await page.keyboard.press("Escape");
   await page.waitForURL(dashboardViewUrl);
+  await projectSearch.click();
+  await projectSearch.pressSequentially("iehjkl");
+  assert.equal(await projectSearch.inputValue(), "iehjkl");
+  assert.equal(page.url(), dashboardViewUrl);
+  await projectSearch.fill("");
+  await page.keyboard.press("Escape");
+  assert.equal(await page.locator("#keyboard-mode").textContent(), "DASHBOARD");
   assert.equal(await tatrFrame.locator(".table-head").isVisible(), true);
   assert.equal(await tatrFrame.locator(".mobile-sort").isHidden(), true);
   await tatrFrame.locator('[data-sort="title"]').click();
@@ -1783,6 +2003,29 @@ try {
   pages.push(homePage);
   await homePage.goto(baseUrl);
   const mainCard = homePage.locator(".dashboard-card", { hasText: "Main" });
+  await mainCard.waitFor();
+  await homePage.keyboard.press("g");
+  await homePage.keyboard.press("g");
+  await homePage
+    .locator(".dashboard-card.keyboard-selected", {
+      hasText: "Main",
+    })
+    .waitFor();
+  await homePage.keyboard.press(":");
+  const homeCommandInput = homePage.locator(".command-input");
+  await homeCommandInput.fill("dash Ma");
+  await homeCommandInput.press("Tab");
+  assert.equal(await homeCommandInput.inputValue(), "dashboard Main");
+  await homeCommandInput.press("Escape");
+  await homePage.locator(".command-palette-modal").waitFor({ state: "hidden" });
+  await homePage.keyboard.press("Shift+/");
+  await homePage.locator("#home-keyboard-help").waitFor();
+  await homePage.locator("#home-keyboard-help .button.primary").click();
+  homePage.once("dialog", (dialog) => dialog.dismiss());
+  await homePage.keyboard.press("a");
+  await homePage.keyboard.press("e");
+  await homePage.waitForURL(dashboardEditUrl);
+  await homePage.goBack();
   await mainCard.waitFor();
   assert.equal(await mainCard.locator(".dashboard-preview-widget").count(), 4);
   assert.match(

@@ -63,9 +63,21 @@ layout preview plus Open, Edit, Rename, Duplicate, and Delete actions. Create an
 empty dashboard from the home or the dashboard switcher. Dashboard routes are
 `/d/<dashboard-id>` for Zen and `/d/<dashboard-id>/edit` for the editor.
 Variants that opt in show a `Focus` control in Zen mode. Focus uses
-`/d/<dashboard-id>/focus/<instance-id>`, preserves the mounted frontend, fills
-the viewport, and closes with its button, Escape, or browser Back. The editor shows
-server-owned backend health for each widget. Health diagnostics
+`/d/<dashboard-id>/focus/<instance-id>`, preserves the mounted frontend, and
+fills the viewport. Desktop Zen and Editor share a visible Vim-style cell
+cursor. Use `hjkl` to move through empty cells and skip complete occupied widgets, `gg` for the first cell, `i` or Enter to interact
+with the widget under it, `f` for Focus, `e` for Editor, `d` for dashboard
+completion, `gh` for home, `:` for commands, and `?` for help. Widget mode
+passes normal keys to filters and other controls; Escape returns to Dashboard
+mode. In Editor, `a` adds at an empty cursor cell, `x` requests confirmed
+removal of the widget under it, `v` stages a ghost move or swap for Enter to
+commit, and `z` returns to Zen. The Add Widget dialog supports `jk` catalog and
+variant navigation, `l` or Enter to configure, `h` to return, and `a` to add;
+option controls retain normal input. Dashboard home supports card navigation,
+open, edit, create, commands, and help keys. Focus starts in
+Widget mode, so Escape first leaves widget
+interaction and a second Escape closes Focus. The close button and browser Back
+also close Focus. The editor shows server-owned backend health for each widget. Health diagnostics
 include liveness, the last update and error, and a confirmed manual restart.
 Dashboardd probes backends every 10 seconds and marks them stale after 30 seconds
 without protocol activity. Zen mode does not show health controls. The fixed Zen

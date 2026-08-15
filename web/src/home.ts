@@ -1,3 +1,4 @@
+import { CommandPalette } from "./command-palette";
 import {
   parseDashboard,
   parseDashboardEvent,
@@ -24,20 +25,49 @@ app.innerHTML = `
       <button class="button primary create-dashboard" type="button">Create dashboard</button>
     </section>
   </main>
+  <dialog id="home-keyboard-help" class="modal keyboard-help-modal">
+    <form method="dialog">
+      <header><h2>Dashboard home keys</h2><button class="icon-button" value="cancel" aria-label="Close">x</button></header>
+      <dl class="keyboard-help-list">
+        <div><dt>h j k l</dt><dd>Select a dashboard card</dd></div>
+        <div><dt>g g / G</dt><dd>Select the first or last dashboard</dd></div>
+        <div><dt>Enter / e</dt><dd>Open the selected dashboard in Zen / Editor</dd></div>
+        <div><dt>a</dt><dd>Create a dashboard</dd></div>
+        <div><dt>:</dt><dd>Open the command palette</dd></div>
+        <div><dt>Esc</dt><dd>Clear the dashboard selection</dd></div>
+      </dl>
+      <footer><button class="button primary" value="cancel">Close</button></footer>
+    </form>
+  </dialog>
 `;
 
 const gallery = required<HTMLElement>("#dashboard-gallery");
 const empty = required<HTMLElement>("#dashboard-empty");
 const errorElement = required<HTMLElement>("#home-error");
+const helpDialog = required<HTMLDialogElement>("#home-keyboard-help");
 const createButtons = [
   required<HTMLButtonElement>("#create-dashboard"),
   required<HTMLButtonElement>(".create-dashboard"),
 ];
 let dashboards: Dashboard[] = [];
 let refreshTimer: number | null = null;
+let selectedDashboardId: string | null = null;
+let pendingFirstKey = false;
+let pendingFirstKeyTimer: number | null = null;
+const commandPalette = new CommandPalette(
+  homeCommandCandidates,
+  executeHomeCommand,
+);
 
 for (const button of createButtons)
   button.addEventListener("click", () => void createDashboard());
+document.addEventListener("keydown", handleHomeKeydown, true);
+gallery.addEventListener("pointerdown", (event) => {
+  const card = (event.target as Element).closest<HTMLElement>(
+    ".dashboard-card",
+  );
+  if (card?.dataset.dashboardId) selectDashboard(card.dataset.dashboardId);
+});
 
 void Promise.all([loadTheme(), loadDashboards()]);
 const events = new EventSource("/api/v1/events");
@@ -76,12 +106,185 @@ events.addEventListener("message", (message) => {
 });
 window.addEventListener("beforeunload", () => events.close());
 
+function handleHomeKeydown(event: KeyboardEvent): void {
+  if (
+    event.defaultPrevented ||
+    event.ctrlKey ||
+    event.altKey ||
+    event.metaKey ||
+    window.matchMedia("(max-width: 580px)").matches ||
+    [...document.querySelectorAll("dialog")].some((dialog) => dialog.open) ||
+    event.composedPath().some((target) => {
+      if (!(target instanceof HTMLElement)) return false;
+      const dialog = target.closest<HTMLDialogElement>("dialog");
+      if (dialog && !dialog.open) return false;
+      return (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        target.isContentEditable
+      );
+    })
+  )
+    return;
+  if (pendingFirstKey) {
+    const first = event.key === "g";
+    clearHomeFirstKey();
+    if (first) {
+      event.preventDefault();
+      selectBoundaryDashboard(false);
+      return;
+    }
+  }
+  if (event.key === "g") {
+    event.preventDefault();
+    pendingFirstKey = true;
+    pendingFirstKeyTimer = window.setTimeout(clearHomeFirstKey, 700);
+    return;
+  }
+  if (["h", "j", "k", "l"].includes(event.key)) {
+    event.preventDefault();
+    selectDashboardSpatially(event.key as "h" | "j" | "k" | "l");
+  } else if (event.key === "G") {
+    event.preventDefault();
+    selectBoundaryDashboard(true);
+  } else if (event.key === "Enter") {
+    event.preventDefault();
+    openSelectedDashboard(false);
+  } else if (event.key === "e") {
+    event.preventDefault();
+    openSelectedDashboard(true);
+  } else if (event.key === "a") {
+    event.preventDefault();
+    void createDashboard();
+  } else if (event.key === ":") {
+    event.preventDefault();
+    commandPalette.open();
+  } else if (event.key === "?" || (event.key === "/" && event.shiftKey)) {
+    event.preventDefault();
+    helpDialog.showModal();
+  } else if (event.key === "Escape") {
+    selectedDashboardId = null;
+    renderHomeSelection();
+  }
+}
+
+function clearHomeFirstKey(): void {
+  pendingFirstKey = false;
+  if (pendingFirstKeyTimer !== null) {
+    window.clearTimeout(pendingFirstKeyTimer);
+    pendingFirstKeyTimer = null;
+  }
+}
+
+function selectDashboard(dashboardId: string): void {
+  if (!dashboards.some((dashboard) => dashboard.id === dashboardId)) return;
+  selectedDashboardId = dashboardId;
+  renderHomeSelection();
+}
+
+function selectBoundaryDashboard(last: boolean): void {
+  const dashboard = dashboards[last ? dashboards.length - 1 : 0];
+  if (dashboard) selectDashboard(dashboard.id);
+}
+
+function selectDashboardSpatially(direction: "h" | "j" | "k" | "l"): void {
+  const cards = [...gallery.querySelectorAll<HTMLElement>(".dashboard-card")];
+  if (!selectedDashboardId) return selectBoundaryDashboard(false);
+  const current = cards.find(
+    (card) => card.dataset.dashboardId === selectedDashboardId,
+  );
+  if (!current) return selectBoundaryDashboard(false);
+  const currentBox = current.getBoundingClientRect();
+  const horizontal = direction === "h" || direction === "l";
+  const sign = direction === "h" || direction === "k" ? -1 : 1;
+  const currentPrimary = horizontal
+    ? currentBox.left + currentBox.width / 2
+    : currentBox.top + currentBox.height / 2;
+  const currentSecondary = horizontal
+    ? currentBox.top + currentBox.height / 2
+    : currentBox.left + currentBox.width / 2;
+  const candidate = cards
+    .filter((card) => card !== current)
+    .map((card) => {
+      const box = card.getBoundingClientRect();
+      const primary = horizontal
+        ? box.left + box.width / 2
+        : box.top + box.height / 2;
+      const secondary = horizontal
+        ? box.top + box.height / 2
+        : box.left + box.width / 2;
+      return {
+        card,
+        primary: (primary - currentPrimary) * sign,
+        secondary: Math.abs(secondary - currentSecondary),
+      };
+    })
+    .filter((item) => item.primary > 0)
+    .sort(
+      (left, right) =>
+        left.primary - right.primary || left.secondary - right.secondary,
+    )[0];
+  if (candidate?.card.dataset.dashboardId)
+    selectDashboard(candidate.card.dataset.dashboardId);
+}
+
+function renderHomeSelection(): void {
+  for (const card of gallery.querySelectorAll<HTMLElement>(".dashboard-card"))
+    card.classList.toggle(
+      "keyboard-selected",
+      card.dataset.dashboardId === selectedDashboardId,
+    );
+}
+
+function openSelectedDashboard(editing: boolean): void {
+  if (!selectedDashboardId) return selectBoundaryDashboard(false);
+  window.location.assign(
+    `/d/${encodeURIComponent(selectedDashboardId)}${editing ? "/edit" : ""}`,
+  );
+}
+
+function homeCommandCandidates(): string[] {
+  return [
+    "new",
+    "help",
+    ...dashboards.flatMap((dashboard) => [
+      `dashboard ${dashboard.name}`,
+      `edit ${dashboard.name}`,
+    ]),
+  ];
+}
+
+function executeHomeCommand(value: string): string | null {
+  if (value === "new") {
+    void createDashboard();
+    return null;
+  }
+  if (value === "help") {
+    window.setTimeout(() => helpDialog.showModal());
+    return null;
+  }
+  const [command, ...nameParts] = value.split(/\s+/);
+  const name = nameParts.join(" ");
+  const dashboard = dashboards.find((candidate) => candidate.name === name);
+  if (!dashboard || (command !== "dashboard" && command !== "edit"))
+    return `Unknown command: ${value}`;
+  window.location.assign(
+    `/d/${encodeURIComponent(dashboard.id)}${command === "edit" ? "/edit" : ""}`,
+  );
+  return null;
+}
+
 async function loadDashboards(): Promise<void> {
   try {
     const response = await fetch("/api/v1/dashboards");
     if (!response.ok)
       throw new Error(`${response.status} ${response.statusText}`);
     dashboards = parseDashboardList(await response.json()).dashboards;
+    if (refreshTimer !== null) {
+      window.clearTimeout(refreshTimer);
+      refreshTimer = null;
+    }
     render();
     clearError();
   } catch (error) {
@@ -107,6 +310,12 @@ function render(): void {
   gallery.hidden = dashboards.length === 0;
   for (const dashboard of dashboards) gallery.append(dashboardCard(dashboard));
   if (dashboards.length < 32) gallery.append(createTile());
+  if (
+    selectedDashboardId &&
+    !dashboards.some((dashboard) => dashboard.id === selectedDashboardId)
+  )
+    selectedDashboardId = null;
+  renderHomeSelection();
 }
 
 function dashboardCard(dashboard: Dashboard): HTMLElement {

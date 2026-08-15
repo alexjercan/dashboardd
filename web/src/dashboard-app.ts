@@ -1,4 +1,5 @@
 import { isWidgetModule, type WidgetFrontend } from "@scufris/widget-sdk";
+import { CommandPalette } from "./command-palette";
 import {
   connectDashboard,
   type ConnectionStatus,
@@ -47,6 +48,7 @@ app.innerHTML = `
       </section>
       <main id="widgets" class="dashboard-grid" aria-label="Dashboard widgets"></main>
       <footer class="dashboard-footer">
+        <span id="keyboard-hint" class="keyboard-hint"><strong id="keyboard-mode">DASHBOARD</strong><span id="keyboard-keys"> hjkl select  i interact  f focus  e edit  ? help</span></span>
         <span class="connection-state"><span id="connection-indicator" class="status-dot" aria-hidden="true"></span><span id="connection-status">Connecting...</span></span>
         <label class="dashboard-switcher-label"><span class="sr-only">Dashboard</span><select id="dashboard-switcher"><option>Dashboards</option></select></label>
         <a id="edit-layout" class="zen-edit" href="${dashboardPath}/edit">Edit</a>
@@ -105,6 +107,39 @@ app.innerHTML = `
       <footer><button class="button" value="cancel">Cancel</button><button id="confirm-remove" class="button danger" type="button">Remove</button></footer>
     </form>
   </dialog>
+  <dialog id="add-keyboard-help" class="modal keyboard-help-modal">
+    <form method="dialog">
+      <header><h2>Add Widget keys</h2><button class="icon-button" value="cancel" aria-label="Close">x</button></header>
+      <dl class="keyboard-help-list">
+        <div><dt>j / k</dt><dd>Next or previous widget or variant</dd></div>
+        <div><dt>g g / G</dt><dd>First or last widget in the catalog</dd></div>
+        <div><dt>l / Enter</dt><dd>Configure the highlighted widget</dd></div>
+        <div><dt>h</dt><dd>Return to the widget catalog</dd></div>
+        <div><dt>a</dt><dd>Add the configured widget</dd></div>
+        <div><dt>Tab</dt><dd>Navigate options and links normally</dd></div>
+        <div><dt>Esc</dt><dd>Close this help or Add Widget</dd></div>
+      </dl>
+      <footer><button class="button primary" value="cancel">Close</button></footer>
+    </form>
+  </dialog>
+  <dialog id="keyboard-help" class="modal keyboard-help-modal">
+    <form method="dialog">
+      <header><h2>Keyboard commands</h2><button class="icon-button" value="cancel" aria-label="Close">x</button></header>
+      <dl class="keyboard-help-list">
+        <div><dt>h j k l</dt><dd>Move the dashboard cursor one cell</dd></div>
+        <div><dt>g g</dt><dd>Move the cursor to the first cell</dd></div>
+        <div><dt>i / Enter</dt><dd>Interact with the selected widget</dd></div>
+        <div><dt>f</dt><dd>Focus the selected widget</dd></div>
+        <div><dt>e / z</dt><dd>Open Editor / return to Zen</dd></div>
+        <div><dt>d / g h</dt><dd>Choose a dashboard / open dashboard home</dd></div>
+        <div><dt>a / x</dt><dd>Add at the cursor / remove the widget under it in Editor</dd></div>
+        <div><dt>v</dt><dd>Pick up the widget under the Editor cursor for a staged move</dd></div>
+        <div><dt>:</dt><dd>Open the command palette</dd></div>
+        <div><dt>Esc</dt><dd>Leave widget interaction or close the current layer</dd></div>
+      </dl>
+      <footer><button class="button primary" value="cancel">Close</button></footer>
+    </form>
+  </dialog>
 `;
 
 const statusElement = required<HTMLElement>("#connection-status");
@@ -130,6 +165,10 @@ const addDialog = required<HTMLDialogElement>("#add-widget");
 const removeDialog = required<HTMLDialogElement>("#remove-widget");
 const healthDialog = required<HTMLDialogElement>("#widget-health");
 const linkDialog = required<HTMLDialogElement>("#link-widget");
+const helpDialog = required<HTMLDialogElement>("#keyboard-help");
+const addHelpDialog = required<HTMLDialogElement>("#add-keyboard-help");
+const keyboardModeElement = required<HTMLElement>("#keyboard-mode");
+const keyboardKeysElement = required<HTMLElement>("#keyboard-keys");
 const catalogElement = required<HTMLElement>("#widget-catalog");
 const selectionElement = required<HTMLElement>("#widget-selection");
 const selectedNameElement = required<HTMLElement>("#selected-widget-name");
@@ -155,7 +194,14 @@ const healthUpdatedElement = required<HTMLElement>("#health-updated");
 const healthRestartsElement = required<HTMLElement>("#health-restarts");
 const healthErrorElement = required<HTMLElement>("#health-error");
 const restartWidgetButton = required<HTMLButtonElement>("#restart-widget");
-for (const dialog of [addDialog, linkDialog, healthDialog, removeDialog]) {
+for (const dialog of [
+  addDialog,
+  linkDialog,
+  healthDialog,
+  removeDialog,
+  helpDialog,
+  addHelpDialog,
+]) {
   dialog.addEventListener("click", (event) => {
     if (event.target === dialog) dialog.close();
   });
@@ -195,6 +241,46 @@ let relinkTarget: {
 let drag: DragState | null = null;
 let connection: DashboardConnection;
 let controlsTimer: number | null = null;
+let keyboardMode: "dashboard" | "widget" = focusedInstanceId
+  ? "widget"
+  : "dashboard";
+let selectedInstanceId: string | null = focusedInstanceId;
+let keyboardCursor = { column: 0, row: 0 };
+let moveState: {
+  instanceId: string;
+  originalCursor: { column: number; row: number };
+  width: number;
+  height: number;
+} | null = null;
+let addPendingFirstKey = false;
+let addPendingFirstKeyTimer: number | null = null;
+let pendingFirstKey = false;
+let pendingFirstKeyTimer: number | null = null;
+const dashboardNames = new Map<string, string>();
+const commandPalette = new CommandPalette(
+  dashboardCommandCandidates,
+  executeDashboardCommand,
+);
+
+type DashboardCommand =
+  | "select-left"
+  | "select-down"
+  | "select-up"
+  | "select-right"
+  | "cursor-home"
+  | "open-home"
+  | "enter-widget"
+  | "open-focus"
+  | "open-editor"
+  | "open-zen"
+  | "open-switcher"
+  | "open-palette"
+  | "open-help"
+  | "add-widget"
+  | "remove-widget"
+  | "toggle-move"
+  | "commit-move"
+  | "escape";
 
 type DragState = {
   instanceId: string;
@@ -218,6 +304,8 @@ window.addEventListener("popstate", () => syncRoute(true));
 window.addEventListener("resize", renderCanvas);
 confirmAddButton.addEventListener("click", () => void createSelectedWidget());
 backToWidgetsButton.addEventListener("click", showWidgetCatalog);
+addDialog.addEventListener("keydown", handleAddDialogKeydown);
+addDialog.addEventListener("close", clearAddFirstKey);
 confirmRemoveButton.addEventListener(
   "click",
   () => void removeSelectedWidget(),
@@ -237,6 +325,7 @@ increaseColumns.addEventListener(
   () => void updateDashboardColumns(dashboardLayout.columns + 1),
 );
 closeFocusButton.addEventListener("click", closeFocus);
+document.addEventListener("pointerdown", handleCanvasPointerDown, true);
 healthDialog.addEventListener("close", () => {
   healthInstanceId = null;
   resetRestartConfirmation();
@@ -244,13 +333,8 @@ healthDialog.addEventListener("close", () => {
 for (const eventName of ["pointermove", "pointerdown", "touchstart", "keydown"])
   window.addEventListener(eventName, showControls, { passive: true });
 showControls();
-document.addEventListener("keydown", (event) => {
-  if (event.key !== "Escape") return;
-  if (focusedInstanceId) {
-    event.preventDefault();
-    closeFocus();
-  } else if (drag) cancelDrag();
-});
+renderKeyboardState();
+document.addEventListener("keydown", handleDashboardKeydown, true);
 
 function showControls(): void {
   document.body.classList.add("controls-active");
@@ -259,6 +343,543 @@ function showControls(): void {
     document.body.classList.remove("controls-active");
     controlsTimer = null;
   }, 3_000);
+}
+
+function handleDashboardKeydown(event: KeyboardEvent): void {
+  if (event.defaultPrevented || event.ctrlKey || event.altKey || event.metaKey)
+    return;
+  if (window.matchMedia("(max-width: 580px)").matches) return;
+  if ([...document.querySelectorAll("dialog")].some((dialog) => dialog.open))
+    return;
+  if (event.key === "Escape") {
+    const openMenus =
+      document.querySelectorAll<HTMLDetailsElement>("details[open]");
+    const openMenu = openMenus[openMenus.length - 1];
+    if (openMenu) {
+      event.preventDefault();
+      event.stopPropagation();
+      openMenu.open = false;
+      return;
+    }
+  }
+
+  if (moveState) {
+    const moveCommand: Partial<Record<string, DashboardCommand>> = {
+      h: "select-left",
+      j: "select-down",
+      k: "select-up",
+      l: "select-right",
+      Enter: "commit-move",
+      v: "toggle-move",
+      Escape: "toggle-move",
+      "?": "open-help",
+    };
+    const command = moveCommand[event.key];
+    if (!command) return;
+    event.preventDefault();
+    event.stopPropagation();
+    dispatchDashboardCommand(command);
+    return;
+  }
+
+  if (keyboardMode === "widget") {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    event.stopPropagation();
+    setKeyboardMode("dashboard");
+    containers.get(selectedInstanceId ?? "")?.focus();
+    return;
+  }
+
+  if (isEditableEventPath(event)) return;
+  const moveHandle = event
+    .composedPath()
+    .find(
+      (target): target is HTMLElement =>
+        target instanceof HTMLElement &&
+        target.classList.contains("drag-handle"),
+    );
+  const arrowOffsets: Record<string, [number, number]> = {
+    ArrowLeft: [-1, 0],
+    ArrowRight: [1, 0],
+    ArrowUp: [0, -1],
+    ArrowDown: [0, 1],
+  };
+  const arrowOffset = arrowOffsets[event.key];
+  const moveFrame = moveHandle?.closest<HTMLElement>(".dashboard-widget");
+  if (editing && arrowOffset && moveFrame?.dataset.instanceId) {
+    event.preventDefault();
+    event.stopPropagation();
+    moveInstanceByOffset(moveFrame.dataset.instanceId, ...arrowOffset);
+    return;
+  }
+  if (pendingFirstKey) {
+    const command: DashboardCommand | null =
+      event.key === "g"
+        ? "cursor-home"
+        : event.key === "h"
+          ? "open-home"
+          : null;
+    clearFirstKey();
+    if (command) {
+      event.preventDefault();
+      dispatchDashboardCommand(command);
+      return;
+    }
+  }
+  if (event.key === "g") {
+    event.preventDefault();
+    pendingFirstKey = true;
+    pendingFirstKeyTimer = window.setTimeout(clearFirstKey, 700);
+    return;
+  }
+  const command: Partial<Record<string, DashboardCommand>> = editing
+    ? {
+        h: "select-left",
+        j: "select-down",
+        k: "select-up",
+        l: "select-right",
+        a: "add-widget",
+        x: "remove-widget",
+        v: "toggle-move",
+        Enter: "commit-move",
+        z: "open-zen",
+        Escape: "escape",
+        d: "open-switcher",
+        ":": "open-palette",
+        "?": "open-help",
+      }
+    : {
+        h: "select-left",
+        j: "select-down",
+        k: "select-up",
+        l: "select-right",
+        i: "enter-widget",
+        Enter: "enter-widget",
+        f: "open-focus",
+        e: "open-editor",
+        d: "open-switcher",
+        Escape: "escape",
+        ":": "open-palette",
+        "?": "open-help",
+      };
+  const selected = command[event.key];
+  if (!selected) return;
+  event.preventDefault();
+  event.stopPropagation();
+  dispatchDashboardCommand(selected);
+}
+
+function dispatchDashboardCommand(command: DashboardCommand): void {
+  switch (command) {
+    case "select-left":
+    case "select-down":
+    case "select-up":
+    case "select-right": {
+      const direction = command.slice("select-".length) as
+        "left" | "down" | "up" | "right";
+      moveKeyboardCursor(direction);
+      break;
+    }
+    case "cursor-home":
+      setKeyboardCursor(0, 0);
+      break;
+    case "open-home":
+      window.location.assign("/");
+      break;
+    case "enter-widget":
+      enterSelectedWidget();
+      break;
+    case "open-focus": {
+      const instance = instanceUnderCursor();
+      if (instance) openFocus(instance.id);
+      break;
+    }
+    case "open-editor":
+      navigateTo(`${dashboardPath}/edit`);
+      break;
+    case "open-zen":
+      navigateTo(dashboardPath);
+      break;
+    case "open-switcher":
+      commandPalette.open("dashboard ");
+      break;
+    case "open-palette":
+      commandPalette.open();
+      break;
+    case "open-help":
+      helpDialog.showModal();
+      break;
+    case "add-widget": {
+      if (instanceUnderCursor()) announce("That position is occupied");
+      else openAddDialog(keyboardCursor.column, keyboardCursor.row);
+      break;
+    }
+    case "remove-widget": {
+      const instance = instanceUnderCursor();
+      if (instance) openRemoveDialog(instance.id);
+      else announce("No widget at the cursor");
+      break;
+    }
+    case "toggle-move":
+      if (moveState) cancelKeyboardMove();
+      else beginKeyboardMove();
+      break;
+    case "commit-move":
+      commitKeyboardMove();
+      break;
+    case "escape":
+      if (drag) cancelDrag();
+      else if (focusedInstanceId) closeFocus();
+      else if (editing) navigateTo(dashboardPath);
+      break;
+  }
+}
+
+function isEditableEventPath(event: Event): boolean {
+  return event.composedPath().some((target) => {
+    if (!(target instanceof HTMLElement)) return false;
+    const dialog = target.closest<HTMLDialogElement>("dialog");
+    if (dialog && !dialog.open) return false;
+    return (
+      target instanceof HTMLInputElement ||
+      target instanceof HTMLTextAreaElement ||
+      target instanceof HTMLSelectElement ||
+      target.isContentEditable
+    );
+  });
+}
+
+function clearFirstKey(): void {
+  pendingFirstKey = false;
+  if (pendingFirstKeyTimer !== null) {
+    window.clearTimeout(pendingFirstKeyTimer);
+    pendingFirstKeyTimer = null;
+  }
+}
+
+function setKeyboardMode(mode: "dashboard" | "widget"): void {
+  keyboardMode = mode;
+  renderKeyboardState();
+  announce(mode === "widget" ? "Widget mode" : "Dashboard mode");
+}
+
+function selectInstance(instanceId: string, focus = true): void {
+  const instance = resources.get(instanceId);
+  if (!instance) return;
+  setKeyboardCursor(instance.layout.column, instance.layout.row, false);
+  if (focus) containers.get(instanceId)?.focus();
+}
+
+function setKeyboardCursor(
+  column: number,
+  row: number,
+  announcePosition = true,
+): void {
+  const rowCount = Number(
+    widgetsElement.style.getPropertyValue("--dashboard-rows"),
+  );
+  keyboardCursor = {
+    column: Math.max(
+      0,
+      Math.min(dashboardLayout.columns - (moveState?.width ?? 1), column),
+    ),
+    row: Math.max(
+      0,
+      Math.min(Math.max(0, rowCount - (moveState?.height ?? 1)), row),
+    ),
+  };
+  selectedInstanceId = instanceUnderCursor()?.id ?? null;
+  renderKeyboardState();
+  if (announcePosition)
+    announce(
+      `Cursor at column ${keyboardCursor.column + 1}, row ${keyboardCursor.row + 1}`,
+    );
+}
+
+function moveKeyboardCursor(direction: "left" | "down" | "up" | "right"): void {
+  const underCursor = instanceUnderCursor();
+  const blockers = moveState
+    ? overlappingInstances(
+        keyboardCursor.column,
+        keyboardCursor.row,
+        moveState.width,
+        moveState.height,
+        moveState.instanceId,
+      )
+    : underCursor
+      ? [underCursor]
+      : [];
+  if (blockers.length === 0) {
+    const offsets = {
+      left: [-1, 0],
+      right: [1, 0],
+      up: [0, -1],
+      down: [0, 1],
+    } as const;
+    const [columnOffset, rowOffset] = offsets[direction];
+    setKeyboardCursor(
+      keyboardCursor.column + columnOffset,
+      keyboardCursor.row + rowOffset,
+    );
+    return;
+  }
+
+  if (direction === "left")
+    setKeyboardCursor(
+      Math.min(...blockers.map((instance) => instance.layout.column)) -
+        (moveState?.width ?? 1),
+      keyboardCursor.row,
+    );
+  else if (direction === "right")
+    setKeyboardCursor(
+      Math.max(
+        ...blockers.map(
+          (instance) => instance.layout.column + instance.layout.width,
+        ),
+      ),
+      keyboardCursor.row,
+    );
+  else if (direction === "up")
+    setKeyboardCursor(
+      keyboardCursor.column,
+      Math.min(...blockers.map((instance) => instance.layout.row)) -
+        (moveState?.height ?? 1),
+    );
+  else
+    setKeyboardCursor(
+      keyboardCursor.column,
+      Math.max(
+        ...blockers.map(
+          (instance) => instance.layout.row + instance.layout.height,
+        ),
+      ),
+    );
+}
+
+function beginKeyboardMove(): void {
+  if (!editing) return;
+  const instance = instanceUnderCursor();
+  if (!instance) {
+    announce("No widget at the cursor");
+    return;
+  }
+  moveState = {
+    instanceId: instance.id,
+    originalCursor: { ...keyboardCursor },
+    width: instance.layout.width,
+    height: instance.layout.height,
+  };
+  setKeyboardCursor(instance.layout.column, instance.layout.row, false);
+  announce("Move mode");
+}
+
+function cancelKeyboardMove(): void {
+  const state = moveState;
+  if (!state) return;
+  moveState = null;
+  setKeyboardCursor(
+    state.originalCursor.column,
+    state.originalCursor.row,
+    false,
+  );
+  announce("Move cancelled");
+}
+
+function commitKeyboardMove(): void {
+  const state = moveState;
+  const source = state && resources.get(state.instanceId);
+  if (!state || !source) return;
+  const column = keyboardCursor.column;
+  const row = keyboardCursor.row;
+  const targets = overlappingInstances(
+    column,
+    row,
+    state.width,
+    state.height,
+    source.id,
+  );
+  if (targets.length > 1) {
+    announce("That position is unavailable");
+    return;
+  }
+  moveState = null;
+  renderKeyboardState();
+  if (column === source.layout.column && row === source.layout.row) {
+    announce("Move cancelled");
+    return;
+  }
+  if (targets[0]) void swapInstances(source.id, targets[0].id);
+  else void moveInstance(source.id, column, row);
+}
+
+function overlappingInstances(
+  column: number,
+  row: number,
+  width: number,
+  height: number,
+  excludeId: string,
+): Instance[] {
+  return [...resources.values()].filter(
+    (instance) =>
+      instance.id !== excludeId &&
+      column < instance.layout.column + instance.layout.width &&
+      column + width > instance.layout.column &&
+      row < instance.layout.row + instance.layout.height &&
+      row + height > instance.layout.row,
+  );
+}
+
+function instanceUnderCursor(): Instance | undefined {
+  return [...resources.values()].find(
+    (instance) =>
+      keyboardCursor.column >= instance.layout.column &&
+      keyboardCursor.column < instance.layout.column + instance.layout.width &&
+      keyboardCursor.row >= instance.layout.row &&
+      keyboardCursor.row < instance.layout.row + instance.layout.height,
+  );
+}
+
+function renderKeyboardState(): void {
+  const underCursor = instanceUnderCursor();
+  selectedInstanceId = underCursor?.id ?? null;
+  for (const [instanceId, frame] of containers) {
+    frame.classList.toggle(
+      "keyboard-selected",
+      keyboardMode === "widget" && instanceId === selectedInstanceId,
+    );
+    frame.classList.toggle(
+      "keyboard-under-cursor",
+      !moveState &&
+        keyboardMode === "dashboard" &&
+        instanceId === selectedInstanceId,
+    );
+    frame.classList.toggle(
+      "keyboard-move-source",
+      moveState?.instanceId === instanceId,
+    );
+  }
+  widgetsElement.querySelector(".dashboard-keyboard-cursor")?.remove();
+  if (!focusedInstanceId) {
+    const cursor = document.createElement("div");
+    const expandedInstance = editing && !moveState ? underCursor : undefined;
+    cursor.className = "dashboard-keyboard-cursor";
+    cursor.classList.toggle("occupied", Boolean(underCursor));
+    cursor.classList.toggle("moving", Boolean(moveState));
+    cursor.classList.toggle("expanded", Boolean(expandedInstance));
+    cursor.setAttribute("aria-hidden", "true");
+    cursor.style.setProperty(
+      "--widget-column",
+      String((expandedInstance?.layout.column ?? keyboardCursor.column) + 1),
+    );
+    cursor.style.setProperty(
+      "--widget-row",
+      String((expandedInstance?.layout.row ?? keyboardCursor.row) + 1),
+    );
+    cursor.style.setProperty(
+      "--widget-width",
+      String(moveState?.width ?? expandedInstance?.layout.width ?? 1),
+    );
+    cursor.style.setProperty(
+      "--widget-height",
+      String(moveState?.height ?? expandedInstance?.layout.height ?? 1),
+    );
+    widgetsElement.append(cursor);
+  }
+  keyboardModeElement.textContent = moveState
+    ? "MOVE"
+    : editing
+      ? "EDITOR"
+      : keyboardMode === "widget"
+        ? "WIDGET"
+        : "DASHBOARD";
+  keyboardKeysElement.textContent = moveState
+    ? " hjkl place  Enter commit  v/Esc cancel"
+    : editing
+      ? " hjkl cursor  a add  x remove  v move  z zen  ? help"
+      : keyboardMode === "widget"
+        ? " Esc dashboard mode"
+        : " hjkl cursor  i interact  f focus  e edit  ? help";
+  document.body.dataset.keyboardMode = moveState
+    ? "move"
+    : editing
+      ? "editor"
+      : keyboardMode;
+}
+
+function enterSelectedWidget(): void {
+  if (editing) return;
+  const instance = instanceUnderCursor();
+  const frame = instance && containers.get(instance.id);
+  if (!frame) return;
+  selectedInstanceId = instance.id;
+  setKeyboardMode("widget");
+  const target = frame.querySelector<HTMLElement>(
+    ".dashboard-widget-mount input, .dashboard-widget-mount textarea, .dashboard-widget-mount select, .dashboard-widget-mount button, .dashboard-widget-mount [tabindex]:not([tabindex='-1'])",
+  );
+  (target ?? frame).focus();
+}
+
+function handleCanvasPointerDown(event: PointerEvent): void {
+  const path = event.composedPath();
+  const frame = path.find(
+    (target): target is HTMLElement =>
+      target instanceof HTMLElement &&
+      target.classList.contains("dashboard-widget"),
+  );
+  if (frame?.dataset.instanceId) {
+    selectInstance(frame.dataset.instanceId, false);
+    if (!editing) setKeyboardMode("widget");
+    return;
+  }
+  const slot = path.find(
+    (target): target is HTMLElement =>
+      target instanceof HTMLElement &&
+      target.classList.contains("dashboard-slot"),
+  );
+  if (editing && slot)
+    setKeyboardCursor(Number(slot.dataset.column), Number(slot.dataset.row));
+  else if (!editing) setKeyboardMode("dashboard");
+}
+
+function dashboardCommandCandidates(): string[] {
+  return [
+    "edit",
+    "zen",
+    "focus",
+    "home",
+    "help",
+    ...[...dashboardNames.values()].map((name) => `dashboard ${name}`),
+  ];
+}
+
+function executeDashboardCommand(value: string): string | null {
+  const [name, ...arguments_] = value.split(/\s+/);
+  if (name === "edit" && arguments_.length === 0)
+    dispatchDashboardCommand("open-editor");
+  else if (name === "zen" && arguments_.length === 0)
+    dispatchDashboardCommand("open-zen");
+  else if (name === "focus" && arguments_.length === 0)
+    dispatchDashboardCommand("open-focus");
+  else if (name === "home" && arguments_.length === 0)
+    dispatchDashboardCommand("open-home");
+  else if (name === "help" && arguments_.length === 0)
+    window.setTimeout(() => helpDialog.showModal());
+  else if (name === "dashboard" && arguments_.length > 0) {
+    const requested = arguments_.join(" ");
+    const match = [...dashboardNames].find(
+      ([, dashboardName]) => dashboardName === requested,
+    );
+    if (match) window.location.assign(`/d/${encodeURIComponent(match[0])}`);
+    else return `Dashboard not found: ${requested}`;
+  } else return `Unknown command: ${value}`;
+  return null;
+}
+
+function navigateTo(path: string): void {
+  if (window.location.pathname === path) return;
+  window.history.pushState(null, "", path);
+  syncRoute(true);
 }
 
 function renderStatus(status: ConnectionStatus): void {
@@ -399,7 +1020,13 @@ async function mountWidget(instance: Instance): Promise<void> {
   remove.textContent = "Remove";
   remove.setAttribute("aria-label", `Remove ${descriptor.name}`);
   remove.addEventListener("click", () => openRemoveDialog(instance.id));
-  frame.addEventListener("keydown", moveWithKeyboard);
+  frame.addEventListener("focusin", (event) => {
+    const widgetContentFocused =
+      event.target instanceof Node && mount.contains(event.target);
+    if ((editing && event.target !== frame) || widgetContentFocused)
+      selectInstance(instance.id, false);
+    if (!editing && widgetContentFocused) setKeyboardMode("widget");
+  });
   frame.append(
     mount,
     focusButton,
@@ -467,6 +1094,8 @@ function navigateDashboard(event: MouseEvent): void {
 
 function openFocus(instanceId: string): void {
   if (!supportsFocus(instanceId) || editing) return;
+  selectedInstanceId = instanceId;
+  keyboardMode = "widget";
   window.history.pushState(
     { scufrisFocus: true },
     "",
@@ -515,8 +1144,16 @@ function syncRoute(focus: boolean): void {
   const nextRoute = parseDashboardRoute(window.location.pathname);
   focusedInstanceId = nextRoute?.focusInstanceId ?? null;
   const nextEditing = nextRoute?.mode === "edit";
-  if (!nextEditing) cancelDrag();
+  if (!nextEditing) {
+    cancelDrag();
+    if (moveState) cancelKeyboardMove();
+  }
   editing = nextEditing;
+  if (focusedInstanceId) {
+    selectedInstanceId = focusedInstanceId;
+    keyboardMode = "widget";
+  } else if (editing) keyboardMode = "dashboard";
+  else if (previousFocusedInstanceId) keyboardMode = "dashboard";
   document.title = focusedInstanceId
     ? "Widget Focus - Scufris"
     : editing
@@ -560,6 +1197,7 @@ function renderCanvas(): void {
       if (frame) widgetsElement.append(frame);
     }
     renderFocusLayer();
+    renderKeyboardState();
     return;
   }
 
@@ -606,10 +1244,14 @@ function renderCanvas(): void {
       slot.style.setProperty("--widget-row", String(row + 1));
       slot.innerHTML = `<span aria-hidden="true">+</span><span class="sr-only">Add widget at column ${column + 1}, row ${row + 1}</span>`;
       slot.addEventListener("click", () => openAddDialog(column, row));
+      slot.addEventListener("focus", () =>
+        setKeyboardCursor(column, row, false),
+      );
       widgetsElement.append(slot);
     }
   }
   renderFocusLayer();
+  renderKeyboardState();
 }
 
 function renderFocusControl(instanceId: string, frame: HTMLElement): void {
@@ -970,23 +1612,15 @@ function setDragTarget(target: DragState["target"]): void {
   }
 }
 
-function moveWithKeyboard(event: KeyboardEvent): void {
-  if (!editing || !event.key.startsWith("Arrow")) return;
-  const frame = event.currentTarget as HTMLElement;
-  const instance = frame.dataset.instanceId
-    ? resources.get(frame.dataset.instanceId)
-    : undefined;
+function moveInstanceByOffset(
+  instanceId: string,
+  columnOffset: number,
+  rowOffset: number,
+): void {
+  const instance = resources.get(instanceId);
   if (!instance) return;
-  const offsets: Record<string, [number, number]> = {
-    ArrowLeft: [-1, 0],
-    ArrowRight: [1, 0],
-    ArrowUp: [0, -1],
-    ArrowDown: [0, 1],
-  };
-  const [columnOffset, rowOffset] = offsets[event.key];
   const column = instance.layout.column + columnOffset;
   const row = instance.layout.row + rowOffset;
-  event.preventDefault();
   if (!isWithinBounds(instance, column, row)) {
     announce("That position is unavailable");
     return;
@@ -1115,6 +1749,105 @@ function applyLayout(frame: HTMLElement, instance: Instance): void {
   frame.dataset.layout = `${instance.layout.width}x${instance.layout.height}`;
 }
 
+function handleAddDialogKeydown(event: KeyboardEvent): void {
+  if (
+    event.ctrlKey ||
+    event.altKey ||
+    event.metaKey ||
+    isEditableEventPath(event)
+  )
+    return;
+  const configuring = !selectionElement.hidden;
+  if (!configuring && addPendingFirstKey) {
+    const first = event.key === "g";
+    clearAddFirstKey();
+    if (first) {
+      event.preventDefault();
+      highlightAddChoice(0);
+      return;
+    }
+  }
+  if (!configuring && event.key === "g") {
+    event.preventDefault();
+    addPendingFirstKey = true;
+    addPendingFirstKeyTimer = window.setTimeout(clearAddFirstKey, 700);
+    return;
+  }
+  if (event.key === "?") {
+    event.preventDefault();
+    addHelpDialog.showModal();
+    return;
+  }
+  if (!configuring && event.key === "G") {
+    event.preventDefault();
+    highlightAddChoice(catalogElement.children.length - 1);
+    return;
+  }
+  if (event.key === "j" || event.key === "k") {
+    event.preventDefault();
+    if (configuring) cycleVariant(event.key === "j" ? 1 : -1);
+    else cycleAddChoice(event.key === "j" ? 1 : -1);
+    return;
+  }
+  if (!configuring && (event.key === "l" || event.key === "Enter")) {
+    event.preventDefault();
+    catalogElement
+      .querySelector<HTMLButtonElement>(".widget-choice.selected")
+      ?.click();
+  } else if (configuring && event.key === "h") {
+    event.preventDefault();
+    showWidgetCatalog();
+  } else if (configuring && event.key === "a") {
+    event.preventDefault();
+    if (!confirmAddButton.disabled) void createSelectedWidget();
+  }
+}
+
+function clearAddFirstKey(): void {
+  addPendingFirstKey = false;
+  if (addPendingFirstKeyTimer !== null) {
+    window.clearTimeout(addPendingFirstKeyTimer);
+    addPendingFirstKeyTimer = null;
+  }
+}
+
+function cycleAddChoice(offset: number): void {
+  const choices = [
+    ...catalogElement.querySelectorAll<HTMLButtonElement>(".widget-choice"),
+  ];
+  const current = choices.findIndex((choice) =>
+    choice.classList.contains("selected"),
+  );
+  highlightAddChoice(
+    Math.max(0, Math.min(choices.length - 1, current + offset)),
+  );
+}
+
+function highlightAddChoice(index: number): void {
+  const choices = [
+    ...catalogElement.querySelectorAll<HTMLButtonElement>(".widget-choice"),
+  ];
+  const selected = choices[index];
+  if (!selected) return;
+  for (const choice of choices)
+    choice.classList.toggle("selected", choice === selected);
+  selected.focus();
+}
+
+function cycleVariant(offset: number): void {
+  const variants = [
+    ...variantsElement.querySelectorAll<HTMLButtonElement>(".variant-choice"),
+  ];
+  const current = variants.findIndex((variant) =>
+    variant.classList.contains("selected"),
+  );
+  const next =
+    variants[Math.max(0, Math.min(variants.length - 1, current + offset))];
+  if (!next || next === variants[current]) return;
+  next.click();
+  selectionElement.focus();
+}
+
 function openAddDialog(column: number, row: number): void {
   selectedSlot = { column, row };
   selectedWidget = null;
@@ -1135,6 +1868,7 @@ function openAddDialog(column: number, row: number): void {
     catalogElement.append(choice);
   }
   addDialog.showModal();
+  highlightAddChoice(0);
 }
 
 function selectWidget(
@@ -1483,7 +2217,9 @@ async function removeSelectedWidget(): Promise<void> {
 }
 
 function removeInstance(instanceId: string): void {
+  if (moveState?.instanceId === instanceId) cancelKeyboardMove();
   resources.delete(instanceId);
+  if (selectedInstanceId === instanceId) selectedInstanceId = null;
   instanceHealth.delete(instanceId);
   if (healthInstanceId === instanceId) healthDialog.close();
   linkBus.removeInstance(instanceId);
@@ -1556,6 +2292,9 @@ async function loadDashboardSwitcher(): Promise<void> {
     if (!response.ok)
       throw new Error(`${response.status} ${response.statusText}`);
     const dashboards = parseDashboardList(await response.json()).dashboards;
+    dashboardNames.clear();
+    for (const dashboard of dashboards)
+      dashboardNames.set(dashboard.id, dashboard.name);
     dashboardSwitcher.replaceChildren();
     const home = document.createElement("option");
     home.value = "/";
