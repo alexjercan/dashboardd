@@ -88,9 +88,9 @@ try {
   await page.locator('#connection-status:text-is("Connected")').waitFor();
   await page.locator("#finish-editing").click();
   await page.waitForURL(dashboardViewUrl);
-  const layoutResponse = await page.request.get(`${baseUrl}/api/v1/layout`);
+  const layoutResponse = await page.request.get(dashboardApiUrl);
   assert.equal(layoutResponse.status(), 200);
-  assert.deepEqual(await layoutResponse.json(), { columns: 9 });
+  assert.equal((await layoutResponse.json()).columns, 9);
   assert.equal(
     await instanceCount(page, dashboardApiUrl),
     0,
@@ -122,9 +122,17 @@ try {
   );
   assert.equal(
     await page.locator(".dashboard-slot").count(),
-    54,
-    "empty editor canvas is 9x6",
+    63,
+    "empty editor canvas derives seven rows from the viewport",
   );
+  assert.equal(await page.locator("#column-count").textContent(), "9");
+  const fullCanvas = await page.locator("#widgets").boundingBox();
+  assert.equal(Math.round(fullCanvas.width), 1424);
+  assert.equal(Math.round(fullCanvas.height), 984);
+  await page.locator("#increase-columns").click();
+  await page.locator("#column-count:text-is('10')").waitFor();
+  await page.locator("#decrease-columns").click();
+  await page.locator("#column-count:text-is('9')").waitFor();
   await page.locator("#finish-editing").click();
   await page.waitForURL(dashboardViewUrl);
   assert.equal(
@@ -346,8 +354,8 @@ try {
   );
   assert.equal(
     await page.locator(".dashboard-slot").count(),
-    53,
-    "occupied first unit retains the minimum canvas",
+    62,
+    "occupied first unit retains the viewport-derived canvas",
   );
 
   const cpuTwo = await addWidget(page, "1", "0", "CPU", "Compact");
@@ -427,7 +435,8 @@ try {
     ),
   );
   assert.ok(boxes.every(Boolean));
-  assert.ok(boxes.every((box) => box.height === 110));
+  assert.ok(boxes.every((box) => box.height > 120));
+  assert.ok(boxes.every((box) => box.height === boxes[0].height));
 
   await page.reload();
   await page.locator(`[data-instance-id="${cpuOne}"]`).waitFor();
@@ -571,7 +580,7 @@ try {
   await waitForTelemetry(fullFrame);
   const fullBox = await fullFrame.boundingBox();
   assert.ok(fullBox);
-  assert.equal(fullBox.height, 350);
+  assert.ok(fullBox.height > 350);
   assert.deepEqual(fullInstance.layout, {
     column: 3,
     row: 0,
@@ -1679,8 +1688,10 @@ try {
   await waitForRenderedValue(
     page.locator(`[data-instance-id="${networkCompact}"] .down strong`),
   );
-  assert.equal((await diskFullFrame.boundingBox()).height, 230);
-  assert.equal((await networkFullFrame.boundingBox()).height, 230);
+  const diskFullHeight = (await diskFullFrame.boundingBox()).height;
+  const networkFullHeight = (await networkFullFrame.boundingBox()).height;
+  assert.ok(diskFullHeight > 230);
+  assert.equal(networkFullHeight, diskFullHeight);
   await waitForInstanceHealth(page, dashboardApiUrl, diskFull, "healthy");
   await waitForInstanceHealth(page, dashboardApiUrl, networkFull, "healthy");
   assert.doesNotMatch(

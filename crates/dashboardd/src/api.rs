@@ -51,11 +51,13 @@ pub struct DashboardList {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct CreateDashboard {
     pub name: String,
+    pub columns: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
-pub struct RenameDashboard {
-    pub name: String,
+pub struct UpdateDashboard {
+    pub name: Option<String>,
+    pub columns: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -134,7 +136,6 @@ pub struct SetWidgetState {
 #[openapi(
     paths(
         health,
-        get_layout,
         get_theme,
         list_widgets,
         get_widget,
@@ -163,7 +164,7 @@ pub struct SetWidgetState {
     ),
     components(schemas(
         CreateDashboard,
-        RenameDashboard,
+        UpdateDashboard,
         Dashboard,
         DashboardList,
         CreateInstance,
@@ -203,7 +204,6 @@ struct ApiDoc;
 pub fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
-        .route("/api/v1/layout", get(get_layout))
         .route("/api/v1/theme", get(get_theme))
         .route("/api/v1/widgets", get(list_widgets))
         .route("/api/v1/widgets/{widget_id}", get(get_widget))
@@ -294,15 +294,6 @@ async fn health() -> StatusCode {
 
 #[utoipa::path(
     get,
-    path = "/api/v1/layout",
-    responses((status = 200, description = "Canonical dashboard layout constraints", body = DashboardLayout))
-)]
-async fn get_layout(State(state): State<AppState>) -> Json<DashboardLayout> {
-    Json(state.instances.layout())
-}
-
-#[utoipa::path(
-    get,
     path = "/api/v1/theme",
     responses((status = 200, description = "Effective public dashboard theme", body = Theme))
 )]
@@ -330,7 +321,10 @@ async fn create_dashboard(
     State(state): State<AppState>,
     ApiJson(request): ApiJson<CreateDashboard>,
 ) -> Result<Response, ApiError> {
-    let dashboard = state.instances.create_dashboard(&request.name).await?;
+    let dashboard = state
+        .instances
+        .create_dashboard(&request.name, request.columns.unwrap_or(9))
+        .await?;
     Ok((
         StatusCode::CREATED,
         [(
@@ -342,16 +336,16 @@ async fn create_dashboard(
         .into_response())
 }
 
-#[utoipa::path(patch, path = "/api/v1/dashboards/{dashboard_id}", request_body = RenameDashboard, responses((status = 200, body = Dashboard), (status = 400, body = ErrorResponse), (status = 404, body = ErrorResponse)))]
+#[utoipa::path(patch, path = "/api/v1/dashboards/{dashboard_id}", request_body = UpdateDashboard, responses((status = 200, body = Dashboard), (status = 400, body = ErrorResponse), (status = 404, body = ErrorResponse)))]
 async fn rename_dashboard(
     AxumPath(dashboard_id): AxumPath<DashboardId>,
     State(state): State<AppState>,
-    ApiJson(request): ApiJson<RenameDashboard>,
+    ApiJson(request): ApiJson<UpdateDashboard>,
 ) -> Result<Json<Dashboard>, ApiError> {
     Ok(Json(
         state
             .instances
-            .rename_dashboard(&dashboard_id, &request.name)
+            .update_dashboard(&dashboard_id, request.name.as_deref(), request.columns)
             .await?,
     ))
 }
@@ -932,6 +926,12 @@ impl From<InstanceError> for ApiError {
             InstanceError::InvalidDashboardName => {
                 (StatusCode::BAD_REQUEST, "invalid_dashboard_name")
             }
+            InstanceError::InvalidDashboardColumns => {
+                (StatusCode::BAD_REQUEST, "invalid_dashboard_columns")
+            }
+            InstanceError::DashboardColumnsOccupied => {
+                (StatusCode::CONFLICT, "dashboard_columns_occupied")
+            }
             InstanceError::UnknownInstance => (StatusCode::NOT_FOUND, "unknown_instance"),
             InstanceError::UnknownVariant => (StatusCode::NOT_FOUND, "unknown_variant"),
             InstanceError::InvalidOptions(_) => (StatusCode::BAD_REQUEST, "invalid_options"),
@@ -1092,18 +1092,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn returns_canonical_layout_constraints() {
-        let response = test_app()
-            .oneshot(Request::get("/api/v1/layout").body(Body::empty()).unwrap())
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        assert_eq!(body.as_ref(), br#"{"columns":9}"#);
-    }
-
-    #[tokio::test]
     async fn lists_zero_dashboards() {
         let response = test_app()
             .oneshot(
@@ -1132,13 +1120,14 @@ mod tests {
         assert_eq!(response.status(), StatusCode::CREATED);
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let dashboard: Dashboard = serde_json::from_slice(&body).unwrap();
+        assert_eq!(dashboard.columns, 9);
 
         let response = app
             .clone()
             .oneshot(
                 Request::patch(format!("/api/v1/dashboards/{}", dashboard.id))
                     .header(CONTENT_TYPE, "application/json")
-                    .body(Body::from(r#"{"name":"Projects"}"#))
+                    .body(Body::from(r#"{"name":"Projects","columns":12}"#))
                     .unwrap(),
             )
             .await
@@ -1158,6 +1147,7 @@ mod tests {
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let duplicate: Dashboard = serde_json::from_slice(&body).unwrap();
         assert_eq!(duplicate.name, "Projects (1)");
+        assert_eq!(duplicate.columns, 12);
 
         let response = app
             .clone()
@@ -1275,7 +1265,6 @@ mod tests {
             document["components"]["schemas"]["DashboardLayout"]["type"],
             "object"
         );
-        assert!(document["paths"]["/api/v1/layout"].is_object());
         assert!(document["paths"]["/api/v1/dashboards"].is_object());
         assert!(document["paths"]["/api/v1/dashboards/{dashboard_id}/instances"].is_object());
         assert!(document["paths"]["/api/v1/widget-state/{widget_id}"].is_object());

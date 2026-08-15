@@ -97,6 +97,7 @@ export type Instance = {
 export type Dashboard = {
   id: string;
   name: string;
+  columns: number;
   instances: Instance[];
   health: InstanceHealth[];
 };
@@ -225,6 +226,7 @@ export function parseDashboard(value: unknown): Dashboard {
     !isRecord(value) ||
     typeof value.id !== "string" ||
     typeof value.name !== "string" ||
+    !isPositiveInteger(value.columns) ||
     !Array.isArray(value.instances) ||
     !Array.isArray(value.health)
   )
@@ -232,6 +234,7 @@ export function parseDashboard(value: unknown): Dashboard {
   return {
     id: value.id,
     name: value.name,
+    columns: value.columns,
     instances: value.instances.map(parseInstance),
     health: value.health.map(parseInstanceHealth),
   };

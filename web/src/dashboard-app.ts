@@ -32,6 +32,11 @@ app.innerHTML = `
       <h1 id="zen-heading" class="sr-only">Scufris Dashboard</h1>
       <header id="editor-header" class="dashboard-header" hidden>
         <h1 id="editor-heading" tabindex="-1">Edit dashboard</h1>
+        <div class="canvas-columns" aria-label="Dashboard columns">
+          <button id="decrease-columns" class="icon-button" type="button" aria-label="Decrease columns">-</button>
+          <span><strong id="column-count">9</strong> columns</span>
+          <button id="increase-columns" class="icon-button" type="button" aria-label="Increase columns">+</button>
+        </div>
         <a id="finish-editing" class="button primary" href="${dashboardPath}">Done</a>
       </header>
       <div id="dashboard-error" class="dashboard-error" role="alert" hidden></div>
@@ -115,6 +120,9 @@ const errorElement = required<HTMLElement>("#dashboard-error");
 const announcementElement = required<HTMLElement>("#dashboard-announcement");
 const editorHeader = required<HTMLElement>("#editor-header");
 const editorHeading = required<HTMLElement>("#editor-heading");
+const columnCount = required<HTMLElement>("#column-count");
+const decreaseColumns = required<HTMLButtonElement>("#decrease-columns");
+const increaseColumns = required<HTMLButtonElement>("#increase-columns");
 const emptyDashboard = required<HTMLElement>("#empty-dashboard");
 const editButton = required<HTMLAnchorElement>("#edit-layout");
 const doneButton = required<HTMLAnchorElement>("#finish-editing");
@@ -186,6 +194,7 @@ let relinkTarget: {
 } | null = null;
 let drag: DragState | null = null;
 let connection: DashboardConnection;
+let controlsTimer: number | null = null;
 
 type DragState = {
   instanceId: string;
@@ -206,6 +215,7 @@ for (const link of [
 ])
   link.addEventListener("click", navigateDashboard);
 window.addEventListener("popstate", () => syncRoute(true));
+window.addEventListener("resize", renderCanvas);
 confirmAddButton.addEventListener("click", () => void createSelectedWidget());
 backToWidgetsButton.addEventListener("click", showWidgetCatalog);
 confirmRemoveButton.addEventListener(
@@ -218,11 +228,22 @@ restartWidgetButton.addEventListener(
   () => void restartSelectedWidget(),
 );
 dashboardSwitcher.addEventListener("change", () => void switchDashboard());
+decreaseColumns.addEventListener(
+  "click",
+  () => void updateDashboardColumns(dashboardLayout.columns - 1),
+);
+increaseColumns.addEventListener(
+  "click",
+  () => void updateDashboardColumns(dashboardLayout.columns + 1),
+);
 closeFocusButton.addEventListener("click", closeFocus);
 healthDialog.addEventListener("close", () => {
   healthInstanceId = null;
   resetRestartConfirmation();
 });
+for (const eventName of ["pointermove", "pointerdown", "touchstart", "keydown"])
+  window.addEventListener(eventName, showControls, { passive: true });
+showControls();
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
   if (focusedInstanceId) {
@@ -230,6 +251,15 @@ document.addEventListener("keydown", (event) => {
     closeFocus();
   } else if (drag) cancelDrag();
 });
+
+function showControls(): void {
+  document.body.classList.add("controls-active");
+  if (controlsTimer !== null) window.clearTimeout(controlsTimer);
+  controlsTimer = window.setTimeout(() => {
+    document.body.classList.remove("controls-active");
+    controlsTimer = null;
+  }, 3_000);
+}
 
 function renderStatus(status: ConnectionStatus): void {
   const labels: Record<ConnectionStatus, string> = {
@@ -293,6 +323,7 @@ function applySnapshot(
   links: DashboardLink[],
 ): void {
   dashboardLayout = layout;
+  renderCanvasDimensions();
   widgetsElement.style.setProperty(
     "--dashboard-columns",
     String(layout.columns),
@@ -503,6 +534,7 @@ function syncRoute(focus: boolean): void {
 }
 
 function renderCanvas(): void {
+  renderCanvasDimensions();
   widgetsElement.classList.toggle("editing", editing);
   document.body.classList.toggle("editing", editing);
   editorHeader.hidden = !editing;
@@ -552,7 +584,9 @@ function renderCanvas(): void {
       }
     }
   }
-  const rowCount = Math.max(6, occupiedRows + 1);
+  const rowCount = Number(
+    widgetsElement.style.getPropertyValue("--dashboard-rows"),
+  );
   for (let row = 0; row < rowCount; row++) {
     for (let column = 0; column < dashboardLayout.columns; column++) {
       const instance = occupied.get(`${column}:${row}`);
@@ -1461,6 +1495,61 @@ function removeInstance(instanceId: string): void {
   renderCanvas();
 }
 
+function renderCanvasDimensions(): void {
+  const occupiedRows = Math.max(
+    0,
+    ...[...resources.values()].map(
+      (instance) => instance.layout.row + instance.layout.height,
+    ),
+  );
+  const naturalRows = Math.max(
+    1,
+    Math.ceil((dashboardLayout.columns * innerHeight) / innerWidth),
+  );
+  const rows = Math.min(
+    24,
+    Math.max(
+      naturalRows,
+      occupiedRows + (editing && occupiedRows < 24 ? 1 : 0),
+    ),
+  );
+  widgetsElement.style.setProperty(
+    "--dashboard-columns",
+    String(dashboardLayout.columns),
+  );
+  widgetsElement.style.setProperty("--dashboard-rows", String(rows));
+  columnCount.textContent = String(dashboardLayout.columns);
+  decreaseColumns.disabled = dashboardLayout.columns <= 3;
+  increaseColumns.disabled = dashboardLayout.columns >= 24;
+}
+
+async function updateDashboardColumns(columns: number): Promise<void> {
+  if (columns < 3 || columns > 24) return;
+  try {
+    const response = await fetch(apiDashboardPath, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ columns }),
+    });
+    if (!response.ok) throw await responseError(response);
+    const dashboard = parseDashboard(await response.json());
+    dashboardLayout = { columns: dashboard.columns };
+    renderCanvas();
+    announce(`${dashboard.columns} dashboard columns`);
+  } catch (error) {
+    showError(errorMessage(error));
+  }
+}
+
+async function responseError(response: Response): Promise<Error> {
+  const value = (await response.json().catch(() => null)) as {
+    error?: { message?: string };
+  } | null;
+  return new Error(
+    value?.error?.message ?? `${response.status} ${response.statusText}`,
+  );
+}
+
 async function loadDashboardSwitcher(): Promise<void> {
   try {
     const response = await fetch("/api/v1/dashboards");
@@ -1512,7 +1601,10 @@ async function switchDashboard(): Promise<void> {
       const response = await fetch("/api/v1/dashboards", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({
+          name,
+          columns: Math.max(3, Math.min(24, Math.round(innerWidth / 160))),
+        }),
       });
       if (!response.ok)
         throw new Error(`${response.status} ${response.statusText}`);
@@ -1570,9 +1662,19 @@ syncRoute(false);
 void loadDashboardSwitcher();
 
 connection = connectDashboard(dashboardId, {
-  onDashboardsChanged(destroyedDashboardId) {
+  onDashboardsChanged(dashboard, destroyedDashboardId) {
     if (destroyedDashboardId === dashboardId) window.location.assign("/");
-    else void loadDashboardSwitcher();
+    else {
+      if (
+        dashboard?.id === dashboardId &&
+        dashboard.columns !== dashboardLayout.columns
+      ) {
+        dashboardLayout = { columns: dashboard.columns };
+        renderCanvasDimensions();
+        renderCanvas();
+      }
+      void loadDashboardSwitcher();
+    }
   },
   onStatus: renderStatus,
   onTheme: applyTheme,

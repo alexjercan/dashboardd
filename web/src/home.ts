@@ -52,11 +52,13 @@ events.addEventListener("message", (message) => {
       const dashboard = dashboards.find(
         (candidate) => candidate.id === event.data.dashboard_id,
       );
-      const previous = dashboard?.health.find(
+      if (!dashboard) return;
+      const index = dashboard.health.findIndex(
         (health) => health.instance_id === event.data.health.instance_id,
       );
-      if (!previous || previous.status !== event.data.health.status)
-        scheduleRefresh();
+      if (index >= 0) dashboard.health[index] = event.data.health;
+      else dashboard.health.push(event.data.health);
+      updateHealthSummary(dashboard);
       return;
     }
     if (
@@ -129,6 +131,7 @@ function dashboardCard(dashboard: Dashboard): HTMLElement {
       (instance) => instance.layout.row + instance.layout.height,
     ),
   );
+  preview.style.setProperty("--preview-columns", String(dashboard.columns));
   preview.style.setProperty("--preview-rows", String(rows));
   for (const instance of dashboard.instances) {
     const block = document.createElement("span");
@@ -175,6 +178,20 @@ function dashboardCard(dashboard: Dashboard): HTMLElement {
   return card;
 }
 
+function updateHealthSummary(dashboard: Dashboard): void {
+  const card = [
+    ...gallery.querySelectorAll<HTMLElement>(".dashboard-card"),
+  ].find((candidate) => candidate.dataset.dashboardId === dashboard.id);
+  const health = card?.querySelector<HTMLElement>(".dashboard-card-health");
+  if (!health) return;
+  const status = aggregateHealth(dashboard);
+  health.dataset.status = status;
+  const dot = health.querySelector(".status-dot");
+  health.replaceChildren();
+  if (dot) health.append(dot);
+  health.append(document.createTextNode(healthLabel(status)));
+}
+
 function createTile(): HTMLElement {
   const button = document.createElement("button");
   button.className = "dashboard-create-tile";
@@ -190,7 +207,10 @@ async function createDashboard(): Promise<void> {
   const dashboard = await dashboardRequest("/api/v1/dashboards", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({
+      name,
+      columns: suggestedColumns(window.innerWidth),
+    }),
   });
   if (dashboard)
     window.location.assign(`/d/${encodeURIComponent(dashboard.id)}/edit`);
@@ -246,6 +266,10 @@ async function dashboardRequest(
     showError(errorMessage(error));
     return null;
   }
+}
+
+function suggestedColumns(width: number): number {
+  return Math.max(3, Math.min(24, Math.round(width / 160)));
 }
 
 function aggregateHealth(dashboard: Dashboard): HealthStatus | "empty" {

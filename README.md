@@ -108,10 +108,13 @@ surface while retaining the selected artifact.
 Dashboard compositions persist in `$XDG_STATE_HOME/scufris/dashboard.json`, or
 `$HOME/.local/state/scufris/dashboard.json` when `XDG_STATE_HOME` is unset.
 `DASHBOARDD_STATE_FILE` overrides both paths. Each dashboard owns independent
-instances, placement, options, and links. All dashboards remain running for
-immediate switching and use globally unique instance IDs. Package shared state
-remains global. Version 1 state migrates into a dashboard named `Main`. An
-invalid saved composition stops startup instead of discarding state.
+instances, placement, options, links, and a canonical 3 to 24 column canvas.
+Desktop dashboards fill the viewport and derive rows from their aspect ratio and
+occupied content. Narrow screens project the canonical layout into a scrolling
+three-column view. All dashboards remain running for immediate switching and
+use globally unique instance IDs. Package shared state remains global. State
+schemas are prototype-only and are not migrated; an old or invalid state file
+stops startup.
 
 ## User configuration
 

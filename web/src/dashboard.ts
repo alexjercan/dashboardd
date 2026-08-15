@@ -1,12 +1,13 @@
 import {
+  parseDashboard,
   parseDashboardEvent,
-  parseDashboardLayout,
   parseInstanceHealth,
   parseInstanceHealthList,
   parseInstanceList,
   parseLinkList,
   parseTheme,
   parseWidgetList,
+  type Dashboard,
   type DashboardLayout,
   type ErrorResponse,
   type DashboardLink,
@@ -21,7 +22,10 @@ export type ConnectionStatus =
   "connecting" | "connected" | "disconnected" | "error";
 
 export type DashboardEvents = {
-  onDashboardsChanged(destroyedDashboardId?: string): void;
+  onDashboardsChanged(
+    dashboard?: Dashboard,
+    destroyedDashboardId?: string,
+  ): void;
   onStatus(status: ConnectionStatus): void;
   onTheme(theme: Theme): void;
   onConfigurationError(message: string): void;
@@ -78,10 +82,10 @@ export function connectDashboard(
       switch (event.kind) {
         case "dashboard_created":
         case "dashboard_updated":
-          events.onDashboardsChanged();
+          events.onDashboardsChanged(event.data.dashboard);
           break;
         case "dashboard_destroyed":
-          events.onDashboardsChanged(event.data.dashboard_id);
+          events.onDashboardsChanged(undefined, event.data.dashboard_id);
           break;
         case "instance_created":
           if (event.data.dashboard_id !== dashboardId) break;
@@ -176,7 +180,9 @@ async function reconcile(
   const base = dashboardPath(dashboardId);
   const [layout, theme, widgetList, instanceList, healthList, linkList] =
     await Promise.all([
-      requestJson("/api/v1/layout", parseDashboardLayout),
+      requestJson(base, parseDashboard).then((dashboard) => ({
+        columns: dashboard.columns,
+      })),
       requestJson("/api/v1/theme", parseTheme),
       requestJson("/api/v1/widgets", parseWidgetList),
       requestJson(`${base}/instances`, parseInstanceList),

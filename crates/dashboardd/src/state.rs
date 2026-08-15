@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use utoipa::ToSchema;
 
-const SCHEMA_VERSION: u32 = 2;
+const SCHEMA_VERSION: u32 = 3;
 
 pub type DashboardId = String;
 
@@ -45,6 +45,7 @@ pub struct DashboardLink {
 pub struct PersistedDashboard {
     pub id: DashboardId,
     pub name: String,
+    pub columns: u32,
     #[serde(default)]
     pub instances: Vec<PersistedInstance>,
     #[serde(default)]
@@ -57,16 +58,6 @@ pub struct DashboardStateFile {
     pub dashboards: Vec<PersistedDashboard>,
     #[serde(default)]
     pub widget_state: BTreeMap<WidgetId, Value>,
-}
-
-#[derive(Deserialize)]
-struct LegacyDashboardStateFile {
-    schema_version: u32,
-    instances: Vec<PersistedInstance>,
-    #[serde(default)]
-    links: Vec<DashboardLink>,
-    #[serde(default)]
-    widget_state: BTreeMap<WidgetId, Value>,
 }
 
 impl DashboardStateFile {
@@ -114,30 +105,14 @@ impl StateStore {
             .get("schema_version")
             .and_then(Value::as_u64)
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing schema_version"))?;
-        let state = match version {
-            1 => {
-                let legacy: LegacyDashboardStateFile = serde_json::from_value(value)
-                    .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-                debug_assert_eq!(legacy.schema_version, 1);
-                let migrated = DashboardStateFile::new(vec![PersistedDashboard {
-                    id: "dashboard-1".into(),
-                    name: "Main".into(),
-                    instances: legacy.instances,
-                    links: legacy.links,
-                }])
-                .with_widget_state(legacy.widget_state);
-                self.save(&migrated)?;
-                migrated
-            }
-            version if version == u64::from(SCHEMA_VERSION) => serde_json::from_value(value)
-                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?,
-            version => {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("unsupported schema_version {version}"),
-                ));
-            }
-        };
+        if version != u64::from(SCHEMA_VERSION) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("unsupported schema_version {version}"),
+            ));
+        }
+        let state = serde_json::from_value(value)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
         Ok(Some(state))
     }
 
@@ -227,6 +202,7 @@ mod tests {
         let state = DashboardStateFile::new(vec![PersistedDashboard {
             id: "dashboard-1".into(),
             name: "Main".into(),
+            columns: 9,
             instances: vec![persisted_instance()],
             links: vec![],
         }]);
@@ -238,31 +214,22 @@ mod tests {
     }
 
     #[test]
-    fn legacy_state_migrates_and_preserves_widget_state() {
-        let path = temporary_path("legacy");
+    fn old_state_is_rejected() {
+        let path = temporary_path("old");
         fs::write(
             &path,
-            r#"{"schema_version":1,"instances":[],"links":[],"widget_state":{"projects":{"pins":[]}}}"#,
+            r#"{"schema_version":2,"dashboards":[],"widget_state":{}}"#,
         )
         .unwrap();
 
-        let state = StateStore::new(path.clone()).load().unwrap().unwrap();
+        let error = StateStore::new(path.clone()).load().unwrap_err();
 
-        assert_eq!(state.schema_version, 2);
-        assert_eq!(state.dashboards[0].name, "Main");
-        assert_eq!(
-            state.widget_state["projects"],
-            serde_json::json!({"pins": []})
-        );
-        assert_eq!(
-            serde_json::from_str::<Value>(&fs::read_to_string(&path).unwrap()).unwrap()["schema_version"],
-            2
-        );
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
         fs::remove_file(path).unwrap();
     }
 
     #[test]
-    fn version_two_can_store_zero_dashboards() {
+    fn version_three_can_store_zero_dashboards() {
         let path = temporary_path("empty");
         let store = StateStore::new(path.clone());
         store.save(&DashboardStateFile::new(vec![])).unwrap();
@@ -274,7 +241,7 @@ mod tests {
     #[test]
     fn invalid_state_fails_to_load() {
         let path = temporary_path("invalid");
-        fs::write(&path, r#"{"schema_version":2}"#).unwrap();
+        fs::write(&path, r#"{"schema_version":3}"#).unwrap();
 
         let error = StateStore::new(path.clone()).load().unwrap_err();
 

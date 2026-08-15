@@ -21,6 +21,10 @@ use tokio::{
 };
 use utoipa::ToSchema;
 
+const MIN_DASHBOARD_COLUMNS: u32 = 3;
+const MAX_DASHBOARD_COLUMNS: u32 = 24;
+const MAX_DASHBOARD_ROWS: u32 = 24;
+
 use crate::{
     configuration::InitialWidget,
     event::DashboardEvent,
@@ -66,6 +70,7 @@ impl Default for InstanceLayout {
 pub struct Dashboard {
     pub id: DashboardId,
     pub name: String,
+    pub columns: u32,
     pub instances: Vec<Instance>,
     pub health: Vec<InstanceHealth>,
 }
@@ -101,10 +106,10 @@ pub struct InstanceManager {
 }
 
 struct Inner {
-    layout: DashboardLayout,
     instances: Mutex<HashMap<InstanceId, ManagedInstance>>,
     links: RwLock<Vec<DashboardLink>>,
     dashboards: RwLock<BTreeMap<DashboardId, String>>,
+    dashboard_columns: RwLock<BTreeMap<DashboardId, u32>>,
     events: broadcast::Sender<DashboardEvent>,
     next_id: AtomicU64,
     next_dashboard_id: AtomicU64,
@@ -135,6 +140,10 @@ pub enum InstanceError {
     DashboardLimit,
     #[error("dashboard name must contain 1 to 64 characters")]
     InvalidDashboardName,
+    #[error("dashboard columns must be between 3 and 24")]
+    InvalidDashboardColumns,
+    #[error("dashboard columns would place a widget out of bounds")]
+    DashboardColumnsOccupied,
     #[error("instance was not found")]
     UnknownInstance,
     #[error("widget variant was not found")]
@@ -164,14 +173,14 @@ pub enum InstanceError {
 }
 
 impl InstanceManager {
-    pub fn new(layout: DashboardLayout) -> Self {
+    pub fn new(_layout: DashboardLayout) -> Self {
         let (events, _) = broadcast::channel(256);
         Self {
             inner: Arc::new(Inner {
-                layout,
                 instances: Mutex::new(HashMap::new()),
                 links: RwLock::new(Vec::new()),
                 dashboards: RwLock::new(BTreeMap::new()),
+                dashboard_columns: RwLock::new(BTreeMap::new()),
                 events,
                 next_id: AtomicU64::new(1),
                 next_dashboard_id: AtomicU64::new(1),
@@ -205,6 +214,7 @@ impl InstanceManager {
         let mut restored = Vec::new();
         let mut restored_links = Vec::new();
         let mut restored_dashboards = BTreeMap::new();
+        let mut restored_dashboard_columns = BTreeMap::new();
         let mut restored_widget_state = BTreeMap::new();
         let mut next_id = 1;
         let mut next_dashboard_id = 1;
@@ -225,6 +235,9 @@ impl InstanceManager {
                 let name = normalize_dashboard_name(&dashboard.name).map_err(|error| {
                     InstanceError::InvalidState(format!("invalid dashboard name: {error}"))
                 })?;
+                validate_dashboard_columns(dashboard.columns).map_err(|error| {
+                    InstanceError::InvalidState(format!("invalid dashboard columns: {error}"))
+                })?;
                 if dashboard.id.is_empty()
                     || restored_dashboards
                         .insert(dashboard.id.clone(), name)
@@ -234,6 +247,7 @@ impl InstanceManager {
                         "dashboard IDs must be non-empty and unique".into(),
                     ));
                 }
+                restored_dashboard_columns.insert(dashboard.id.clone(), dashboard.columns);
                 next_dashboard_id = next_dashboard_id.max(sequence_after(&dashboard.id));
                 let mut layouts = Vec::new();
                 for persisted in dashboard.instances {
@@ -269,7 +283,14 @@ impl InstanceManager {
                         width: variant.width,
                         height: variant.height,
                     };
-                    validate_layout(layout, &instance_layout, layouts.iter()).map_err(|error| {
+                    validate_layout(
+                        DashboardLayout {
+                            columns: dashboard.columns,
+                        },
+                        &instance_layout,
+                        layouts.iter(),
+                    )
+                    .map_err(|error| {
                         InstanceError::InvalidState(format!(
                             "instance {:?} has invalid position: {error}",
                             persisted.id
@@ -326,6 +347,7 @@ impl InstanceManager {
             store
                 .save(&state_from_runtime(
                     &restored_dashboards,
+                    &restored_dashboard_columns,
                     instances.values(),
                     &restored_links,
                     restored_widget_state.clone(),
@@ -336,10 +358,10 @@ impl InstanceManager {
         }
         Ok(Self {
             inner: Arc::new(Inner {
-                layout,
                 instances: Mutex::new(instances),
                 links: RwLock::new(restored_links),
                 dashboards: RwLock::new(restored_dashboards),
+                dashboard_columns: RwLock::new(restored_dashboard_columns),
                 events,
                 next_id: AtomicU64::new(next_id),
                 next_dashboard_id: AtomicU64::new(next_dashboard_id),
@@ -353,10 +375,6 @@ impl InstanceManager {
                 widget_state: RwLock::new(restored_widget_state),
             }),
         })
-    }
-
-    pub fn layout(&self) -> DashboardLayout {
-        self.inner.layout
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<DashboardEvent> {
@@ -374,10 +392,16 @@ impl InstanceManager {
             .read()
             .expect("dashboards lock is poisoned")
             .clone();
+        let columns = self
+            .inner
+            .dashboard_columns
+            .read()
+            .expect("dashboard columns lock is poisoned")
+            .clone();
         let instances = self.inner.instances.lock().await;
         dashboards
             .into_iter()
-            .map(|(id, name)| dashboard_resource(&id, name, instances.values()))
+            .map(|(id, name)| dashboard_resource(&id, name, columns[&id], instances.values()))
             .collect()
     }
 
@@ -390,12 +414,27 @@ impl InstanceManager {
             .get(dashboard_id)
             .cloned()
             .ok_or(InstanceError::UnknownDashboard)?;
+        let columns = self
+            .inner
+            .dashboard_columns
+            .read()
+            .expect("dashboard columns lock is poisoned")[dashboard_id];
         let instances = self.inner.instances.lock().await;
-        Ok(dashboard_resource(dashboard_id, name, instances.values()))
+        Ok(dashboard_resource(
+            dashboard_id,
+            name,
+            columns,
+            instances.values(),
+        ))
     }
 
-    pub async fn create_dashboard(&self, name: &str) -> Result<Dashboard, InstanceError> {
+    pub async fn create_dashboard(
+        &self,
+        name: &str,
+        columns: u32,
+    ) -> Result<Dashboard, InstanceError> {
         let name = normalize_dashboard_name(name)?;
+        validate_dashboard_columns(columns)?;
         let instances = self.inner.instances.lock().await;
         let mut dashboards = self
             .inner
@@ -409,13 +448,31 @@ impl InstanceManager {
         let id = format!("dashboard-{sequence}");
         let mut proposed = dashboards.clone();
         proposed.insert(id.clone(), name.clone());
-        self.persist_with_dashboards(&proposed, instances.values(), &self.list_links())?;
+        let mut proposed_columns = self
+            .inner
+            .dashboard_columns
+            .read()
+            .expect("dashboard columns lock is poisoned")
+            .clone();
+        proposed_columns.insert(id.clone(), columns);
+        self.persist_with_dashboards(
+            &proposed,
+            &proposed_columns,
+            instances.values(),
+            &self.list_links(),
+        )?;
         dashboards.insert(id.clone(), name.clone());
+        self.inner
+            .dashboard_columns
+            .write()
+            .expect("dashboard columns lock is poisoned")
+            .insert(id.clone(), columns);
         drop(instances);
         drop(dashboards);
         let dashboard = Dashboard {
             id,
             name,
+            columns,
             instances: Vec::new(),
             health: Vec::new(),
         };
@@ -425,28 +482,61 @@ impl InstanceManager {
         Ok(dashboard)
     }
 
-    pub async fn rename_dashboard(
+    pub async fn update_dashboard(
         &self,
         dashboard_id: &str,
-        name: &str,
+        name: Option<&str>,
+        columns: Option<u32>,
     ) -> Result<Dashboard, InstanceError> {
-        let name = normalize_dashboard_name(name)?;
+        if name.is_none() && columns.is_none() {
+            return Err(InstanceError::InvalidDashboardName);
+        }
         let instances = self.inner.instances.lock().await;
         let mut dashboards = self
             .inner
             .dashboards
             .write()
             .expect("dashboards lock is poisoned");
-        if !dashboards.contains_key(dashboard_id) {
-            return Err(InstanceError::UnknownDashboard);
+        let current_name = dashboards
+            .get(dashboard_id)
+            .cloned()
+            .ok_or(InstanceError::UnknownDashboard)?;
+        let name = name
+            .map(normalize_dashboard_name)
+            .transpose()?
+            .unwrap_or(current_name);
+        let mut dashboard_columns = self
+            .inner
+            .dashboard_columns
+            .write()
+            .expect("dashboard columns lock is poisoned");
+        let current_columns = dashboard_columns[dashboard_id];
+        let columns = columns.unwrap_or(current_columns);
+        validate_dashboard_columns(columns)?;
+        if columns < current_columns
+            && instances.values().any(|instance| {
+                instance.dashboard_id == dashboard_id
+                    && instance.resource.layout.column + instance.resource.layout.width > columns
+            })
+        {
+            return Err(InstanceError::DashboardColumnsOccupied);
         }
         let mut proposed = dashboards.clone();
         proposed.insert(dashboard_id.into(), name.clone());
-        self.persist_with_dashboards(&proposed, instances.values(), &self.list_links())?;
+        let mut proposed_columns = dashboard_columns.clone();
+        proposed_columns.insert(dashboard_id.into(), columns);
+        self.persist_with_dashboards(
+            &proposed,
+            &proposed_columns,
+            instances.values(),
+            &self.list_links(),
+        )?;
         dashboards.insert(dashboard_id.into(), name.clone());
-        let dashboard = dashboard_resource(dashboard_id, name, instances.values());
-        drop(instances);
+        dashboard_columns.insert(dashboard_id.into(), columns);
+        let dashboard = dashboard_resource(dashboard_id, name, columns, instances.values());
+        drop(dashboard_columns);
         drop(dashboards);
+        drop(instances);
         let _ = self.inner.events.send(DashboardEvent::DashboardUpdated {
             dashboard: dashboard.clone(),
         });
@@ -467,6 +557,12 @@ impl InstanceManager {
             .get(dashboard_id)
             .cloned()
             .ok_or(InstanceError::UnknownDashboard)?;
+        let mut dashboard_columns = self
+            .inner
+            .dashboard_columns
+            .write()
+            .expect("dashboard columns lock is poisoned");
+        let columns = dashboard_columns[dashboard_id];
         if dashboards.len() >= 32 {
             return Err(InstanceError::DashboardLimit);
         }
@@ -499,6 +595,8 @@ impl InstanceManager {
             .collect::<Vec<_>>();
         let mut proposed_dashboards = dashboards.clone();
         proposed_dashboards.insert(new_dashboard_id.clone(), name.clone());
+        let mut proposed_columns = dashboard_columns.clone();
+        proposed_columns.insert(new_dashboard_id.clone(), columns);
         let mut proposed_links = self.list_links();
         proposed_links.extend(copied_links.iter().cloned());
         let widget_state = self
@@ -515,6 +613,7 @@ impl InstanceManager {
             store
                 .save(&state_from_resources(
                     &proposed_dashboards,
+                    &proposed_columns,
                     resources,
                     &proposed_links,
                     widget_state,
@@ -522,6 +621,7 @@ impl InstanceManager {
                 .map_err(|_| InstanceError::PersistenceFailed)?;
         }
         dashboards.insert(new_dashboard_id.clone(), name.clone());
+        dashboard_columns.insert(new_dashboard_id.clone(), columns);
         for (resource, config) in copies {
             let health = HealthTracker::new(
                 new_dashboard_id.clone(),
@@ -553,7 +653,8 @@ impl InstanceManager {
             .write()
             .expect("links lock is poisoned")
             .extend(copied_links);
-        let dashboard = dashboard_resource(&new_dashboard_id, name, instances.values());
+        let dashboard = dashboard_resource(&new_dashboard_id, name, columns, instances.values());
+        drop(dashboard_columns);
         drop(instances);
         drop(dashboards);
         let _ = self.inner.events.send(DashboardEvent::DashboardCreated {
@@ -585,14 +686,23 @@ impl InstanceManager {
                 .collect::<Vec<_>>();
             let mut proposed = dashboards.clone();
             proposed.remove(dashboard_id);
+            let mut dashboard_columns = self
+                .inner
+                .dashboard_columns
+                .write()
+                .expect("dashboard columns lock is poisoned");
+            let mut proposed_columns = dashboard_columns.clone();
+            proposed_columns.remove(dashboard_id);
             self.persist_with_dashboards(
                 &proposed,
+                &proposed_columns,
                 instances
                     .values()
                     .filter(|instance| instance.dashboard_id != dashboard_id),
                 &retained_links,
             )?;
             dashboards.remove(dashboard_id);
+            dashboard_columns.remove(dashboard_id);
             *self.inner.links.write().expect("links lock is poisoned") = retained_links;
             removed_ids
                 .into_iter()
@@ -752,8 +862,13 @@ impl InstanceManager {
             height: variant.height,
         };
         let mut instances = self.inner.instances.lock().await;
+        let columns = self
+            .inner
+            .dashboard_columns
+            .read()
+            .expect("dashboard columns lock is poisoned")[dashboard_id];
         validate_layout(
-            self.inner.layout,
+            DashboardLayout { columns },
             &layout,
             instances
                 .values()
@@ -855,8 +970,13 @@ impl InstanceManager {
             width: current.width,
             height: current.height,
         };
+        let columns = self
+            .inner
+            .dashboard_columns
+            .read()
+            .expect("dashboard columns lock is poisoned")[&dashboard_id];
         validate_layout(
-            self.inner.layout,
+            DashboardLayout { columns },
             &layout,
             instances
                 .iter()
@@ -906,6 +1026,11 @@ impl InstanceManager {
         if instances[target_id].dashboard_id != dashboard_id {
             return Err(InstanceError::UnknownInstance);
         }
+        let columns = self
+            .inner
+            .dashboard_columns
+            .read()
+            .expect("dashboard columns lock is poisoned")[&dashboard_id];
         let source_layout = instances[source_id].resource.layout.clone();
         let target_layout = instances[target_id].resource.layout.clone();
         let mut source_next = source_layout.clone();
@@ -916,7 +1041,7 @@ impl InstanceManager {
         target_next.row = source_layout.row;
 
         validate_layout(
-            self.inner.layout,
+            DashboardLayout { columns },
             &source_next,
             instances
                 .iter()
@@ -928,7 +1053,7 @@ impl InstanceManager {
                 .map(|(_, instance)| &instance.resource.layout),
         )?;
         validate_layout(
-            self.inner.layout,
+            DashboardLayout { columns },
             &target_next,
             instances
                 .iter()
@@ -1077,6 +1202,7 @@ impl InstanceManager {
     fn persist_with_dashboards<'a>(
         &self,
         dashboards: &BTreeMap<DashboardId, String>,
+        dashboard_columns: &BTreeMap<DashboardId, u32>,
         instances: impl Iterator<Item = &'a ManagedInstance>,
         links: &[DashboardLink],
     ) -> Result<(), InstanceError> {
@@ -1090,7 +1216,13 @@ impl InstanceManager {
             return Ok(());
         };
         store
-            .save(&state_from_runtime(dashboards, instances, links, widget_state))
+            .save(&state_from_runtime(
+                dashboards,
+                dashboard_columns,
+                instances,
+                links,
+                widget_state,
+            ))
             .map_err(|error| {
                 tracing::error!(%error, path = %store.path().display(), "failed to persist dashboards");
                 InstanceError::PersistenceFailed
@@ -1133,7 +1265,18 @@ impl InstanceManager {
             .dashboards
             .read()
             .expect("dashboards lock is poisoned");
-        let state = state_from_resources(&dashboards, resources, links, widget_state)?;
+        let dashboard_columns = self
+            .inner
+            .dashboard_columns
+            .read()
+            .expect("dashboard columns lock is poisoned");
+        let state = state_from_resources(
+            &dashboards,
+            &dashboard_columns,
+            resources,
+            links,
+            widget_state,
+        )?;
         store.save(&state).map_err(|error| {
             tracing::error!(%error, path = %store.path().display(), "failed to persist dashboard composition");
             InstanceError::PersistenceFailed
@@ -1283,6 +1426,7 @@ impl From<&Instance> for PersistedInstance {
 fn dashboard_resource<'a>(
     dashboard_id: &str,
     name: String,
+    columns: u32,
     instances: impl Iterator<Item = &'a ManagedInstance>,
 ) -> Dashboard {
     let mut resources = Vec::new();
@@ -1296,9 +1440,17 @@ fn dashboard_resource<'a>(
     Dashboard {
         id: dashboard_id.into(),
         name,
+        columns,
         instances: resources,
         health,
     }
+}
+
+fn validate_dashboard_columns(columns: u32) -> Result<(), InstanceError> {
+    if !(MIN_DASHBOARD_COLUMNS..=MAX_DASHBOARD_COLUMNS).contains(&columns) {
+        return Err(InstanceError::InvalidDashboardColumns);
+    }
+    Ok(())
 }
 
 fn normalize_dashboard_name(name: &str) -> Result<String, InstanceError> {
@@ -1331,12 +1483,14 @@ fn duplicate_dashboard_name<'a>(
 
 fn state_from_runtime<'a>(
     dashboards: &BTreeMap<DashboardId, String>,
+    dashboard_columns: &BTreeMap<DashboardId, u32>,
     instances: impl Iterator<Item = &'a ManagedInstance>,
     links: &[DashboardLink],
     widget_state: BTreeMap<WidgetId, Value>,
 ) -> DashboardStateFile {
     state_from_resources(
         dashboards,
+        dashboard_columns,
         instances.map(|instance| &instance.resource),
         links,
         widget_state,
@@ -1346,6 +1500,7 @@ fn state_from_runtime<'a>(
 
 fn state_from_resources<'a>(
     dashboards: &BTreeMap<DashboardId, String>,
+    dashboard_columns: &BTreeMap<DashboardId, u32>,
     resources: impl Iterator<Item = &'a Instance>,
     links: &[DashboardLink],
     widget_state: BTreeMap<WidgetId, Value>,
@@ -1358,6 +1513,7 @@ fn state_from_resources<'a>(
                 PersistedDashboard {
                     id: id.clone(),
                     name: name.clone(),
+                    columns: dashboard_columns[id],
                     instances: Vec::new(),
                     links: Vec::new(),
                 },
@@ -1452,6 +1608,7 @@ fn initial_state(
     Ok(DashboardStateFile::new(vec![PersistedDashboard {
         id: "dashboard-1".into(),
         name: "Main".into(),
+        columns: 9,
         instances,
         links: Vec::new(),
     }]))
@@ -1599,6 +1756,7 @@ fn validate_layout<'a>(
         || layout.width > dashboard.columns
         || layout.column >= dashboard.columns
         || layout.column + layout.width > dashboard.columns
+        || layout.row + layout.height > MAX_DASHBOARD_ROWS
     {
         return Err(InstanceError::InvalidLayout);
     }
@@ -1986,12 +2144,12 @@ mod tests {
         let manager = InstanceManager::default();
         for index in 0..32 {
             manager
-                .create_dashboard(&format!("Dashboard {index}"))
+                .create_dashboard(&format!("Dashboard {index}"), 9)
                 .await
                 .unwrap();
         }
         assert!(matches!(
-            manager.create_dashboard("One too many").await,
+            manager.create_dashboard("One too many", 9).await,
             Err(InstanceError::DashboardLimit)
         ));
     }
@@ -2097,6 +2255,7 @@ mod tests {
             .save(&DashboardStateFile::new(vec![PersistedDashboard {
                 id: "dashboard-1".into(),
                 name: "Main".into(),
+                columns: 9,
                 instances: instances.clone(),
                 links: vec![link.clone()],
             }]))
@@ -2111,8 +2270,19 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(manager.list_links(), vec![link.clone()]);
+        manager.update("tatr-tasks-2", 8, 0).await.unwrap();
+        assert!(matches!(
+            manager.update_dashboard("dashboard-1", None, Some(3)).await,
+            Err(InstanceError::DashboardColumnsOccupied)
+        ));
+        let updated = manager
+            .update_dashboard("dashboard-1", None, Some(12))
+            .await
+            .unwrap();
+        assert_eq!(updated.columns, 12);
         let duplicate = manager.duplicate_dashboard("dashboard-1").await.unwrap();
         assert_eq!(duplicate.name, "Main (1)");
+        assert_eq!(duplicate.columns, 12);
         assert_eq!(duplicate.instances.len(), 2);
         assert!(
             duplicate
@@ -2149,6 +2319,7 @@ mod tests {
             .save(&DashboardStateFile::new(vec![PersistedDashboard {
                 id: "dashboard-1".into(),
                 name: "Main".into(),
+                columns: 9,
                 instances,
                 links: vec![invalid],
             }]))
@@ -2198,6 +2369,12 @@ mod tests {
             width: 2,
             height: 1,
         };
+        let too_low = InstanceLayout {
+            column: 0,
+            row: 24,
+            width: 1,
+            height: 1,
+        };
         let collision = InstanceLayout {
             column: 0,
             row: 1,
@@ -2209,6 +2386,10 @@ mod tests {
         assert!(validate_layout(dashboard, &valid, [&occupied].into_iter()).is_ok());
         assert!(matches!(
             validate_layout(dashboard, &invalid, std::iter::empty()),
+            Err(InstanceError::InvalidLayout)
+        ));
+        assert!(matches!(
+            validate_layout(dashboard, &too_low, std::iter::empty()),
             Err(InstanceError::InvalidLayout)
         ));
         assert!(matches!(
