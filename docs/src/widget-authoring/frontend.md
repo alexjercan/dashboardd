@@ -8,7 +8,16 @@ export interface WidgetModule {
 }
 ```
 
-The supported TypeScript API is provided by `@dashboardd/widget-sdk`. The package is currently workspace-local. A built release artifact is required before external frontend publication.
+The supported TypeScript API is provided by `@dashboardd/widget-sdk`. dashboardd builds it as a versioned npm tarball containing JavaScript, TypeScript declarations, and public CSS assets.
+
+Build and install a local artifact:
+
+```bash
+nix build .#widget-sdk
+npm install ./result/dashboardd-widget-sdk-0.1.0.tgz
+```
+
+Tagged dashboardd releases attach the same tested tarball to GitHub Releases. External repositories must depend on a versioned artifact, not a dashboardd source path.
 
 ## Context
 
@@ -78,4 +87,12 @@ Shared state is package-wide persisted JSON. `mutate()` retries revision conflic
 
 Each variant URL serves one JavaScript file. Bundle all dependencies into it. Do not emit unresolved relative chunks, source paths, or runtime imports that dashboardd does not serve.
 
-Use the SDK reset and theme CSS rather than copying dashboard internals. Keep important tile text readable and reserve detailed controls for Focus.
+Use the public CSS exports rather than copying dashboard internals:
+
+```ts
+import widgetReset from "@dashboardd/widget-sdk/widget.css";
+```
+
+`theme.css` defines supported dashboard custom properties for dashboard-compatible hosts and development previews. Widgets inherit those variables from dashboardd without importing the file. `widget.css` provides the Shadow DOM host and box-sizing reset. A bundler must load that import as a source string when it is inserted into a Shadow root.
+
+Keep important tile text readable and reserve detailed controls for Focus.

@@ -136,7 +136,12 @@ The proof must start from clean checkouts and demonstrate:
 - Added mdBook, mdbook-mermaid, Python, documentation build, and documentation checks to the Nix flake.
 - Fixed Project document traversal expressions found by the complete Nix Clippy checks without changing behavior.
 
-Remaining platform work starts with the built frontend SDK artifact and standalone pack/check command.
+- Converted `@dashboardd/widget-sdk` into a compiled public package with JavaScript, declarations, CSS exports, package metadata, and a minimal package README.
+- Added an external consumer test that packs the SDK, installs only its tarball outside the workspace, compiles TypeScript and CSS imports, checks runtime exports, and enforces exact package contents.
+- Added a reproducible `dashboardd#widget-sdk` Nix tarball package and flake check.
+- Added focused SDK CI and tag-driven GitHub Release upload workflows. No release is published until the local commit is reviewed and pushed.
+
+Remaining platform work starts with the standalone pack/check command.
 
 ## Out of scope
 

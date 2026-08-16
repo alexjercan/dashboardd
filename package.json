@@ -15,7 +15,8 @@
     "format": "prettier --write \"{packages,web,widgets,tests,schemas}/**/*.{ts,js,mjs,html,css,json}\" \"{docs,.github}/**/*.{md,yml}\" \"*.{json,md}\"",
     "format:check": "prettier --check \"{packages,web,widgets,tests,schemas}/**/*.{ts,js,mjs,html,css,json}\" \"{docs,.github}/**/*.{md,yml}\" \"*.{json,md}\"",
     "test:contracts": "node tests/contracts.mjs",
-    "test": "npm run test:contracts && node tests/browser.mjs"
+    "test:sdk": "node tests/sdk-package.mjs",
+    "test": "npm run test:contracts && npm run test:sdk && node tests/browser.mjs"
   },
   "devDependencies": {
     "ajv": "^8.17.1",

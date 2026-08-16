@@ -1,5 +1,6 @@
 /target
 /node_modules
+/packages/widget-sdk/dist
 /web/dist
 /widgets/*/frontend/dist
 /.build

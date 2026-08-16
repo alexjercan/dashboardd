@@ -26,6 +26,27 @@
           rustNightly = pkgs.rust-bin.nightly.latest.default.override {
             extensions = [ "rust-src" "clippy" "rustfmt" ];
           };
+          widgetSdk = pkgs.stdenvNoCC.mkDerivation {
+            pname = "dashboardd-widget-sdk";
+            version = "0.1.0";
+            src = ./.;
+            nativeBuildInputs = [ pkgs.nodejs_22 pkgs.typescript ];
+            buildPhase = ''
+              runHook preBuild
+              export HOME="$TMPDIR/home"
+              export npm_config_cache="$TMPDIR/npm-cache"
+              mkdir -p "$HOME" "$npm_config_cache"
+              cd packages/widget-sdk
+              npm pack
+              runHook postBuild
+            '';
+            installPhase = ''
+              runHook preInstall
+              mkdir -p "$out"
+              cp dashboardd-widget-sdk-*.tgz "$out/"
+              runHook postInstall
+            '';
+          };
           docs = pkgs.stdenvNoCC.mkDerivation {
             pname = "dashboardd-docs";
             version = "0.1.0";
@@ -47,7 +68,9 @@
           };
         in {
           packages.docs = docs;
+          packages.widget-sdk = widgetSdk;
           checks.docs = docs;
+          checks.widget-sdk = widgetSdk;
 
           devShells.default = pkgs.mkShell {
             packages = [

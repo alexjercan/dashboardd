@@ -1,12 +1,43 @@
 {
   "name": "@dashboardd/widget-sdk",
   "version": "0.1.0",
-  "private": true,
+  "description": "Frontend types, lifecycle helpers, and styles for dashboardd widgets",
+  "license": "MIT",
   "type": "module",
-  "exports": {
-    ".": "./src/index.ts",
-    "./theme.css": "./theme.css",
-    "./widget.css": "./widget.css"
+  "homepage": "https://alexjercan.github.io/dashboardd/widget-authoring/frontend.html",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alexjercan/dashboardd.git",
+    "directory": "packages/widget-sdk"
   },
-  "types": "./src/index.ts"
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./theme.css": {
+      "types": "./dist/css.d.ts",
+      "default": "./dist/theme.css"
+    },
+    "./widget.css": {
+      "types": "./dist/css.d.ts",
+      "default": "./dist/widget.css"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "sideEffects": [
+    "**/*.css"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "prepare": "npm run build"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
 }

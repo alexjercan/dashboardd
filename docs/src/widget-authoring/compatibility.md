@@ -20,11 +20,11 @@ Widget-owned `message` and `update` payloads are outside the dashboardd protocol
 - Minor - additive optional APIs.
 - Major - removed APIs, new requirements, or changed behavior.
 
-The frontend bundle imports SDK code at build time. dashboardd does not inject an SDK module at runtime.
+The frontend bundle imports SDK code at build time. dashboardd does not inject an SDK module at runtime. GitHub release tarballs and the `dashboardd#widget-sdk` Nix package contain the same packed files.
 
 ## Prototype policy
 
-No external widget release exists yet. Until the first public SDK and packaging release, dashboardd can replace these contracts cleanly without compatibility adapters. After release, supported versions and removal dates must be stated in release notes before removal.
+No external widget release exists yet. Until the first tagged SDK and packaging release, dashboardd can replace these contracts cleanly without compatibility adapters. After release, supported versions and removal dates must be stated in release notes before removal.
 
 ## Widget identity
 

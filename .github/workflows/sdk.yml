@@ -1,0 +1,40 @@
+name: Widget SDK
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/sdk.yml"
+      - "packages/widget-sdk/**"
+      - "tests/fixtures/sdk-consumer/**"
+      - "tests/sdk-package.mjs"
+      - "package.json"
+      - "package-lock.json"
+      - "flake.nix"
+  push:
+    branches: [master]
+    paths:
+      - ".github/workflows/sdk.yml"
+      - "packages/widget-sdk/**"
+      - "tests/fixtures/sdk-consumer/**"
+      - "tests/sdk-package.mjs"
+      - "package.json"
+      - "package-lock.json"
+      - "flake.nix"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run test:sdk
+      - uses: DeterminateSystems/nix-installer-action@v17
+      - run: nix build .#widget-sdk

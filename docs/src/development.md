@@ -14,6 +14,7 @@ cargo fmt --all -- --check
 cargo test --workspace
 npm run format:check
 npm run docs:build
+npm run test:sdk
 npm test
 nix flake check
 ```
@@ -35,6 +36,16 @@ Build one frontend workspace with:
 ```bash
 npm run build -w @dashboardd/cpu-widget
 ```
+
+## Widget SDK
+
+```bash
+npm run build --workspace @dashboardd/widget-sdk
+npm run test:sdk
+nix build .#widget-sdk
+```
+
+The SDK test packs the npm artifact, installs it into a temporary project outside the workspace, compiles an external TypeScript widget, verifies runtime and CSS exports, and rejects leaked source files.
 
 ## Documentation
 

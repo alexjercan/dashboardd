@@ -1,0 +1,36 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  widget-sdk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run test:sdk
+      - name: Verify SDK version
+        run: |
+          version=$(node --print 'require("./packages/widget-sdk/package.json").version')
+          test "$GITHUB_REF_NAME" = "v$version"
+      - uses: DeterminateSystems/nix-installer-action@v17
+      - run: nix build .#widget-sdk
+      - name: Publish SDK tarball
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" result/*.tgz --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" result/*.tgz --verify-tag --generate-notes
+          fi
