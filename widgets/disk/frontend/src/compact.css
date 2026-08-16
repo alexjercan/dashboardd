@@ -9,19 +9,19 @@ article {
   align-content: center;
   gap: 7px;
   padding: 12px;
-  background: var(--scufris-color-surface);
-  color: var(--scufris-color-text);
+  background: var(--dashboardd-color-surface);
+  color: var(--dashboardd-color-text);
 }
 
 h2 {
   margin: 0;
-  color: var(--scufris-color-text-bright);
+  color: var(--dashboardd-color-text-bright);
   font-size: 12px;
 }
 
 .usage {
-  color: var(--scufris-color-accent);
-  font-family: var(--scufris-font-mono);
+  color: var(--dashboardd-color-accent);
+  font-family: var(--dashboardd-font-mono);
   font-size: clamp(23px, 3vw, 31px);
   line-height: 0.9;
 }
@@ -32,7 +32,7 @@ h2 {
   border-radius: 2px;
   background: color-mix(
     in srgb,
-    var(--scufris-color-text-dim) 35%,
+    var(--dashboardd-color-text-dim) 35%,
     transparent
   );
 }
@@ -40,21 +40,21 @@ h2 {
 .fill {
   width: var(--usage, 0%);
   height: 100%;
-  background: var(--scufris-color-success);
+  background: var(--dashboardd-color-success);
 }
 
 .fill.warm {
-  background: var(--scufris-color-accent);
+  background: var(--dashboardd-color-accent);
 }
 
 .fill.hot {
-  background: var(--scufris-color-danger);
+  background: var(--dashboardd-color-danger);
 }
 
 .amount {
   overflow: hidden;
-  color: var(--scufris-color-text-muted);
-  font-family: var(--scufris-font-mono);
+  color: var(--dashboardd-color-text-muted);
+  font-family: var(--dashboardd-font-mono);
   font-size: 8px;
   text-overflow: ellipsis;
   white-space: nowrap;

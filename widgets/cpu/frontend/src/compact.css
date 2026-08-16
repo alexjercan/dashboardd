@@ -9,20 +9,20 @@ article {
   height: 100%;
   padding: 12px;
   overflow: hidden;
-  background: var(--scufris-color-surface);
+  background: var(--dashboardd-color-surface);
 }
 
 h2 {
   margin: 0;
-  color: var(--scufris-color-text-bright);
+  color: var(--dashboardd-color-text-bright);
   font-size: 13px;
   text-transform: uppercase;
 }
 
 .usage {
   margin: auto 0;
-  color: var(--scufris-color-accent);
-  font-family: var(--scufris-font-mono);
+  color: var(--dashboardd-color-accent);
+  font-family: var(--dashboardd-font-mono);
   font-size: clamp(24px, 3vw, 34px);
   line-height: 1;
 }
@@ -31,13 +31,13 @@ h2 {
   display: flex;
   justify-content: space-between;
   gap: 6px;
-  color: var(--scufris-color-text-muted);
-  font-family: var(--scufris-font-mono);
+  color: var(--dashboardd-color-text-muted);
+  font-family: var(--dashboardd-font-mono);
   font-size: 10px;
   white-space: nowrap;
 }
 
 b {
-  color: var(--scufris-color-text);
+  color: var(--dashboardd-color-text);
   font-weight: 500;
 }

@@ -1,4 +1,4 @@
-# Scufris
+# dashboardd
 
 Local-first dashboard for monitoring and controlling a computer.
 
@@ -39,13 +39,13 @@ widget data and must not contain credentials or filesystem paths.
 Useful commands:
 
 ```bash
-npm run build -w @scufris/cpu-widget
-npm run watch -w @scufris/cpu-widget
-npm run watch -w @scufris/memory-widget
-npm run watch -w @scufris/disk-widget
-npm run watch -w @scufris/network-widget
+npm run build -w @dashboardd/cpu-widget
+npm run watch -w @dashboardd/cpu-widget
+npm run watch -w @dashboardd/memory-widget
+npm run watch -w @dashboardd/disk-widget
+npm run watch -w @dashboardd/network-widget
 DASHBOARDD_WIDGETS_DIR=.build/widgets cargo run -p dashboardd
-DASHBOARDD_STATE_FILE=/tmp/scufris-dashboard.json cargo run -p dashboardd
+DASHBOARDD_STATE_FILE=/tmp/dashboardd-dashboard.json cargo run -p dashboardd
 RUST_LOG=dashboardd=debug,tower_http=debug cargo run -p dashboardd
 npm test
 ```
@@ -117,8 +117,8 @@ symlinks, active HTML, embedded local assets, and unsupported binaries remain
 unavailable. Its Focus presentation provides a larger document and image
 surface while retaining the selected artifact.
 
-Dashboard compositions persist in `$XDG_STATE_HOME/scufris/dashboard.json`, or
-`$HOME/.local/state/scufris/dashboard.json` when `XDG_STATE_HOME` is unset.
+Dashboard compositions persist in `$XDG_STATE_HOME/dashboardd/dashboard.json`, or
+`$HOME/.local/state/dashboardd/dashboard.json` when `XDG_STATE_HOME` is unset.
 `DASHBOARDD_STATE_FILE` overrides both paths. Each dashboard owns independent
 instances, placement, options, links, and a canonical 3 to 24 column canvas.
 Desktop dashboards fill the viewport and derive rows from their aspect ratio and
@@ -131,7 +131,7 @@ stops startup.
 ## User configuration
 
 Dashboardd reads configuration from `DASHBOARDD_CONFIG_FILE`, then
-`$XDG_CONFIG_HOME/scufris/config.toml`, then `$HOME/.config/scufris/config.toml`.
+`$XDG_CONFIG_HOME/dashboardd/config.toml`, then `$HOME/.config/dashboardd/config.toml`.
 The file is optional and dashboardd never writes it.
 
 Theme values are optional six-digit hexadecimal colors. Valid changes apply to

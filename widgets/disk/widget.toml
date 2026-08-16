@@ -7,7 +7,7 @@ description = "Root filesystem capacity and I/O"
 package = "disk"
 
 [frontend]
-workspace = "@scufris/disk-widget"
+workspace = "@dashboardd/disk-widget"
 
 [[frontend.variants]]
 id = "full"

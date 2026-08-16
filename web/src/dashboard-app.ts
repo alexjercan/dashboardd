@@ -1,4 +1,4 @@
-import { isWidgetModule, type WidgetFrontend } from "@scufris/widget-sdk";
+import { isWidgetModule, type WidgetFrontend } from "@dashboardd/widget-sdk";
 import { CommandPalette } from "./command-palette";
 import {
   connectDashboard,
@@ -30,7 +30,7 @@ const apiDashboardPath = `/api/v1/dashboards/${encodeURIComponent(dashboardId)}`
 app.innerHTML = `
   <section class="dashboard-shell">
     <div class="dashboard-content">
-      <h1 id="zen-heading" class="sr-only">Scufris Dashboard</h1>
+      <h1 id="zen-heading" class="sr-only">dashboardd Dashboard</h1>
       <header id="editor-header" class="dashboard-header" hidden>
         <h1 id="editor-heading" tabindex="-1">Edit dashboard</h1>
         <div class="canvas-columns" aria-label="Dashboard columns">
@@ -916,16 +916,16 @@ function applyTheme(theme: Theme): void {
   for (const [name, value] of Object.entries(theme)) {
     if (name === "fonts") continue;
     document.documentElement.style.setProperty(
-      `--scufris-color-${name.replaceAll("_", "-")}`,
+      `--dashboardd-color-${name.replaceAll("_", "-")}`,
       value as string,
     );
   }
   document.documentElement.style.setProperty(
-    "--scufris-font-sans",
+    "--dashboardd-font-sans",
     `"${theme.fonts.sans}", ui-sans-serif, system-ui, sans-serif`,
   );
   document.documentElement.style.setProperty(
-    "--scufris-font-mono",
+    "--dashboardd-font-mono",
     `"${theme.fonts.mono}", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace`,
   );
   if (errorElement.dataset.source === "configuration") clearError();
@@ -1097,7 +1097,7 @@ function openFocus(instanceId: string): void {
   selectedInstanceId = instanceId;
   keyboardMode = "widget";
   window.history.pushState(
-    { scufrisFocus: true },
+    { dashboarddFocus: true },
     "",
     `${dashboardPath}/focus/${encodeURIComponent(instanceId)}`,
   );
@@ -1117,7 +1117,7 @@ function isFocusHistoryEntry(): boolean {
   return (
     typeof window.history.state === "object" &&
     window.history.state !== null &&
-    window.history.state.scufrisFocus === true
+    window.history.state.dashboarddFocus === true
   );
 }
 
@@ -1155,10 +1155,10 @@ function syncRoute(focus: boolean): void {
   } else if (editing) keyboardMode = "dashboard";
   else if (previousFocusedInstanceId) keyboardMode = "dashboard";
   document.title = focusedInstanceId
-    ? "Widget Focus - Scufris"
+    ? "Widget Focus - dashboardd"
     : editing
-      ? "Edit dashboard - Scufris"
-      : "Scufris Dashboard";
+      ? "Edit dashboard - dashboardd"
+      : "dashboardd Dashboard";
   renderCanvas();
   if (!focus) return;
   if (focusedInstanceId) closeFocusButton.focus();
@@ -2318,10 +2318,10 @@ async function loadDashboardSwitcher(): Promise<void> {
     );
     if (current) {
       document.title = editing
-        ? `Edit ${current.name} - Scufris`
+        ? `Edit ${current.name} - dashboardd`
         : focusedInstanceId
-          ? `${current.name} Focus - Scufris`
-          : `${current.name} - Scufris`;
+          ? `${current.name} Focus - dashboardd`
+          : `${current.name} - dashboardd`;
     }
   } catch (error) {
     showError(`Could not load dashboards: ${errorMessage(error)}`);

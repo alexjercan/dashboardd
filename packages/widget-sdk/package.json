@@ -1,5 +1,5 @@
 {
-  "name": "@scufris/widget-sdk",
+  "name": "@dashboardd/widget-sdk",
   "version": "0.1.0",
   "private": true,
   "type": "module",

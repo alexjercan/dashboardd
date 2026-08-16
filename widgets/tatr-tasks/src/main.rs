@@ -1199,7 +1199,7 @@ mod tests {
     fn parses_strict_task_metadata_without_the_body() {
         let selection = ProjectSelection {
             project_id: "project-test".into(),
-            project: "scufris".into(),
+            project: "sample".into(),
             worktree_id: "worktree-test".into(),
             worktree: "Primary".into(),
         };
@@ -1226,15 +1226,15 @@ mod tests {
 
     #[test]
     fn lists_and_loads_private_task_artifacts_with_format_and_path_guards() {
-        let root = env::temp_dir().join(format!("scufris-tatr-details-{}", std::process::id()));
+        let root = env::temp_dir().join(format!("dashboardd-tatr-details-{}", std::process::id()));
         write_task(
-            &root.join("scufris"),
+            &root.join("sample"),
             "20260814-150000",
             "Linked details",
             "OPEN",
             100,
         );
-        let task = root.join("scufris/tasks/20260814-150000");
+        let task = root.join("sample/tasks/20260814-150000");
         fs::create_dir_all(task.join("research")).unwrap();
         fs::write(
             task.join("research/notes.md"),
@@ -1257,7 +1257,7 @@ mod tests {
             .unwrap();
         #[cfg(unix)]
         std::os::unix::fs::symlink("/etc/passwd", task.join("linked.txt")).unwrap();
-        let identity = project_selection("scufris", &root.join("scufris"));
+        let identity = project_selection("sample", &root.join("sample"));
         let selection = TaskSelection {
             project_id: identity.project_id,
             project: identity.project,
@@ -1265,7 +1265,7 @@ mod tests {
             worktree: identity.worktree,
             task_id: "20260814-150000".into(),
         };
-        let project = root.join("scufris");
+        let project = root.join("sample");
 
         let details = load_details(&project, &selection, "TASK.md").unwrap();
         assert_eq!(details.artifact, "TASK.md");
@@ -1307,7 +1307,7 @@ mod tests {
 
     #[tokio::test]
     async fn resolves_linked_worktree_tasks_by_opaque_identity() {
-        let root = env::temp_dir().join(format!("scufris-tatr-worktree-{}", std::process::id()));
+        let root = env::temp_dir().join(format!("dashboardd-tatr-worktree-{}", std::process::id()));
         let project = root.join("sample");
         write_task(&project, "20260814-170000", "Primary task", "OPEN", 1);
         let run = |directory: &Path, arguments: &[&str]| {
@@ -1381,7 +1381,7 @@ mod tests {
 
     #[test]
     fn limits_artifact_lists_and_validates_artifact_commands() {
-        let root = env::temp_dir().join(format!("scufris-tatr-limit-{}", std::process::id()));
+        let root = env::temp_dir().join(format!("dashboardd-tatr-limit-{}", std::process::id()));
         write_task(&root, "20260814-160000", "Many artifacts", "OPEN", 1);
         let task = root.join("tasks/20260814-160000");
         for index in 0..MAX_ARTIFACTS + 10 {
@@ -1398,7 +1398,7 @@ mod tests {
 
     #[test]
     fn recursively_loads_filters_and_sorts_projects_without_exposing_root() {
-        let root = env::temp_dir().join(format!("scufris-tatr-{}", std::process::id()));
+        let root = env::temp_dir().join(format!("dashboardd-tatr-{}", std::process::id()));
         write_task(&root.join("one"), "20260814-120000", "First", "OPEN", 20);
         write_task(
             &root.join("nested/two"),

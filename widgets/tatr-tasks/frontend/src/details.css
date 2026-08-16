@@ -9,7 +9,7 @@
   flex-direction: column;
   padding: 13px 14px;
   overflow: hidden;
-  background: var(--scufris-color-surface);
+  background: var(--dashboardd-color-surface);
 }
 
 .artifact-header {
@@ -17,12 +17,12 @@
   z-index: 2;
   flex: none;
   padding-bottom: 9px;
-  border-bottom: 1px solid var(--scufris-color-selection);
+  border-bottom: 1px solid var(--dashboardd-color-selection);
 }
 
 .artifact-header h2 {
   margin: 0;
-  color: var(--scufris-color-text-bright);
+  color: var(--dashboardd-color-text-bright);
   font-size: 15px;
 }
 
@@ -33,9 +33,9 @@
 
 .identity {
   overflow: hidden;
-  color: var(--scufris-color-text-muted);
+  color: var(--dashboardd-color-text-muted);
   cursor: pointer;
-  font-family: var(--scufris-font-mono);
+  font-family: var(--dashboardd-font-mono);
   font-size: 9px;
   line-height: 1.35;
   list-style: none;
@@ -48,7 +48,7 @@
 
 .identity::after {
   margin-left: 6px;
-  color: var(--scufris-color-accent);
+  color: var(--dashboardd-color-accent);
   content: "+";
 }
 
@@ -57,7 +57,7 @@
 }
 
 .identity:focus-visible {
-  color: var(--scufris-color-accent);
+  color: var(--dashboardd-color-accent);
   outline: none;
 }
 
@@ -70,11 +70,11 @@
   max-height: 190px;
   padding: 5px;
   overflow-y: auto;
-  border: 1px solid var(--scufris-color-border);
+  border: 1px solid var(--dashboardd-color-border);
   border-radius: 4px;
-  background: var(--scufris-color-canvas);
+  background: var(--dashboardd-color-canvas);
   box-shadow: 0 12px 28px rgb(0 0 0 / 45%);
-  scrollbar-color: var(--scufris-color-selection) transparent;
+  scrollbar-color: var(--dashboardd-color-selection) transparent;
   scrollbar-width: thin;
 }
 
@@ -85,9 +85,9 @@
   border: 0;
   border-radius: 2px;
   background: transparent;
-  color: var(--scufris-color-text-muted);
+  color: var(--dashboardd-color-text-muted);
   cursor: pointer;
-  font-family: var(--scufris-font-mono);
+  font-family: var(--dashboardd-font-mono);
   font-size: 9px;
   text-align: left;
   text-overflow: ellipsis;
@@ -97,14 +97,14 @@
 .artifact-menu button:hover,
 .artifact-menu button:focus-visible,
 .artifact-menu button.selected {
-  background: var(--scufris-color-selection);
-  color: var(--scufris-color-text-bright);
+  background: var(--dashboardd-color-selection);
+  color: var(--dashboardd-color-text-bright);
   outline: none;
 }
 
 .artifact-menu button.selected::before {
   margin-right: 6px;
-  color: var(--scufris-color-accent);
+  color: var(--dashboardd-color-accent);
   content: "*";
 }
 
@@ -116,7 +116,7 @@
 .state {
   display: grid;
   place-items: center;
-  color: var(--scufris-color-text-muted);
+  color: var(--dashboardd-color-text-muted);
   font-size: 10px;
 }
 
@@ -125,18 +125,18 @@
 .image-artifact {
   padding: 10px 3px 4px 0;
   overflow: auto;
-  color: var(--scufris-color-text);
+  color: var(--dashboardd-color-text);
   font-size: 11px;
   line-height: 1.55;
-  scrollbar-color: var(--scufris-color-selection) transparent;
+  scrollbar-color: var(--dashboardd-color-selection) transparent;
   scrollbar-width: thin;
 }
 
 .text-artifact pre {
   min-width: max-content;
   margin: 0;
-  color: var(--scufris-color-text);
-  font-family: var(--scufris-font-mono);
+  color: var(--dashboardd-color-text);
+  font-family: var(--dashboardd-font-mono);
   font-size: 9px;
   line-height: 1.55;
   white-space: pre-wrap;
@@ -167,7 +167,7 @@
 .document-artifact h3,
 .document-artifact h4 {
   margin: 15px 0 6px;
-  color: var(--scufris-color-text-bright);
+  color: var(--dashboardd-color-text-bright);
   line-height: 1.25;
 }
 
@@ -200,18 +200,18 @@
 .document-artifact code {
   padding: 1px 3px;
   border-radius: 2px;
-  background: var(--scufris-color-canvas);
-  color: var(--scufris-color-secondary);
-  font-family: var(--scufris-font-mono);
+  background: var(--dashboardd-color-canvas);
+  color: var(--dashboardd-color-secondary);
+  font-family: var(--dashboardd-font-mono);
   font-size: 9px;
 }
 
 .document-artifact pre {
   padding: 8px;
   overflow-x: auto;
-  border: 1px solid var(--scufris-color-selection);
+  border: 1px solid var(--dashboardd-color-selection);
   border-radius: 3px;
-  background: var(--scufris-color-canvas);
+  background: var(--dashboardd-color-canvas);
 }
 
 .document-artifact pre code {
@@ -221,17 +221,17 @@
 
 .document-artifact blockquote {
   padding-left: 9px;
-  border-left: 2px solid var(--scufris-color-border);
-  color: var(--scufris-color-text-muted);
+  border-left: 2px solid var(--dashboardd-color-border);
+  color: var(--dashboardd-color-text-muted);
 }
 
 .document-artifact a {
-  color: var(--scufris-color-accent);
+  color: var(--dashboardd-color-accent);
 }
 
 .document-artifact hr {
   border: 0;
-  border-top: 1px solid var(--scufris-color-selection);
+  border-top: 1px solid var(--dashboardd-color-selection);
 }
 
 .document-artifact table {
@@ -242,7 +242,7 @@
 .document-artifact th,
 .document-artifact td {
   padding: 4px 5px;
-  border: 1px solid var(--scufris-color-selection);
+  border: 1px solid var(--dashboardd-color-selection);
   text-align: left;
 }
 

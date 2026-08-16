@@ -9,7 +9,7 @@ article {
   flex-direction: column;
   padding: 13px 14px;
   overflow: hidden;
-  background: var(--scufris-color-surface);
+  background: var(--dashboardd-color-surface);
 }
 
 header {
@@ -23,12 +23,12 @@ header {
 
 h2 {
   margin: 0;
-  color: var(--scufris-color-text-bright);
+  color: var(--dashboardd-color-text-bright);
   font-size: 15px;
 }
 
 .summary {
-  color: var(--scufris-color-text-muted);
+  color: var(--dashboardd-color-text-muted);
   font-size: 9px;
 }
 
@@ -38,18 +38,18 @@ h2 {
   flex: none;
   gap: 5px;
   padding-bottom: 7px;
-  border-bottom: 1px solid var(--scufris-color-selection);
+  border-bottom: 1px solid var(--dashboardd-color-selection);
 }
 
 .search,
 .sort,
 .filters summary,
 .filter-menu {
-  border: 1px solid var(--scufris-color-border);
+  border: 1px solid var(--dashboardd-color-border);
   border-radius: 3px;
-  background: var(--scufris-color-surface);
-  color: var(--scufris-color-text);
-  font-family: var(--scufris-font-mono);
+  background: var(--dashboardd-color-surface);
+  color: var(--dashboardd-color-text);
+  font-family: var(--dashboardd-font-mono);
   font-size: 8px;
 }
 
@@ -61,7 +61,7 @@ h2 {
 }
 
 .search::placeholder {
-  color: var(--scufris-color-text-muted);
+  color: var(--dashboardd-color-text-muted);
 }
 
 .sort {
@@ -80,7 +80,7 @@ h2 {
   min-width: 48px;
   padding: 0 5px;
   place-items: center;
-  color: var(--scufris-color-text-muted);
+  color: var(--dashboardd-color-text-muted);
   cursor: pointer;
   list-style: none;
 }
@@ -94,7 +94,7 @@ h2 {
 .filters summary:focus-visible,
 .search:focus,
 .sort:focus-visible {
-  border-color: var(--scufris-color-accent);
+  border-color: var(--dashboardd-color-accent);
   outline: none;
 }
 
@@ -115,12 +115,12 @@ h2 {
   display: flex;
   align-items: center;
   gap: 6px;
-  color: var(--scufris-color-text-muted);
+  color: var(--dashboardd-color-text-muted);
   cursor: pointer;
 }
 
 .filter-menu input {
-  accent-color: var(--scufris-color-accent);
+  accent-color: var(--dashboardd-color-accent);
 }
 
 .hidden-selection {
@@ -131,10 +131,14 @@ h2 {
   gap: 8px;
   min-height: 25px;
   padding: 4px 6px;
-  border-bottom: 1px solid var(--scufris-color-selection);
-  background: color-mix(in srgb, var(--scufris-color-accent) 8%, transparent);
-  color: var(--scufris-color-secondary);
-  font-family: var(--scufris-font-mono);
+  border-bottom: 1px solid var(--dashboardd-color-selection);
+  background: color-mix(
+    in srgb,
+    var(--dashboardd-color-accent) 8%,
+    transparent
+  );
+  color: var(--dashboardd-color-secondary);
+  font-family: var(--dashboardd-font-mono);
   font-size: 8px;
 }
 
@@ -153,13 +157,13 @@ h2 {
   padding: 0;
   border: 0;
   background: transparent;
-  color: var(--scufris-color-accent);
+  color: var(--dashboardd-color-accent);
   cursor: pointer;
   font: inherit;
 }
 
 .hidden-selection button:focus-visible {
-  outline: 1px solid var(--scufris-color-accent);
+  outline: 1px solid var(--dashboardd-color-accent);
   outline-offset: 2px;
 }
 
@@ -167,7 +171,7 @@ h2 {
   min-height: 0;
   flex: 1;
   overflow-y: auto;
-  scrollbar-color: var(--scufris-color-selection) transparent;
+  scrollbar-color: var(--dashboardd-color-selection) transparent;
   scrollbar-width: thin;
 }
 
@@ -175,12 +179,12 @@ h2 {
   position: relative;
   display: flex;
   align-items: center;
-  border-bottom: 1px solid var(--scufris-color-selection);
+  border-bottom: 1px solid var(--dashboardd-color-selection);
 }
 
 .project-row.selected {
-  background: var(--scufris-color-selection);
-  box-shadow: inset 2px 0 var(--scufris-color-accent);
+  background: var(--dashboardd-color-selection);
+  box-shadow: inset 2px 0 var(--dashboardd-color-accent);
 }
 
 .project-choice {
@@ -192,21 +196,21 @@ h2 {
   padding: 8px 6px;
   border: 0;
   background: transparent;
-  color: var(--scufris-color-text);
+  color: var(--dashboardd-color-text);
   cursor: pointer;
-  font-family: var(--scufris-font-mono);
+  font-family: var(--dashboardd-font-mono);
   text-align: left;
 }
 
 .project-choice:hover,
 .project-choice:focus-visible {
-  background: var(--scufris-color-selection);
+  background: var(--dashboardd-color-selection);
   outline: none;
 }
 
 .project-row strong {
   overflow: hidden;
-  color: var(--scufris-color-text-bright);
+  color: var(--dashboardd-color-text-bright);
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -214,7 +218,7 @@ h2 {
 
 .branch {
   overflow: hidden;
-  color: var(--scufris-color-text-muted);
+  color: var(--dashboardd-color-text-muted);
   font-size: 9px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -224,16 +228,16 @@ h2 {
   grid-column: 2;
   grid-row: 1 / span 2;
   align-self: center;
-  color: var(--scufris-color-text-muted);
+  color: var(--dashboardd-color-text-muted);
   font-size: 9px;
 }
 
 .git-state[data-state="clean"] {
-  color: var(--scufris-color-success);
+  color: var(--dashboardd-color-success);
 }
 
 .git-state[data-state="dirty"] {
-  color: var(--scufris-color-accent);
+  color: var(--dashboardd-color-accent);
 }
 
 .pin-button {
@@ -244,7 +248,7 @@ h2 {
   padding: 4px;
   border: 0;
   background: transparent;
-  color: var(--scufris-color-text-dim);
+  color: var(--dashboardd-color-text-dim);
   cursor: pointer;
   place-items: center;
 }
@@ -258,7 +262,7 @@ h2 {
 }
 
 .pin-button.pinned {
-  color: var(--scufris-color-accent);
+  color: var(--dashboardd-color-accent);
 }
 
 .pin-button.pinned svg {
@@ -267,7 +271,7 @@ h2 {
 
 .pin-button:hover:not(:disabled),
 .pin-button:focus-visible {
-  color: var(--scufris-color-accent);
+  color: var(--dashboardd-color-accent);
   outline: none;
 }
 
@@ -282,17 +286,17 @@ h2 {
   margin-right: 5px;
   padding: 2px 3px;
   overflow: hidden;
-  border: 1px solid var(--scufris-color-border);
+  border: 1px solid var(--dashboardd-color-border);
   border-radius: 3px;
-  background: var(--scufris-color-surface);
-  color: var(--scufris-color-secondary);
-  font-family: var(--scufris-font-mono);
+  background: var(--dashboardd-color-surface);
+  color: var(--dashboardd-color-secondary);
+  font-family: var(--dashboardd-font-mono);
   font-size: 8px;
   text-overflow: ellipsis;
 }
 
 .worktree:focus-visible {
-  border-color: var(--scufris-color-accent);
+  border-color: var(--dashboardd-color-accent);
   outline: none;
 }
 
@@ -300,6 +304,6 @@ h2 {
   display: grid;
   height: 100%;
   place-items: center;
-  color: var(--scufris-color-text-muted);
+  color: var(--dashboardd-color-text-muted);
   font-size: 10px;
 }

@@ -7,7 +7,7 @@ description = "Weekly Claude subscription limits"
 package = "claude-usage"
 
 [frontend]
-workspace = "@scufris/claude-usage-widget"
+workspace = "@dashboardd/claude-usage-widget"
 
 [[frontend.variants]]
 id = "full"

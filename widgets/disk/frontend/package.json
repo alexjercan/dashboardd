@@ -1,5 +1,5 @@
 {
-  "name": "@scufris/disk-widget",
+  "name": "@dashboardd/disk-widget",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -7,7 +7,7 @@
     "watch": "webpack --mode development --watch"
   },
   "dependencies": {
-    "@scufris/widget-sdk": "0.1.0"
+    "@dashboardd/widget-sdk": "0.1.0"
   },
   "devDependencies": {
     "ts-loader": "^9.5.2",

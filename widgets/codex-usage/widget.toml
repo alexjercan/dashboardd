@@ -7,7 +7,7 @@ description = "Weekly Codex subscription limit"
 package = "codex-usage"
 
 [frontend]
-workspace = "@scufris/codex-usage-widget"
+workspace = "@dashboardd/codex-usage-widget"
 
 [[frontend.variants]]
 id = "compact"

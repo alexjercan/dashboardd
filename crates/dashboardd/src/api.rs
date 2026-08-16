@@ -1005,7 +1005,7 @@ mod tests {
 
     fn test_app_with_projects() -> (Router, std::path::PathBuf) {
         let root = std::env::temp_dir().join(format!(
-            "scufris-api-widget-state-{}-{}",
+            "dashboardd-api-widget-state-{}-{}",
             std::process::id(),
             std::thread::current().name().unwrap_or("test")
         ));

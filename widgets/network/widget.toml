@@ -7,7 +7,7 @@ description = "Aggregate network throughput"
 package = "network"
 
 [frontend]
-workspace = "@scufris/network-widget"
+workspace = "@dashboardd/network-widget"
 
 [[frontend.variants]]
 id = "full"

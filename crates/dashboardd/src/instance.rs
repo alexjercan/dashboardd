@@ -2071,7 +2071,7 @@ mod tests {
     #[tokio::test]
     async fn persists_shared_widget_state_before_publishing_it() {
         let root = std::env::temp_dir().join(format!(
-            "scufris-widget-state-{}-{}",
+            "dashboardd-widget-state-{}-{}",
             std::process::id(),
             std::thread::current().name().unwrap_or("test")
         ));
@@ -2167,7 +2167,7 @@ mod tests {
     #[test]
     fn initial_widgets_are_normalized_and_collisions_are_rejected() {
         let root = std::env::temp_dir().join(format!(
-            "scufris-initial-widgets-{}-{}",
+            "dashboardd-initial-widgets-{}-{}",
             std::process::id(),
             std::thread::current().name().unwrap_or("test")
         ));
@@ -2212,7 +2212,7 @@ mod tests {
     #[tokio::test]
     async fn restores_valid_links_and_rejects_invalid_ports() {
         let root = std::env::temp_dir().join(format!(
-            "scufris-linked-state-{}-{}",
+            "dashboardd-linked-state-{}-{}",
             std::process::id(),
             std::thread::current().name().unwrap_or("test")
         ));

@@ -29,7 +29,7 @@ const stateFile = path.join(artifacts, `dashboard-${process.pid}.json`);
 const configFile = path.join(artifacts, `config-${process.pid}.toml`);
 const tatrRoot = path.join(artifacts, `tatr-${process.pid}`);
 writeTatrTask(
-  "scufris",
+  "sample",
   "20260814-120000",
   "Add Tatr widget",
   "IN_PROGRESS",
@@ -42,7 +42,7 @@ writeTatrTask("tatr", "20260814-110000", "Document filters", "OPEN", 40, [
 writeTatrTask("tatr", "20260814-100000", "Old task", "CLOSED", 200, [
   "archive",
 ]);
-writeTatrArtifacts("scufris", "20260814-120000");
+writeTatrArtifacts("sample", "20260814-120000");
 writeProjectRepositories();
 writeConfiguration("#123456");
 const dashboardUrl = `http://127.0.0.1:${dashboardPort}`;
@@ -151,7 +151,7 @@ try {
   assert.equal(
     await page.evaluate(() =>
       getComputedStyle(document.documentElement).getPropertyValue(
-        "--scufris-color-accent",
+        "--dashboardd-color-accent",
       ),
     ),
     "#123456",
@@ -159,7 +159,7 @@ try {
   assert.match(
     await page.evaluate(() =>
       getComputedStyle(document.documentElement).getPropertyValue(
-        "--scufris-font-mono",
+        "--dashboardd-font-mono",
       ),
     ),
     /^"Iosevka"/,
@@ -168,7 +168,7 @@ try {
   await page.waitForFunction(
     () =>
       getComputedStyle(document.documentElement).getPropertyValue(
-        "--scufris-color-accent",
+        "--dashboardd-color-accent",
       ) === "#abcdef",
   );
   writeConfiguration("yellow");
@@ -180,7 +180,7 @@ try {
   assert.equal(
     await page.evaluate(() =>
       getComputedStyle(document.documentElement).getPropertyValue(
-        "--scufris-color-accent",
+        "--dashboardd-color-accent",
       ),
     ),
     "#abcdef",
@@ -190,14 +190,14 @@ try {
   await page.waitForFunction(
     () =>
       getComputedStyle(document.documentElement).getPropertyValue(
-        "--scufris-color-accent",
+        "--dashboardd-color-accent",
       ) === "#fedcba",
   );
   assert.equal(await page.locator("#dashboard-error").isHidden(), true);
   writeConfiguration("#fedcba", "", "DejaVu Sans Mono");
   await page.waitForFunction(() =>
     getComputedStyle(document.documentElement)
-      .getPropertyValue("--scufris-font-mono")
+      .getPropertyValue("--dashboardd-font-mono")
       .startsWith('"DejaVu Sans Mono"'),
   );
   writeConfiguration("#fedcba", "", "Iosevka; monospace");
@@ -209,7 +209,7 @@ try {
   assert.match(
     await page.evaluate(() =>
       getComputedStyle(document.documentElement).getPropertyValue(
-        "--scufris-font-mono",
+        "--dashboardd-font-mono",
       ),
     ),
     /^"DejaVu Sans Mono"/,
@@ -217,7 +217,7 @@ try {
   writeConfiguration("#fedcba");
   await page.waitForFunction(() =>
     getComputedStyle(document.documentElement)
-      .getPropertyValue("--scufris-font-mono")
+      .getPropertyValue("--dashboardd-font-mono")
       .startsWith('"Iosevka"'),
   );
   assert.equal(await page.locator("#dashboard-error").isHidden(), true);
@@ -225,14 +225,14 @@ try {
   await page.waitForFunction(
     () =>
       getComputedStyle(document.documentElement).getPropertyValue(
-        "--scufris-color-accent",
+        "--dashboardd-color-accent",
       ) === "#ffdd33",
   );
   writeConfiguration("#fedcba");
   await page.waitForFunction(
     () =>
       getComputedStyle(document.documentElement).getPropertyValue(
-        "--scufris-color-accent",
+        "--dashboardd-color-accent",
       ) === "#fedcba",
   );
 
@@ -267,7 +267,13 @@ try {
     catalog
       .find((widget) => widget.id === "projects")
       .outputs.map((port) => [port.id, port.type, port.variants]),
-    [["selected_project", "scufris.project-selection/v1", ["list", "pinned"]]],
+    [
+      [
+        "selected_project",
+        "dashboardd.project-selection/v1",
+        ["list", "pinned"],
+      ],
+    ],
   );
   assert.deepEqual(
     catalog
@@ -289,7 +295,7 @@ try {
       .find((widget) => widget.id === "tatr-tasks")
       .inputs.map((port) => [port.id, port.type, port.variants, port.required]),
     [
-      ["project", "scufris.project-selection/v1", ["full"], false],
+      ["project", "dashboardd.project-selection/v1", ["full"], false],
       ["task", "tatr.task-selection/v1", ["details"], true],
     ],
   );
@@ -1046,7 +1052,7 @@ try {
   assert.deepEqual(await projectRows.locator("strong").allTextContents(), [
     "idle",
     "other",
-    "scufris",
+    "sample",
     "tatr",
   ]);
   await projectSearch.click();
@@ -1057,24 +1063,24 @@ try {
   await projectSearch.fill("");
   await projectSort.selectOption("recent");
   assert.deepEqual(await projectRows.locator("strong").allTextContents(), [
-    "scufris",
+    "sample",
     "tatr",
     "idle",
     "other",
   ]);
   await projectSort.selectOption("name");
-  await projectSearch.fill("SCF RS");
+  await projectSearch.fill("SMP LE");
   assert.deepEqual(await projectRows.locator("strong").allTextContents(), [
-    "scufris",
+    "sample",
   ]);
   assert.equal(
     await projectsListFrame.locator(".summary").textContent(),
     "1 of 4 projects",
   );
-  await projectSearch.fill("i");
+  await projectSearch.fill("l");
   assert.deepEqual(await projectRows.locator("strong").allTextContents(), [
     "idle",
-    "scufris",
+    "sample",
   ]);
   await projectSearch.fill("[");
   await projectsListFrame
@@ -1091,33 +1097,33 @@ try {
   );
   await dirtyFilter.check();
   assert.deepEqual(await projectRows.locator("strong").allTextContents(), [
-    "scufris",
+    "sample",
   ]);
   await activeTasksFilter.check();
   assert.deepEqual(await projectRows.locator("strong").allTextContents(), [
-    "scufris",
+    "sample",
   ]);
   await dirtyFilter.uncheck();
   assert.deepEqual(await projectRows.locator("strong").allTextContents(), [
-    "scufris",
+    "sample",
     "tatr",
   ]);
   await activeTasksFilter.uncheck();
   await projectsListFrame.locator(".filters summary").click();
 
   await projectsListFrame
-    .locator(".project-row", { hasText: "scufris" })
+    .locator(".project-row", { hasText: "sample" })
     .locator(".project-choice")
     .click();
-  await projectFrame.locator('.identity:text-is("scufris")').waitFor();
+  await projectFrame.locator('.identity:text-is("sample")').waitFor();
   await projectSearch.fill("tatr");
   const hiddenProjectSelection = projectsListFrame.locator(".hidden-selection");
   await hiddenProjectSelection
-    .locator("span", { hasText: "Selected: scufris" })
+    .locator("span", { hasText: "Selected: sample" })
     .waitFor();
   assert.equal(
     await projectFrame.locator(".identity").textContent(),
-    "scufris",
+    "sample",
     "search does not clear hidden selection",
   );
   await page.screenshot({
@@ -1145,7 +1151,7 @@ try {
   await secondProjectsListFrame.locator(".project-row").nth(3).waitFor();
   await Promise.all([
     projectsListFrame
-      .locator(".project-row", { hasText: "scufris" })
+      .locator(".project-row", { hasText: "sample" })
       .locator(".pin-button")
       .click(),
     secondProjectsListFrame
@@ -1153,7 +1159,7 @@ try {
       .locator(".pin-button")
       .click(),
   ]);
-  await pinnedFrame.locator(".project-card", { hasText: "scufris" }).waitFor();
+  await pinnedFrame.locator(".project-card", { hasText: "sample" }).waitFor();
   await pinnedFrame.locator(".project-card", { hasText: "tatr" }).waitFor();
   await projectsListFrame
     .locator(".project-row", { hasText: "idle" })
@@ -1250,13 +1256,13 @@ try {
   assert.equal(await tatrFrame.locator(".task-row").count(), 1);
   await tatrFrame.locator(".clear").click();
   await projectsListFrame
-    .locator(".project-row", { hasText: "scufris" })
+    .locator(".project-row", { hasText: "sample" })
     .click();
   await tatrFrame
-    .locator(".project-filter", { hasText: "Project: scufris" })
+    .locator(".project-filter", { hasText: "Project: sample" })
     .waitFor();
   assert.equal(await tatrFrame.locator(".task-row").count(), 1);
-  await projectFrame.locator(".identity", { hasText: "scufris" }).waitFor();
+  await projectFrame.locator(".identity", { hasText: "sample" }).waitFor();
   await projectFrame
     .locator(".recent-changes code", { hasText: "README.md" })
     .waitFor();
@@ -1266,7 +1272,7 @@ try {
     })
     .waitFor();
   await projectsListFrame
-    .locator(".project-row", { hasText: "scufris" })
+    .locator(".project-row", { hasText: "sample" })
     .click();
   await tatrFrame.locator(".task-row").nth(1).waitFor();
   assert.equal(await tatrFrame.locator(".task-row").count(), 2);
@@ -1275,10 +1281,10 @@ try {
     "Select a project",
   );
   await projectsListFrame
-    .locator(".project-row", { hasText: "scufris" })
+    .locator(".project-row", { hasText: "sample" })
     .click();
   await tatrFrame
-    .locator(".project-filter", { hasText: "Project: scufris" })
+    .locator(".project-filter", { hasText: "Project: sample" })
     .waitFor();
   await tatrFrame.locator(".title", { hasText: "Add Tatr widget" }).click();
   await detailsFrame
@@ -1291,7 +1297,7 @@ try {
     .waitFor();
   assert.equal(
     await detailsFrame.locator(".identity").textContent(),
-    "scufris // 20260814-120000/TASK.md",
+    "sample // 20260814-120000/TASK.md",
   );
   assert.equal(await detailsFrame.locator(".markdown script").count(), 0);
   assert.equal(await detailsFrame.locator(".markdown img").count(), 0);
@@ -1302,19 +1308,19 @@ try {
     "noopener noreferrer",
   );
 
-  const scufrisProjectRow = projectsListFrame.locator(".project-row", {
-    hasText: "scufris",
+  const sampleProjectRow = projectsListFrame.locator(".project-row", {
+    hasText: "sample",
   });
   assert.deepEqual(
-    await scufrisProjectRow.locator(".worktree option").allTextContents(),
+    await sampleProjectRow.locator(".worktree option").allTextContents(),
     ["Primary", "feature/projects"],
   );
-  await scufrisProjectRow
+  await sampleProjectRow
     .locator(".worktree")
     .selectOption({ label: "feature/projects" });
   await tatrFrame
     .locator(".project-filter", {
-      hasText: "Project: scufris // feature/projects",
+      hasText: "Project: sample // feature/projects",
     })
     .waitFor();
   await tatrFrame
@@ -1322,7 +1328,7 @@ try {
     .waitFor();
   await detailsFrame.locator(".state", { hasText: "Select a task" }).waitFor();
   await projectFrame
-    .locator(".identity", { hasText: "scufris // feature/projects" })
+    .locator(".identity", { hasText: "sample // feature/projects" })
     .waitFor();
   await projectFrame
     .locator(".recent-changes code", { hasText: "worktree-notes.txt" })
@@ -1330,13 +1336,13 @@ try {
   assert.equal(
     await secondPage
       .locator(`[data-instance-id="${projectsListInstance.id}"] .project-row`, {
-        hasText: "scufris",
+        hasText: "sample",
       })
       .locator(".worktree")
       .inputValue(),
     await secondPage
       .locator(`[data-instance-id="${projectsListInstance.id}"] .project-row`, {
-        hasText: "scufris",
+        hasText: "sample",
       })
       .locator('.worktree option:text-is("Primary")')
       .getAttribute("value"),
@@ -1350,18 +1356,18 @@ try {
     .waitFor();
   assert.equal(
     await detailsFrame.locator(".identity").textContent(),
-    "scufris // feature/projects // 20260814-120000/TASK.md",
+    "sample // feature/projects // 20260814-120000/TASK.md",
   );
   await page.screenshot({
     path: path.join(artifacts, "projects-worktree-narrow.png"),
     fullPage: true,
   });
-  await scufrisProjectRow
+  await sampleProjectRow
     .locator(".worktree")
     .selectOption({ label: "Primary" });
   await detailsFrame.locator(".state", { hasText: "Select a task" }).waitFor();
   await tatrFrame.locator(".title", { hasText: "Add Tatr widget" }).waitFor();
-  await projectFrame.locator('.identity:text-is("scufris")').waitFor();
+  await projectFrame.locator('.identity:text-is("sample")').waitFor();
   await tatrFrame.locator(".title", { hasText: "Add Tatr widget" }).click();
   await detailsFrame
     .locator(".markdown h1", { hasText: "Add Tatr widget" })
@@ -1470,7 +1476,7 @@ try {
     .locator(".markdown h1", { hasText: "Add Tatr widget" })
     .waitFor();
   await projectsListFrame
-    .locator(".project-row", { hasText: "scufris" })
+    .locator(".project-row", { hasText: "sample" })
     .click();
   await tatrFrame.locator(".title", { hasText: "Document filters" }).click();
   await detailsFrame
@@ -1482,7 +1488,7 @@ try {
     "a new task resets artifact selection to TASK.md",
   );
   await projectsListFrame
-    .locator(".project-row", { hasText: "scufris" })
+    .locator(".project-row", { hasText: "sample" })
     .click();
   await detailsFrame.locator(".state", { hasText: "Select a task" }).waitFor();
   await tatrFrame.locator(".title", { hasText: "Add Tatr widget" }).click();
@@ -1725,20 +1731,20 @@ try {
   );
   assert.equal(
     await projectsListFrame
-      .locator(".project-row", { hasText: "scufris" })
+      .locator(".project-row", { hasText: "sample" })
       .locator(".worktree")
       .inputValue(),
     await projectsListFrame
-      .locator(".project-row", { hasText: "scufris" })
+      .locator(".project-row", { hasText: "sample" })
       .locator('.worktree option:text-is("Primary")')
       .getAttribute("value"),
     "reload resets worktree choice to Primary",
   );
   await projectsListFrame
-    .locator(".project-row", { hasText: "scufris" })
+    .locator(".project-row", { hasText: "sample" })
     .click();
   await tatrFrame
-    .locator(".project-filter", { hasText: "Project: scufris" })
+    .locator(".project-filter", { hasText: "Project: sample" })
     .waitFor();
   await tatrFrame.locator(".title", { hasText: "Add Tatr widget" }).click();
   await detailsFrame.locator(".markdown").waitFor();
@@ -1785,7 +1791,7 @@ try {
   await page.locator("#confirm-link").click();
   assert.equal((await restoreProjectFilter).status(), 200);
   await tatrFrame
-    .locator(".project-filter", { hasText: "Project: scufris" })
+    .locator(".project-filter", { hasText: "Project: sample" })
     .waitFor();
 
   const projectInputBadge = projectFrame.locator(".widget-link-badge.input");
@@ -1816,14 +1822,14 @@ try {
   await page.locator("#confirm-link").click();
   assert.equal((await tatrFromPinned).status(), 200);
   await page.locator("#finish-editing").click();
-  await pinnedFrame.locator(".project-card", { hasText: "scufris" }).click();
-  await projectFrame.locator('.identity:text-is("scufris")').waitFor();
+  await pinnedFrame.locator(".project-card", { hasText: "sample" }).click();
+  await projectFrame.locator('.identity:text-is("sample")').waitFor();
   await tatrFrame
-    .locator(".project-filter", { hasText: "Project: scufris" })
+    .locator(".project-filter", { hasText: "Project: sample" })
     .waitFor();
   assert.equal(
     await pinnedFrame
-      .locator(".project-card", { hasText: "scufris" })
+      .locator(".project-card", { hasText: "sample" })
       .evaluate((element) => element.classList.contains("selected")),
     true,
     "Pinned publishes the Primary project selection",
@@ -1840,7 +1846,7 @@ try {
     .locator("#link-source")
     .selectOption(`${projectsListInstance.id}\u0000selected_project`);
   await page.locator("#confirm-link").click();
-  await projectFrame.locator('.identity:text-is("scufris")').waitFor();
+  await projectFrame.locator('.identity:text-is("sample")').waitFor();
 
   const deleteProjectsList = await page.request.delete(
     `${dashboardApiUrl}/instances/${projectsListInstance.id}`,
@@ -2366,12 +2372,12 @@ function writeTatrArtifacts(project, id) {
 
 function writeProjectRepositories() {
   const commitDates = {
-    scufris: "2026-08-14T12:00:00Z",
+    sample: "2026-08-14T12:00:00Z",
     tatr: "2026-08-13T12:00:00Z",
     idle: "2026-08-12T12:00:00Z",
     other: "2026-08-11T12:00:00Z",
   };
-  for (const project of ["scufris", "tatr", "idle", "other"]) {
+  for (const project of ["sample", "tatr", "idle", "other"]) {
     const directory = path.join(tatrRoot, project);
     mkdirSync(directory, { recursive: true });
     runGitFixture(directory, ["init", "-q", "-b", "main"]);
@@ -2388,10 +2394,10 @@ function writeProjectRepositories() {
       GIT_COMMITTER_DATE: commitDates[project],
     });
   }
-  runGitFixture(path.join(tatrRoot, "scufris"), ["branch", "feature/projects"]);
-  const worktree = path.join(tatrRoot, ".worktrees", "scufris-projects");
+  runGitFixture(path.join(tatrRoot, "sample"), ["branch", "feature/projects"]);
+  const worktree = path.join(tatrRoot, ".worktrees", "sample-projects");
   mkdirSync(path.dirname(worktree), { recursive: true });
-  runGitFixture(path.join(tatrRoot, "scufris"), [
+  runGitFixture(path.join(tatrRoot, "sample"), [
     "worktree",
     "add",
     "-q",
@@ -2408,15 +2414,15 @@ function writeProjectRepositories() {
   );
   writeFileSync(
     path.join(worktree, "README.md"),
-    "# scufris\n\nWorktree fixture change.\n",
+    "# sample\n\nWorktree fixture change.\n",
   );
   writeFileSync(path.join(worktree, "worktree-notes.txt"), "Linked checkout\n");
   writeFileSync(
-    path.join(tatrRoot, "scufris", "README.md"),
-    "# scufris\n\nProjects fixture change.\n",
+    path.join(tatrRoot, "sample", "README.md"),
+    "# sample\n\nProjects fixture change.\n",
   );
   writeFileSync(
-    path.join(tatrRoot, "scufris", "project-notes.txt"),
+    path.join(tatrRoot, "sample", "project-notes.txt"),
     "Untracked project notes\n",
   );
 }

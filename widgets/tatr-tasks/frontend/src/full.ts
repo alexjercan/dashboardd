@@ -1,5 +1,5 @@
-import type { WidgetContext, WidgetFrontend } from "@scufris/widget-sdk";
-import widgetReset from "@scufris/widget-sdk/widget.css";
+import type { WidgetContext, WidgetFrontend } from "@dashboardd/widget-sdk";
+import widgetReset from "@dashboardd/widget-sdk/widget.css";
 import styles from "./styles.css";
 
 type Status = "OPEN" | "IN_PROGRESS" | "CLOSED";

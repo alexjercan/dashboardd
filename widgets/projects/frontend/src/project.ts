@@ -2,8 +2,8 @@ import type {
   WidgetContext,
   WidgetFrontend,
   WidgetPresentation,
-} from "@scufris/widget-sdk";
-import widgetReset from "@scufris/widget-sdk/widget.css";
+} from "@dashboardd/widget-sdk";
+import widgetReset from "@dashboardd/widget-sdk/widget.css";
 import styles from "./project.css";
 import {
   createViewId,

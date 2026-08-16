@@ -14,7 +14,7 @@ const app = document.querySelector<HTMLElement>("#app")!;
 app.innerHTML = `
   <main class="dashboard-home">
     <header class="home-header">
-      <div><p class="home-kicker">Scufris</p><h1>Dashboards</h1></div>
+      <div><p class="home-kicker">dashboardd</p><h1>Dashboards</h1></div>
       <button id="create-dashboard" class="button primary" type="button">Create dashboard</button>
     </header>
     <div id="home-error" class="dashboard-error" role="alert" hidden></div>
@@ -541,16 +541,16 @@ function applyTheme(theme: Theme): void {
   for (const [name, value] of Object.entries(theme)) {
     if (name === "fonts") continue;
     document.documentElement.style.setProperty(
-      `--scufris-color-${name.replaceAll("_", "-")}`,
+      `--dashboardd-color-${name.replaceAll("_", "-")}`,
       value as string,
     );
   }
   document.documentElement.style.setProperty(
-    "--scufris-font-sans",
+    "--dashboardd-font-sans",
     `"${theme.fonts.sans}", ui-sans-serif, system-ui, sans-serif`,
   );
   document.documentElement.style.setProperty(
-    "--scufris-font-mono",
+    "--dashboardd-font-mono",
     `"${theme.fonts.mono}", ui-monospace, monospace`,
   );
 }

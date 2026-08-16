@@ -7,7 +7,7 @@ description = "Read-only tasks across local Tatr projects"
 package = "tatr-tasks"
 
 [frontend]
-workspace = "@scufris/tatr-tasks-widget"
+workspace = "@dashboardd/tatr-tasks-widget"
 
 [[frontend.variants]]
 id = "full"
@@ -31,7 +31,7 @@ variants = ["full"]
 [[links.inputs]]
 id = "project"
 name = "Project filter"
-type = "scufris.project-selection/v1"
+type = "dashboardd.project-selection/v1"
 variants = ["full"]
 required = false
 

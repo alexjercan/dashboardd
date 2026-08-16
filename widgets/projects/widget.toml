@@ -7,7 +7,7 @@ description = "Local project selection and read-only Git status"
 package = "projects"
 
 [frontend]
-workspace = "@scufris/projects-widget"
+workspace = "@dashboardd/projects-widget"
 
 [[frontend.variants]]
 id = "list"
@@ -31,13 +31,13 @@ focus = true
 [[links.outputs]]
 id = "selected_project"
 name = "Selected project"
-type = "scufris.project-selection/v1"
+type = "dashboardd.project-selection/v1"
 variants = ["list", "pinned"]
 
 [[links.inputs]]
 id = "project"
 name = "Project list"
-type = "scufris.project-selection/v1"
+type = "dashboardd.project-selection/v1"
 variants = ["project"]
 required = true
 

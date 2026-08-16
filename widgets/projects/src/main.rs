@@ -1293,7 +1293,8 @@ mod tests {
     use std::io::Write;
 
     fn temporary_root(name: &str) -> PathBuf {
-        let root = env::temp_dir().join(format!("scufris-projects-{}-{name}", std::process::id()));
+        let root =
+            env::temp_dir().join(format!("dashboardd-projects-{}-{name}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
         root

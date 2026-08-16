@@ -9,8 +9,8 @@ header {
   align-items: center;
   justify-content: space-between;
   padding: 0 14px;
-  border-bottom: 1px solid var(--scufris-color-border);
-  background: var(--scufris-color-surface);
+  border-bottom: 1px solid var(--dashboardd-color-border);
+  background: var(--dashboardd-color-surface);
 }
 
 header div {
@@ -21,36 +21,36 @@ header div {
 }
 h2 {
   margin: 0;
-  color: var(--scufris-color-text-bright);
+  color: var(--dashboardd-color-text-bright);
   font-size: 14px;
 }
 .eyebrow,
 .graph-heading,
 .legend,
 .metrics {
-  font-family: var(--scufris-font-mono);
+  font-family: var(--dashboardd-font-mono);
 }
 .eyebrow {
-  color: var(--scufris-color-text-dim);
+  color: var(--dashboardd-color-text-dim);
   font-size: 7px;
   text-transform: uppercase;
   letter-spacing: 1px;
 }
 .usage {
-  color: var(--scufris-color-accent);
-  font-family: var(--scufris-font-mono);
+  color: var(--dashboardd-color-accent);
+  font-family: var(--dashboardd-font-mono);
   font-size: 25px;
 }
 
 .body {
   padding: 8px 14px 10px;
-  background: var(--scufris-color-surface);
-  color: var(--scufris-color-text);
+  background: var(--dashboardd-color-surface);
+  color: var(--dashboardd-color-text);
 }
 .graph-heading {
   display: flex;
   justify-content: space-between;
-  color: var(--scufris-color-text-dim);
+  color: var(--dashboardd-color-text-dim);
   font-size: 7px;
   text-transform: uppercase;
 }
@@ -61,7 +61,7 @@ svg {
   margin-top: 3px;
 }
 .grid {
-  stroke: color-mix(in srgb, var(--scufris-color-border) 60%, transparent);
+  stroke: color-mix(in srgb, var(--dashboardd-color-border) 60%, transparent);
   stroke-width: 1;
 }
 .line {
@@ -70,16 +70,16 @@ svg {
   vector-effect: non-scaling-stroke;
 }
 .line.read {
-  stroke: var(--scufris-color-accent);
+  stroke: var(--dashboardd-color-accent);
 }
 .line.write {
-  stroke: var(--scufris-color-secondary);
+  stroke: var(--dashboardd-color-secondary);
 }
 .legend {
   display: flex;
   gap: 18px;
   margin-top: 2px;
-  color: var(--scufris-color-text-muted);
+  color: var(--dashboardd-color-text-muted);
   font-size: 8px;
 }
 .legend span::before {
@@ -91,14 +91,14 @@ svg {
   content: "";
 }
 .read-key::before {
-  background: var(--scufris-color-accent);
+  background: var(--dashboardd-color-accent);
 }
 .write-key::before {
-  background: var(--scufris-color-secondary);
+  background: var(--dashboardd-color-secondary);
 }
 .legend b,
 .metrics b {
-  color: var(--scufris-color-text-bright);
+  color: var(--dashboardd-color-text-bright);
   font-weight: 400;
 }
 .capacity {
@@ -108,20 +108,20 @@ svg {
   border-radius: 2px;
   background: color-mix(
     in srgb,
-    var(--scufris-color-text-dim) 35%,
+    var(--dashboardd-color-text-dim) 35%,
     transparent
   );
 }
 .fill {
   width: var(--usage, 0%);
   height: 100%;
-  background: var(--scufris-color-success);
+  background: var(--dashboardd-color-success);
 }
 .fill.warm {
-  background: var(--scufris-color-accent);
+  background: var(--dashboardd-color-accent);
 }
 .fill.hot {
-  background: var(--scufris-color-danger);
+  background: var(--dashboardd-color-danger);
 }
 .metrics {
   display: flex;
@@ -129,7 +129,7 @@ svg {
   justify-content: space-between;
   gap: 10px;
   margin-top: 7px;
-  color: var(--scufris-color-text-muted);
+  color: var(--dashboardd-color-text-muted);
   font-size: 8px;
 }
 .metrics span {
@@ -138,6 +138,6 @@ svg {
   white-space: nowrap;
 }
 .filesystem {
-  color: var(--scufris-color-text-dim);
+  color: var(--dashboardd-color-text-dim);
   text-transform: uppercase;
 }

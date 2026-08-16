@@ -449,7 +449,7 @@ mod tests {
 
     #[test]
     fn discovers_widget_variants() {
-        let root = std::env::temp_dir().join(format!("scufris-widgets-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("dashboardd-widgets-{}", std::process::id()));
         let cpu = root.join("cpu");
         fs::create_dir_all(&cpu).unwrap();
         fs::write(
@@ -512,7 +512,7 @@ mod tests {
     #[test]
     fn rejects_invalid_option_manifests() {
         let root =
-            std::env::temp_dir().join(format!("scufris-invalid-options-{}", std::process::id()));
+            std::env::temp_dir().join(format!("dashboardd-invalid-options-{}", std::process::id()));
         let cpu = root.join("cpu");
         fs::create_dir_all(&cpu).unwrap();
         fs::write(
@@ -532,7 +532,7 @@ mod tests {
     #[test]
     fn rejects_version_one_manifests() {
         let root =
-            std::env::temp_dir().join(format!("scufris-invalid-widget-{}", std::process::id()));
+            std::env::temp_dir().join(format!("dashboardd-invalid-widget-{}", std::process::id()));
         let cpu = root.join("cpu");
         fs::create_dir_all(&cpu).unwrap();
         fs::write(

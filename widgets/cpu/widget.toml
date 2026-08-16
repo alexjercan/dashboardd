@@ -7,7 +7,7 @@ description = "Processor usage and temperatures"
 package = "cpu"
 
 [frontend]
-workspace = "@scufris/cpu-widget"
+workspace = "@dashboardd/cpu-widget"
 
 [[frontend.variants]]
 id = "full"

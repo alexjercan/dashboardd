@@ -175,11 +175,11 @@ fn resolve_path_from(
         return Ok(path);
     }
     if let Some(path) = xdg {
-        return Ok(path.join("scufris/config.toml"));
+        return Ok(path.join("dashboardd/config.toml"));
     }
     let home =
         home.ok_or("HOME must be set when DASHBOARDD_CONFIG_FILE and XDG_CONFIG_HOME are unset")?;
-    Ok(home.join(".config/scufris/config.toml"))
+    Ok(home.join(".config/dashboardd/config.toml"))
 }
 
 pub fn load(path: &Path) -> Result<UserConfiguration, String> {
@@ -353,11 +353,11 @@ mod tests {
         );
         assert_eq!(
             resolve_path_from(None, Some("/xdg".into()), Some("/home".into())).unwrap(),
-            PathBuf::from("/xdg/scufris/config.toml")
+            PathBuf::from("/xdg/dashboardd/config.toml")
         );
         assert_eq!(
             resolve_path_from(None, None, Some("/home".into())).unwrap(),
-            PathBuf::from("/home/.config/scufris/config.toml")
+            PathBuf::from("/home/.config/dashboardd/config.toml")
         );
         assert!(resolve_path_from(None, None, None).is_err());
     }
@@ -365,7 +365,7 @@ mod tests {
     #[test]
     fn missing_file_uses_defaults() {
         let path = std::env::temp_dir().join(format!(
-            "scufris-missing-config-{}-{}.toml",
+            "dashboardd-missing-config-{}-{}.toml",
             std::process::id(),
             std::thread::current().name().unwrap_or("test")
         ));

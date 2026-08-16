@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
-description = "Wire types shared by the Scufris dashboard server and widgets"
+description = "Wire types shared by the dashboardd dashboard server and widgets"
 
 [dependencies]
 serde = { version = "1.0.229", features = ["derive"] }

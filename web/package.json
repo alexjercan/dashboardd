@@ -1,5 +1,5 @@
 {
-  "name": "@scufris/dashboard",
+  "name": "@dashboardd/dashboard",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -18,6 +18,6 @@
     "webpack-dev-server": "^5.2.0"
   },
   "dependencies": {
-    "@scufris/widget-sdk": "0.1.0"
+    "@dashboardd/widget-sdk": "0.1.0"
   }
 }

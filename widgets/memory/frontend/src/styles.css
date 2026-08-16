@@ -5,7 +5,7 @@ header {
   gap: 12px;
   padding: 12px 14px 10px;
   border-bottom: 1px solid
-    color-mix(in srgb, var(--scufris-color-border) 28%, transparent);
+    color-mix(in srgb, var(--dashboardd-color-border) 28%, transparent);
 }
 
 .title {
@@ -15,7 +15,7 @@ header {
 }
 
 .eyebrow {
-  color: var(--scufris-color-text-muted);
+  color: var(--dashboardd-color-text-muted);
   font-size: 9px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -23,8 +23,8 @@ header {
 
 h2 {
   margin: 0;
-  color: var(--scufris-color-text-bright);
-  font-family: var(--scufris-font-sans);
+  color: var(--dashboardd-color-text-bright);
+  font-family: var(--dashboardd-font-sans);
   font-size: 17px;
   font-weight: 650;
 }
@@ -37,8 +37,8 @@ h2 {
 }
 
 .usage {
-  color: var(--scufris-color-accent);
-  font-family: var(--scufris-font-sans);
+  color: var(--dashboardd-color-accent);
+  font-family: var(--dashboardd-font-sans);
   font-size: 24px;
   font-variant-numeric: tabular-nums;
   font-weight: 700;
@@ -46,7 +46,7 @@ h2 {
 }
 
 .total {
-  color: var(--scufris-color-secondary);
+  color: var(--dashboardd-color-secondary);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
@@ -58,9 +58,9 @@ h2 {
 .graph-shell {
   overflow: hidden;
   border: 1px solid
-    color-mix(in srgb, var(--scufris-color-border) 22%, transparent);
+    color-mix(in srgb, var(--dashboardd-color-border) 22%, transparent);
   border-radius: 4px;
-  background: var(--scufris-color-canvas);
+  background: var(--dashboardd-color-canvas);
 }
 
 svg {
@@ -70,24 +70,28 @@ svg {
 }
 
 .grid {
-  stroke: color-mix(in srgb, var(--scufris-color-text-muted) 20%, transparent);
+  stroke: color-mix(
+    in srgb,
+    var(--dashboardd-color-text-muted) 20%,
+    transparent
+  );
   stroke-width: 1;
 }
 
 .area {
-  fill: color-mix(in srgb, var(--scufris-color-accent) 13%, transparent);
+  fill: color-mix(in srgb, var(--dashboardd-color-accent) 13%, transparent);
 }
 
 .line {
   fill: none;
-  stroke: var(--scufris-color-accent);
+  stroke: var(--dashboardd-color-accent);
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 2.2;
 }
 
 .axis-label {
-  fill: var(--scufris-color-text-dim);
+  fill: var(--dashboardd-color-text-dim);
   font-size: 9px;
 }
 
@@ -105,14 +109,14 @@ svg {
 
 .resource-heading {
   margin-bottom: 5px;
-  color: var(--scufris-color-text-muted);
+  color: var(--dashboardd-color-text-muted);
   font-size: 9px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
 
 .resource-percent {
-  color: var(--scufris-color-text);
+  color: var(--dashboardd-color-text);
   font-size: 10px;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0;
@@ -122,24 +126,36 @@ svg {
   height: 7px;
   overflow: hidden;
   border: 1px solid
-    color-mix(in srgb, var(--scufris-color-border) 24%, transparent);
+    color-mix(in srgb, var(--dashboardd-color-border) 24%, transparent);
   border-radius: 3px;
-  background: var(--scufris-color-canvas);
+  background: var(--dashboardd-color-canvas);
 }
 
 .bar-fill {
   width: var(--usage, 0%);
   height: 100%;
-  background: color-mix(in srgb, var(--scufris-color-success) 74%, transparent);
+  background: color-mix(
+    in srgb,
+    var(--dashboardd-color-success) 74%,
+    transparent
+  );
   transition: width 180ms linear;
 }
 
 .bar-fill.warm {
-  background: color-mix(in srgb, var(--scufris-color-accent) 78%, transparent);
+  background: color-mix(
+    in srgb,
+    var(--dashboardd-color-accent) 78%,
+    transparent
+  );
 }
 
 .bar-fill.hot {
-  background: color-mix(in srgb, var(--scufris-color-danger) 82%, transparent);
+  background: color-mix(
+    in srgb,
+    var(--dashboardd-color-danger) 82%,
+    transparent
+  );
 }
 
 .metrics {
@@ -149,14 +165,14 @@ svg {
 }
 
 .metric-row {
-  color: var(--scufris-color-text-muted);
+  color: var(--dashboardd-color-text-muted);
   font-size: 9px;
   letter-spacing: 0.05em;
   text-transform: uppercase;
 }
 
 .metric-value {
-  color: var(--scufris-color-text);
+  color: var(--dashboardd-color-text);
   font-size: 10px;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0;
@@ -166,13 +182,13 @@ svg {
 .waiting,
 .error {
   padding: 24px 12px;
-  color: var(--scufris-color-text-muted);
+  color: var(--dashboardd-color-text-muted);
   font-size: 11px;
   text-align: center;
 }
 
 .error {
-  color: var(--scufris-color-danger);
+  color: var(--dashboardd-color-danger);
 }
 
 .error[hidden] {

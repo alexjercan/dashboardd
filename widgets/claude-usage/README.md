@@ -17,8 +17,8 @@ The backend reads Claude Code OAuth credentials from
 and requests the Claude OAuth usage resource. Credentials and raw provider
 responses are not sent to the frontend or written to logs.
 
-Normalized usage is shared through `$XDG_CACHE_HOME/scufris`, with
-`$HOME/.cache/scufris` as the fallback. This prevents duplicate full, compact,
+Normalized usage is shared through `$XDG_CACHE_HOME/dashboardd`, with
+`$HOME/.cache/dashboardd` as the fallback. This prevents duplicate full, compact,
 and minimal instances from polling Claude independently.
 
 The cache refreshes after five minutes. Temporary errors preserve the last

@@ -146,11 +146,11 @@ fn resolve_state_file() -> Result<PathBuf, Box<dyn Error>> {
         return Ok(PathBuf::from(path));
     }
     if let Some(path) = env::var_os("XDG_STATE_HOME") {
-        return Ok(PathBuf::from(path).join("scufris/dashboard.json"));
+        return Ok(PathBuf::from(path).join("dashboardd/dashboard.json"));
     }
     let home = env::var_os("HOME")
         .ok_or("HOME must be set when DASHBOARDD_STATE_FILE and XDG_STATE_HOME are unset")?;
-    Ok(PathBuf::from(home).join(".local/state/scufris/dashboard.json"))
+    Ok(PathBuf::from(home).join(".local/state/dashboardd/dashboard.json"))
 }
 
 fn bind_listener(config: &Config) -> io::Result<TcpListener> {

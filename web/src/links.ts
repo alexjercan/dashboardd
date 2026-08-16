@@ -1,4 +1,4 @@
-import type { WidgetLinks } from "@scufris/widget-sdk";
+import type { WidgetLinks } from "@dashboardd/widget-sdk";
 import type { DashboardLink } from "./protocol";
 
 type Handler = (payload: unknown) => void;

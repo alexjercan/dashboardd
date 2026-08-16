@@ -8,8 +8,8 @@ header {
   align-items: center;
   justify-content: space-between;
   padding: 0 14px;
-  border-bottom: 1px solid var(--scufris-color-border);
-  background: var(--scufris-color-surface);
+  border-bottom: 1px solid var(--dashboardd-color-border);
+  background: var(--dashboardd-color-surface);
 }
 header div {
   display: flex;
@@ -19,7 +19,7 @@ header div {
 }
 h2 {
   margin: 0;
-  color: var(--scufris-color-text-bright);
+  color: var(--dashboardd-color-text-bright);
   font-size: 14px;
 }
 .eyebrow,
@@ -27,27 +27,27 @@ h2 {
 .graph-heading,
 .rates,
 .metrics {
-  font-family: var(--scufris-font-mono);
+  font-family: var(--dashboardd-font-mono);
 }
 .eyebrow {
-  color: var(--scufris-color-text-dim);
+  color: var(--dashboardd-color-text-dim);
   font-size: 7px;
   text-transform: uppercase;
   letter-spacing: 1px;
 }
 .interfaces {
-  color: var(--scufris-color-text-muted);
+  color: var(--dashboardd-color-text-muted);
   font-size: 8px;
 }
 .body {
   padding: 8px 14px 10px;
-  background: var(--scufris-color-surface);
-  color: var(--scufris-color-text);
+  background: var(--dashboardd-color-surface);
+  color: var(--dashboardd-color-text);
 }
 .graph-heading {
   display: flex;
   justify-content: space-between;
-  color: var(--scufris-color-text-dim);
+  color: var(--dashboardd-color-text-dim);
   font-size: 7px;
   text-transform: uppercase;
 }
@@ -58,7 +58,7 @@ svg {
   margin-top: 3px;
 }
 .grid {
-  stroke: color-mix(in srgb, var(--scufris-color-border) 60%, transparent);
+  stroke: color-mix(in srgb, var(--dashboardd-color-border) 60%, transparent);
   stroke-width: 1;
 }
 .line {
@@ -67,16 +67,16 @@ svg {
   vector-effect: non-scaling-stroke;
 }
 .line.down {
-  stroke: var(--scufris-color-accent);
+  stroke: var(--dashboardd-color-accent);
 }
 .line.up {
-  stroke: var(--scufris-color-secondary);
+  stroke: var(--dashboardd-color-secondary);
 }
 .rates {
   display: flex;
   gap: 22px;
   margin-top: 2px;
-  color: var(--scufris-color-text-muted);
+  color: var(--dashboardd-color-text-muted);
   font-size: 8px;
 }
 .rates span::before {
@@ -88,14 +88,14 @@ svg {
   content: "";
 }
 .down-key::before {
-  background: var(--scufris-color-accent);
+  background: var(--dashboardd-color-accent);
 }
 .up-key::before {
-  background: var(--scufris-color-secondary);
+  background: var(--dashboardd-color-secondary);
 }
 .rates b,
 .metrics b {
-  color: var(--scufris-color-text-bright);
+  color: var(--dashboardd-color-text-bright);
   font-weight: 400;
 }
 .metrics {
@@ -103,7 +103,7 @@ svg {
   justify-content: space-between;
   gap: 12px;
   margin-top: 13px;
-  color: var(--scufris-color-text-muted);
+  color: var(--dashboardd-color-text-muted);
   font-size: 8px;
 }
 .metrics span {
@@ -113,5 +113,5 @@ svg {
 }
 .errors.active,
 .errors.active b {
-  color: var(--scufris-color-danger);
+  color: var(--dashboardd-color-danger);
 }

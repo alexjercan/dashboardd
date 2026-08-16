@@ -141,7 +141,7 @@ async fn fetch_usage() -> Result<UsageSnapshot, FetchError> {
         .map_err(|_| FetchError::Process)?;
     let mut input = child.stdin.take().ok_or(FetchError::Process)?;
     let mut output = BufReader::new(child.stdout.take().ok_or(FetchError::Process)?).lines();
-    send(&mut input, json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"scufris","version":"0.1"},"capabilities":{}}})).await?;
+    send(&mut input, json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"dashboardd","version":"0.1"},"capabilities":{}}})).await?;
     response(&mut output, 1).await?;
     send(
         &mut input,

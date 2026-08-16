@@ -9,7 +9,7 @@ article {
   flex-direction: column;
   padding: 10px 12px;
   overflow: hidden;
-  background: var(--scufris-color-surface);
+  background: var(--dashboardd-color-surface);
 }
 
 article > header {
@@ -23,7 +23,7 @@ article > header {
 
 h2 {
   margin: 0;
-  color: var(--scufris-color-text-bright);
+  color: var(--dashboardd-color-text-bright);
   font-size: 13px;
 }
 
@@ -33,9 +33,9 @@ h2 {
 .pin-button {
   border: 0;
   background: transparent;
-  color: var(--scufris-color-text-muted);
+  color: var(--dashboardd-color-text-muted);
   cursor: pointer;
-  font-family: var(--scufris-font-mono);
+  font-family: var(--dashboardd-font-mono);
   font-size: 8px;
 }
 
@@ -47,7 +47,7 @@ h2 {
 .move-button:focus-visible,
 .pin-button:hover:not(:disabled),
 .pin-button:focus-visible {
-  color: var(--scufris-color-accent);
+  color: var(--dashboardd-color-accent);
   outline: none;
 }
 
@@ -68,24 +68,32 @@ h2 {
   gap: 2px;
   padding: 6px 7px;
   overflow: hidden;
-  border: 1px solid var(--scufris-color-border);
+  border: 1px solid var(--dashboardd-color-border);
   border-radius: 3px;
-  background: color-mix(in srgb, var(--scufris-color-canvas) 55%, transparent);
-  color: var(--scufris-color-text-muted);
+  background: color-mix(
+    in srgb,
+    var(--dashboardd-color-canvas) 55%,
+    transparent
+  );
+  color: var(--dashboardd-color-text-muted);
   cursor: pointer;
-  font-family: var(--scufris-font-mono);
+  font-family: var(--dashboardd-font-mono);
   text-align: left;
 }
 
 .project-card:hover,
 .project-card:focus-visible,
 .project-card.selected {
-  border-color: var(--scufris-color-accent);
+  border-color: var(--dashboardd-color-accent);
   outline: none;
 }
 
 .project-card.selected {
-  background: color-mix(in srgb, var(--scufris-color-accent) 9%, transparent);
+  background: color-mix(
+    in srgb,
+    var(--dashboardd-color-accent) 9%,
+    transparent
+  );
 }
 
 .project-card strong,
@@ -98,7 +106,7 @@ h2 {
 }
 
 .project-card strong {
-  color: var(--scufris-color-text-bright);
+  color: var(--dashboardd-color-text-bright);
   font-size: 10px;
 }
 
@@ -108,7 +116,7 @@ h2 {
 }
 
 .project-card small {
-  color: var(--scufris-color-text-dim);
+  color: var(--dashboardd-color-text-dim);
 }
 
 .empty-card {
@@ -118,7 +126,7 @@ h2 {
 }
 
 .empty-card strong {
-  color: var(--scufris-color-accent);
+  color: var(--dashboardd-color-accent);
   font-size: 14px;
 }
 
@@ -131,15 +139,19 @@ h2 {
   max-height: min(640px, calc(100vh - 28px));
   padding: 0;
   overflow: hidden;
-  border: 1px solid var(--scufris-color-border);
+  border: 1px solid var(--dashboardd-color-border);
   border-radius: 5px;
-  background: var(--scufris-color-surface);
-  color: var(--scufris-color-text);
+  background: var(--dashboardd-color-surface);
+  color: var(--dashboardd-color-text);
   box-shadow: 0 24px 80px color-mix(in srgb, black 60%, transparent);
 }
 
 .manager::backdrop {
-  background: color-mix(in srgb, var(--scufris-color-canvas) 76%, transparent);
+  background: color-mix(
+    in srgb,
+    var(--dashboardd-color-canvas) 76%,
+    transparent
+  );
 }
 
 .manager > section {
@@ -162,7 +174,7 @@ h2 {
 }
 
 .done {
-  color: var(--scufris-color-accent);
+  color: var(--dashboardd-color-accent);
   font-size: 9px;
 }
 
@@ -170,24 +182,24 @@ h2 {
   height: 30px;
   flex: none;
   padding: 4px 8px;
-  border: 1px solid var(--scufris-color-border);
+  border: 1px solid var(--dashboardd-color-border);
   border-radius: 3px;
-  background: var(--scufris-color-canvas);
-  color: var(--scufris-color-text);
-  font-family: var(--scufris-font-mono);
+  background: var(--dashboardd-color-canvas);
+  color: var(--dashboardd-color-text);
+  font-family: var(--dashboardd-font-mono);
   font-size: 9px;
 }
 
 .search:focus {
-  border-color: var(--scufris-color-accent);
+  border-color: var(--dashboardd-color-accent);
   outline: none;
 }
 
 .limit {
   flex: none;
   padding: 7px 1px;
-  color: var(--scufris-color-text-muted);
-  font-family: var(--scufris-font-mono);
+  color: var(--dashboardd-color-text-muted);
+  font-family: var(--dashboardd-font-mono);
   font-size: 8px;
 }
 
@@ -201,8 +213,8 @@ h2 {
   min-height: 0;
   flex: 1;
   overflow-y: auto;
-  border-top: 1px solid var(--scufris-color-selection);
-  scrollbar-color: var(--scufris-color-selection) transparent;
+  border-top: 1px solid var(--dashboardd-color-selection);
+  scrollbar-color: var(--dashboardd-color-selection) transparent;
   scrollbar-width: thin;
 }
 
@@ -213,21 +225,25 @@ h2 {
   justify-content: space-between;
   gap: 10px;
   padding: 6px 3px;
-  border-bottom: 1px solid var(--scufris-color-selection);
+  border-bottom: 1px solid var(--dashboardd-color-selection);
 }
 
 .manage-row strong {
   min-width: 0;
   overflow: hidden;
-  color: var(--scufris-color-text-bright);
-  font-family: var(--scufris-font-mono);
+  color: var(--dashboardd-color-text-bright);
+  font-family: var(--dashboardd-font-mono);
   font-size: 10px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .pinned-row {
-  background: color-mix(in srgb, var(--scufris-color-accent) 7%, transparent);
+  background: color-mix(
+    in srgb,
+    var(--dashboardd-color-accent) 7%,
+    transparent
+  );
 }
 
 .row-controls {
@@ -264,7 +280,7 @@ h2 {
 }
 
 .pin-button.pinned {
-  color: var(--scufris-color-accent);
+  color: var(--dashboardd-color-accent);
 }
 
 .pin-button.pinned svg {
@@ -274,7 +290,7 @@ h2 {
 .manager-empty {
   margin: 0;
   padding: 18px 4px;
-  color: var(--scufris-color-text-muted);
+  color: var(--dashboardd-color-text-muted);
   font-size: 9px;
   text-align: center;
 }

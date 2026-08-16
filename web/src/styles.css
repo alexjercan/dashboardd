@@ -1,4 +1,4 @@
-@import "@scufris/widget-sdk/theme.css";
+@import "@dashboardd/widget-sdk/theme.css";
 
 * {
   box-sizing: border-box;
@@ -9,9 +9,9 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100%;
-  background: var(--scufris-color-canvas);
-  color: var(--scufris-color-text);
-  font-family: var(--scufris-font-sans);
+  background: var(--dashboardd-color-canvas);
+  color: var(--dashboardd-color-text);
+  font-family: var(--dashboardd-font-sans);
 }
 
 button {
@@ -42,9 +42,9 @@ button {
   justify-content: space-between;
   gap: 20px;
   padding: 8px 10px;
-  border: 1px solid var(--scufris-color-selection);
+  border: 1px solid var(--dashboardd-color-selection);
   border-radius: 5px;
-  background: var(--scufris-color-canvas);
+  background: var(--dashboardd-color-canvas);
 }
 
 .dashboard-header .button {
@@ -55,17 +55,17 @@ button {
 
 h1 {
   margin: 0;
-  color: var(--scufris-color-text-bright);
+  color: var(--dashboardd-color-text-bright);
   font-size: 20px;
   line-height: 1.2;
 }
 
 .button,
 .icon-button {
-  border: 1px solid var(--scufris-color-border);
+  border: 1px solid var(--dashboardd-color-border);
   border-radius: 4px;
   background: transparent;
-  color: var(--scufris-color-text);
+  color: var(--dashboardd-color-text);
   cursor: pointer;
 }
 
@@ -79,19 +79,19 @@ h1 {
 .button:focus-visible,
 .icon-button:hover,
 .icon-button:focus-visible {
-  border-color: var(--scufris-color-accent);
-  color: var(--scufris-color-text-bright);
+  border-color: var(--dashboardd-color-accent);
+  color: var(--dashboardd-color-text-bright);
   outline: none;
 }
 
 .button.primary {
-  border-color: var(--scufris-color-accent);
-  color: var(--scufris-color-accent);
+  border-color: var(--dashboardd-color-accent);
+  color: var(--dashboardd-color-accent);
 }
 
 .button.danger {
-  border-color: var(--scufris-color-danger);
-  color: var(--scufris-color-danger);
+  border-color: var(--dashboardd-color-danger);
+  color: var(--dashboardd-color-danger);
 }
 
 .button:disabled {
@@ -106,10 +106,10 @@ h1 {
 .dashboard-error {
   margin-top: 16px;
   padding: 12px 16px;
-  border: 1px solid var(--scufris-color-danger);
+  border: 1px solid var(--dashboardd-color-danger);
   border-radius: 4px;
-  background: var(--scufris-color-surface);
-  color: var(--scufris-color-danger);
+  background: var(--dashboardd-color-surface);
+  color: var(--dashboardd-color-danger);
   font-size: 14px;
 }
 
@@ -119,13 +119,13 @@ h1 {
   justify-items: center;
   flex: 1;
   gap: 7px;
-  color: var(--scufris-color-text-muted);
+  color: var(--dashboardd-color-text-muted);
   font-size: 12px;
 }
 
 .empty-edit,
 .zen-edit {
-  color: var(--scufris-color-text-muted);
+  color: var(--dashboardd-color-text-muted);
   text-decoration: none;
 }
 
@@ -133,7 +133,7 @@ h1 {
 .empty-edit:focus-visible,
 .zen-edit:hover,
 .zen-edit:focus-visible {
-  color: var(--scufris-color-accent);
+  color: var(--dashboardd-color-accent);
   outline: none;
 }
 
@@ -164,28 +164,28 @@ body.editing .dashboard-grid {
 .dashboard-widget {
   position: relative;
   overflow: hidden;
-  border: 1px solid var(--scufris-color-border);
-  border-radius: var(--scufris-radius-widget);
-  background: var(--scufris-color-surface);
+  border: 1px solid var(--dashboardd-color-border);
+  border-radius: var(--dashboardd-radius-widget);
+  background: var(--dashboardd-color-surface);
   box-shadow: 0 14px 36px rgb(0 0 0 / 22%);
 }
 
 .dashboard-widget:focus-within,
 .dashboard-widget.keyboard-selected {
-  outline: 2px solid var(--scufris-color-accent);
+  outline: 2px solid var(--dashboardd-color-accent);
   outline-offset: 2px;
 }
 
 body[data-keyboard-mode="widget"] .dashboard-widget.keyboard-selected {
-  outline-color: var(--scufris-color-selection);
+  outline-color: var(--dashboardd-color-selection);
 }
 
 .dashboard-keyboard-cursor {
   z-index: 8;
-  border: 2px solid var(--scufris-color-accent);
-  border-radius: var(--scufris-radius-widget);
+  border: 2px solid var(--dashboardd-color-accent);
+  border-radius: var(--dashboardd-radius-widget);
   background: rgb(255 221 51 / 5%);
-  box-shadow: inset 0 0 0 2px var(--scufris-color-canvas);
+  box-shadow: inset 0 0 0 2px var(--dashboardd-color-canvas);
   pointer-events: none;
 }
 
@@ -203,7 +203,7 @@ body:not(.editing)[data-keyboard-mode="dashboard"]
 }
 
 body[data-keyboard-mode="dashboard"] .dashboard-widget.keyboard-under-cursor {
-  outline: 2px solid var(--scufris-color-accent);
+  outline: 2px solid var(--dashboardd-color-accent);
   outline-offset: 2px;
   box-shadow:
     0 14px 36px rgb(0 0 0 / 22%),
@@ -212,7 +212,7 @@ body[data-keyboard-mode="dashboard"] .dashboard-widget.keyboard-under-cursor {
 
 body.editing .dashboard-widget.keyboard-under-cursor,
 .dashboard-widget.keyboard-move-source {
-  outline: 2px dashed var(--scufris-color-accent);
+  outline: 2px dashed var(--dashboardd-color-accent);
   outline-offset: -4px;
   box-shadow: 0 14px 36px rgb(0 0 0 / 22%);
   opacity: 0.5;
@@ -221,7 +221,7 @@ body.editing .dashboard-widget.keyboard-under-cursor,
 .dashboard-keyboard-cursor.moving {
   border-style: solid;
   background: rgb(255 221 51 / 9%);
-  box-shadow: inset 0 0 0 2px var(--scufris-color-canvas);
+  box-shadow: inset 0 0 0 2px var(--dashboardd-color-canvas);
 }
 
 body[data-keyboard-mode="widget"] .dashboard-keyboard-cursor,
@@ -249,10 +249,10 @@ body.focused .dashboard-keyboard-cursor {
   right: 8px;
   min-height: 26px;
   padding: 4px 7px;
-  border: 1px solid var(--scufris-color-border);
+  border: 1px solid var(--dashboardd-color-border);
   border-radius: 3px;
-  background: var(--scufris-color-canvas);
-  color: var(--scufris-color-text-muted);
+  background: var(--dashboardd-color-canvas);
+  color: var(--dashboardd-color-text-muted);
   cursor: pointer;
   font-size: 9px;
   opacity: 0.18;
@@ -264,8 +264,8 @@ body.focused .dashboard-keyboard-cursor {
 
 .dashboard-widget:hover .widget-focus-button,
 .widget-focus-button:focus-visible {
-  border-color: var(--scufris-color-accent);
-  color: var(--scufris-color-text-bright);
+  border-color: var(--dashboardd-color-accent);
+  color: var(--dashboardd-color-text-bright);
   opacity: 1;
   outline: none;
 }
@@ -289,10 +289,10 @@ body.focused .dashboard-keyboard-cursor {
   top: 8px;
   min-height: 30px;
   padding: 5px 9px;
-  border: 1px solid var(--scufris-color-danger);
+  border: 1px solid var(--dashboardd-color-danger);
   border-radius: 4px;
-  background: var(--scufris-color-canvas);
-  color: var(--scufris-color-danger);
+  background: var(--dashboardd-color-canvas);
+  color: var(--dashboardd-color-danger);
   cursor: pointer;
   font-size: 12px;
 }
@@ -306,10 +306,10 @@ body.focused .dashboard-keyboard-cursor {
   min-width: 44px;
   padding: 5px 10px;
   transform: translateX(-50%);
-  border-color: var(--scufris-color-accent);
-  color: var(--scufris-color-accent);
+  border-color: var(--dashboardd-color-accent);
+  color: var(--dashboardd-color-accent);
   cursor: grab;
-  font-family: var(--scufris-font-mono);
+  font-family: var(--dashboardd-font-mono);
   font-size: 15px;
   letter-spacing: 2px;
   touch-action: none;
@@ -335,7 +335,7 @@ body.focused .dashboard-keyboard-cursor {
   inset: 0;
   display: grid;
   place-items: center;
-  color: var(--scufris-color-danger);
+  color: var(--dashboardd-color-danger);
   content: "x";
 }
 
@@ -348,7 +348,7 @@ body.focused .dashboard-keyboard-cursor {
   min-height: 100vh;
   flex-direction: column;
   padding: 12px;
-  background: var(--scufris-color-canvas);
+  background: var(--dashboardd-color-canvas);
 }
 
 .focus-header {
@@ -359,7 +359,7 @@ body.focused .dashboard-keyboard-cursor {
   justify-content: space-between;
   gap: 16px;
   padding: 0 2px 10px;
-  border-bottom: 1px solid var(--scufris-color-selection);
+  border-bottom: 1px solid var(--dashboardd-color-selection);
 }
 
 .focus-header h1 {
@@ -379,7 +379,7 @@ body.focused .dashboard-keyboard-cursor {
 .focus-stage > .dashboard-widget {
   width: 100%;
   min-height: 0;
-  border-color: var(--scufris-color-border);
+  border-color: var(--dashboardd-color-border);
   box-shadow: 0 18px 48px rgb(0 0 0 / 35%);
 }
 
@@ -398,7 +398,7 @@ body.focused {
 }
 
 .editing .dashboard-widget {
-  outline: 1px dashed var(--scufris-color-accent);
+  outline: 1px dashed var(--dashboardd-color-accent);
   outline-offset: 4px;
 }
 
@@ -417,11 +417,11 @@ body.focused {
 }
 
 .editing.drag-active .dashboard-widget:not(.dragging) {
-  outline-color: var(--scufris-color-danger);
+  outline-color: var(--dashboardd-color-danger);
 }
 
 .editing.drag-active .dashboard-widget.drop-target {
-  outline: 3px solid var(--scufris-color-accent);
+  outline: 3px solid var(--dashboardd-color-accent);
   outline-offset: -6px;
 }
 
@@ -442,31 +442,31 @@ body.focused {
   padding: 5px 8px;
   border: 1px solid currentColor;
   border-radius: 4px;
-  background: var(--scufris-color-canvas);
-  color: var(--scufris-color-text-muted);
+  background: var(--dashboardd-color-canvas);
+  color: var(--dashboardd-color-text-muted);
   cursor: pointer;
-  font-family: var(--scufris-font-mono);
+  font-family: var(--dashboardd-font-mono);
   font-size: 9px;
 }
 
 .widget-health-button[data-status="healthy"],
 #health-status[data-status="healthy"] {
-  color: var(--scufris-color-success);
+  color: var(--dashboardd-color-success);
 }
 
 .widget-health-button[data-status="stale"],
 #health-status[data-status="stale"] {
-  color: var(--scufris-color-secondary);
+  color: var(--dashboardd-color-secondary);
 }
 
 .widget-health-button[data-status="degraded"],
 #health-status[data-status="degraded"] {
-  color: var(--scufris-color-accent);
+  color: var(--dashboardd-color-accent);
 }
 
 .widget-health-button[data-status="failed"],
 #health-status[data-status="failed"] {
-  color: var(--scufris-color-danger);
+  color: var(--dashboardd-color-danger);
 }
 
 .widget-health-dot {
@@ -506,11 +506,11 @@ body.focused {
   min-height: 22px;
   padding: 3px 6px;
   overflow: hidden;
-  border: 1px solid var(--scufris-color-border);
+  border: 1px solid var(--dashboardd-color-border);
   border-radius: 3px;
-  background: var(--scufris-color-canvas);
-  color: var(--scufris-color-text-muted);
-  font-family: var(--scufris-font-mono);
+  background: var(--dashboardd-color-canvas);
+  color: var(--dashboardd-color-text-muted);
+  font-family: var(--dashboardd-font-mono);
   font-size: 8px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -522,13 +522,13 @@ button.widget-link-badge {
 
 .widget-link-badge:hover,
 .widget-link-badge:focus-visible {
-  border-color: var(--scufris-color-accent);
-  color: var(--scufris-color-accent);
+  border-color: var(--dashboardd-color-accent);
+  color: var(--dashboardd-color-accent);
   outline: none;
 }
 
 .editing .dashboard-widget.linked-highlight {
-  outline: 3px solid var(--scufris-color-accent);
+  outline: 3px solid var(--dashboardd-color-accent);
   outline-offset: 2px;
 }
 
@@ -543,11 +543,11 @@ button.widget-link-badge {
   grid-template-columns: minmax(90px, 0.45fr) minmax(0, 1fr);
   gap: 14px;
   padding: 10px 0;
-  border-bottom: 1px solid var(--scufris-color-border);
+  border-bottom: 1px solid var(--dashboardd-color-border);
 }
 
 .health-details dt {
-  color: var(--scufris-color-text-muted);
+  color: var(--dashboardd-color-text-muted);
   font-size: 11px;
 }
 
@@ -555,8 +555,8 @@ button.widget-link-badge {
   min-width: 0;
   margin: 0;
   overflow-wrap: anywhere;
-  color: var(--scufris-color-text-bright);
-  font-family: var(--scufris-font-mono);
+  color: var(--dashboardd-color-text-bright);
+  font-family: var(--dashboardd-font-mono);
   font-size: 11px;
 }
 
@@ -568,26 +568,26 @@ button.widget-link-badge {
   display: grid;
   gap: 7px;
   margin-top: 18px;
-  color: var(--scufris-color-text-muted);
+  color: var(--dashboardd-color-text-muted);
   font-size: 12px;
 }
 
 .relink-control select {
   width: 100%;
   padding: 7px;
-  border: 1px solid var(--scufris-color-border);
+  border: 1px solid var(--dashboardd-color-border);
   border-radius: 3px;
-  background: var(--scufris-color-surface);
-  color: var(--scufris-color-text-bright);
+  background: var(--dashboardd-color-surface);
+  color: var(--dashboardd-color-text-bright);
 }
 
 .dashboard-slot {
   display: grid;
   place-items: center;
-  border: 1px dashed var(--scufris-color-border);
-  border-radius: var(--scufris-radius-widget);
+  border: 1px dashed var(--dashboardd-color-border);
+  border-radius: var(--dashboardd-radius-widget);
   background: rgb(40 40 40 / 30%);
-  color: var(--scufris-color-border);
+  color: var(--dashboardd-color-border);
   cursor: pointer;
   font-size: 40px;
 }
@@ -596,14 +596,14 @@ button.widget-link-badge {
 .dashboard-slot:focus-visible,
 .dashboard-slot.keyboard-selected,
 .dashboard-slot.drop-target {
-  border-color: var(--scufris-color-accent);
+  border-color: var(--dashboardd-color-accent);
   background: rgb(255 221 51 / 5%);
-  color: var(--scufris-color-accent);
+  color: var(--dashboardd-color-accent);
   outline: none;
 }
 
 .dashboard-slot.drop-target {
-  outline: 3px solid var(--scufris-color-accent);
+  outline: 3px solid var(--dashboardd-color-accent);
   outline-offset: -6px;
 }
 
@@ -616,8 +616,8 @@ button.widget-link-badge {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  color: var(--scufris-color-text-muted);
-  font-family: var(--scufris-font-mono);
+  color: var(--dashboardd-color-text-muted);
+  font-family: var(--dashboardd-font-mono);
   font-size: 9px;
   opacity: 0;
   transition: opacity 180ms ease;
@@ -635,8 +635,8 @@ body.editing .dashboard-footer,
   align-items: center;
   gap: 8px;
   margin-left: auto;
-  color: var(--scufris-color-text-muted);
-  font-family: var(--scufris-font-mono);
+  color: var(--dashboardd-color-text-muted);
+  font-family: var(--dashboardd-font-mono);
   font-size: 10px;
 }
 
@@ -653,7 +653,7 @@ body.editing .dashboard-footer,
 }
 
 .keyboard-hint strong {
-  color: var(--scufris-color-accent);
+  color: var(--dashboardd-color-accent);
   font-weight: 500;
 }
 
@@ -671,11 +671,11 @@ body.editing .dashboard-footer,
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: var(--scufris-color-accent);
+  background: var(--dashboardd-color-accent);
 }
 
 .status-dot[data-status="connected"] {
-  background: var(--scufris-color-success);
+  background: var(--dashboardd-color-success);
 }
 
 .status-dot[data-status="disconnected"],
@@ -684,16 +684,16 @@ body.editing .dashboard-footer,
 }
 
 .status-dot[data-status="error"] {
-  background: var(--scufris-color-danger);
+  background: var(--dashboardd-color-danger);
 }
 
 .modal {
   width: min(calc(100% - 32px), 480px);
   padding: 0;
-  border: 1px solid var(--scufris-color-border);
+  border: 1px solid var(--dashboardd-color-border);
   border-radius: 7px;
-  background: var(--scufris-color-surface);
-  color: var(--scufris-color-text);
+  background: var(--dashboardd-color-surface);
+  color: var(--dashboardd-color-text);
   box-shadow: 0 22px 70px rgb(0 0 0 / 55%);
 }
 
@@ -725,12 +725,12 @@ body.editing .dashboard-footer,
 }
 
 .modal h2 {
-  color: var(--scufris-color-text-bright);
+  color: var(--dashboardd-color-text-bright);
   font-size: 20px;
 }
 
 .modal h3 {
-  color: var(--scufris-color-accent);
+  color: var(--dashboardd-color-accent);
   font-size: 16px;
 }
 
@@ -756,13 +756,13 @@ body.editing .dashboard-footer,
 }
 
 .keyboard-help-list dt {
-  color: var(--scufris-color-accent);
-  font-family: var(--scufris-font-mono);
+  color: var(--dashboardd-color-accent);
+  font-family: var(--dashboardd-font-mono);
 }
 
 .keyboard-help-list dd {
   margin: 0;
-  color: var(--scufris-color-text-muted);
+  color: var(--dashboardd-color-text-muted);
 }
 
 .command-palette-modal {
@@ -774,54 +774,54 @@ body.editing .dashboard-footer,
   align-items: center;
   gap: 8px;
   margin-top: 18px;
-  color: var(--scufris-color-accent);
-  font-family: var(--scufris-font-mono);
+  color: var(--dashboardd-color-accent);
+  font-family: var(--dashboardd-font-mono);
 }
 
 .command-palette-modal input {
   width: 100%;
   padding: 11px 12px;
-  border: 1px solid var(--scufris-color-selection);
+  border: 1px solid var(--dashboardd-color-selection);
   border-radius: 4px;
-  background: var(--scufris-color-canvas);
-  color: var(--scufris-color-text-bright);
-  font-family: var(--scufris-font-mono);
+  background: var(--dashboardd-color-canvas);
+  color: var(--dashboardd-color-text-bright);
+  font-family: var(--dashboardd-font-mono);
 }
 
 .command-completions {
   margin: 6px 0 0;
   padding: 4px;
-  border: 1px solid var(--scufris-color-selection);
+  border: 1px solid var(--dashboardd-color-selection);
   border-radius: 4px;
-  background: var(--scufris-color-canvas);
+  background: var(--dashboardd-color-canvas);
   list-style: none;
 }
 
 .command-completions li {
   padding: 7px 9px;
   border-radius: 3px;
-  color: var(--scufris-color-text-muted);
+  color: var(--dashboardd-color-text-muted);
   cursor: pointer;
-  font-family: var(--scufris-font-mono);
+  font-family: var(--dashboardd-font-mono);
   font-size: 11px;
 }
 
 .command-completions li[aria-selected="true"],
 .command-completions li:hover {
-  background: var(--scufris-color-selection);
-  color: var(--scufris-color-text-bright);
+  background: var(--dashboardd-color-selection);
+  color: var(--dashboardd-color-text-bright);
 }
 
 .command-error {
   margin-top: 10px !important;
-  color: var(--scufris-color-danger);
+  color: var(--dashboardd-color-danger);
   font-size: 12px;
 }
 
 .modal-position {
   margin-top: 10px !important;
-  color: var(--scufris-color-text-muted);
-  font-family: var(--scufris-font-mono);
+  color: var(--dashboardd-color-text-muted);
+  font-family: var(--dashboardd-font-mono);
   font-size: 12px;
 }
 
@@ -847,36 +847,36 @@ body.editing .dashboard-footer,
   gap: 4px;
   width: 100%;
   padding: 14px;
-  border: 1px solid var(--scufris-color-selection);
+  border: 1px solid var(--dashboardd-color-selection);
   border-radius: 5px;
-  background: var(--scufris-color-canvas);
-  color: var(--scufris-color-text);
+  background: var(--dashboardd-color-canvas);
+  color: var(--dashboardd-color-text);
   text-align: left;
   cursor: pointer;
 }
 
 .widget-choice strong {
-  color: var(--scufris-color-text-bright);
+  color: var(--dashboardd-color-text-bright);
 }
 
 .widget-choice span {
-  color: var(--scufris-color-text-muted);
+  color: var(--dashboardd-color-text-muted);
   font-size: 12px;
 }
 
 .widget-choice:hover,
 .widget-choice:focus-visible,
 .widget-choice.selected {
-  border-color: var(--scufris-color-accent);
+  border-color: var(--dashboardd-color-accent);
   outline: none;
 }
 
 .widget-selection {
   min-width: 0;
   padding: 14px;
-  border: 1px solid var(--scufris-color-selection);
+  border: 1px solid var(--dashboardd-color-selection);
   border-radius: 5px;
-  background: var(--scufris-color-canvas);
+  background: var(--dashboardd-color-canvas);
 }
 
 .widget-selection:focus {
@@ -889,14 +889,14 @@ body.editing .dashboard-footer,
   padding: 0;
   border: 0;
   background: transparent;
-  color: var(--scufris-color-accent);
+  color: var(--dashboardd-color-accent);
   cursor: pointer;
 }
 
 .widget-description,
 .no-options {
   margin-top: 5px !important;
-  color: var(--scufris-color-text-muted);
+  color: var(--dashboardd-color-text-muted);
   font-size: 12px;
 }
 
@@ -909,7 +909,7 @@ body.editing .dashboard-footer,
 
 .widget-selection legend {
   margin-bottom: 8px;
-  color: var(--scufris-color-text-muted);
+  color: var(--dashboardd-color-text-muted);
   font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -926,24 +926,24 @@ body.editing .dashboard-footer,
   gap: 2px;
   min-width: 86px;
   padding: 9px 12px;
-  border: 1px solid var(--scufris-color-selection);
+  border: 1px solid var(--dashboardd-color-selection);
   border-radius: 4px;
-  background: var(--scufris-color-surface);
-  color: var(--scufris-color-text);
+  background: var(--dashboardd-color-surface);
+  color: var(--dashboardd-color-text);
   cursor: pointer;
   text-align: left;
 }
 
 .variant-choice span {
-  color: var(--scufris-color-text-muted);
-  font-family: var(--scufris-font-mono);
+  color: var(--dashboardd-color-text-muted);
+  font-family: var(--dashboardd-font-mono);
   font-size: 10px;
 }
 
 .variant-choice:hover,
 .variant-choice:focus-visible,
 .variant-choice.selected {
-  border-color: var(--scufris-color-accent);
+  border-color: var(--dashboardd-color-accent);
   outline: none;
 }
 
@@ -966,7 +966,7 @@ body.editing .dashboard-footer,
 
 .widget-option small {
   margin-top: 2px;
-  color: var(--scufris-color-text-muted);
+  color: var(--dashboardd-color-text-muted);
   font-size: 10px;
 }
 
@@ -976,10 +976,10 @@ body.editing .dashboard-footer,
 .widget-option select {
   width: 106px;
   padding: 6px;
-  border: 1px solid var(--scufris-color-selection);
+  border: 1px solid var(--dashboardd-color-selection);
   border-radius: 3px;
-  background: var(--scufris-color-surface);
-  color: var(--scufris-color-text-bright);
+  background: var(--dashboardd-color-surface);
+  color: var(--dashboardd-color-text-bright);
 }
 
 .widget-option.integer,
@@ -1012,14 +1012,14 @@ body.editing .dashboard-footer,
 .widget-option textarea {
   min-height: 96px;
   resize: vertical;
-  font-family: var(--scufris-font-mono);
+  font-family: var(--dashboardd-font-mono);
   font-size: 11px;
   line-height: 1.4;
 }
 
 .confirm-modal p {
   margin-top: 18px;
-  color: var(--scufris-color-text-muted);
+  color: var(--dashboardd-color-text-muted);
   font-size: 14px;
 }
 
@@ -1115,8 +1115,8 @@ body.editing .dashboard-footer,
 
 .home-kicker {
   margin: 0 0 6px;
-  color: var(--scufris-color-accent);
-  font-family: var(--scufris-font-mono);
+  color: var(--dashboardd-color-accent);
+  font-family: var(--dashboardd-font-mono);
   font-size: 11px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -1131,9 +1131,9 @@ body.editing .dashboard-footer,
 .dashboard-card,
 .dashboard-create-tile {
   min-height: 280px;
-  border: 1px solid var(--scufris-color-border);
+  border: 1px solid var(--dashboardd-color-border);
   border-radius: 7px;
-  background: var(--scufris-color-surface);
+  background: var(--dashboardd-color-surface);
 }
 
 .dashboard-card {
@@ -1144,7 +1144,7 @@ body.editing .dashboard-footer,
 }
 
 .dashboard-card.keyboard-selected {
-  outline: 2px solid var(--scufris-color-accent);
+  outline: 2px solid var(--dashboardd-color-accent);
   outline-offset: 3px;
 }
 
@@ -1158,8 +1158,8 @@ body.editing .dashboard-footer,
 .dashboard-card h2 {
   overflow: hidden;
   margin: 0;
-  color: var(--scufris-color-text-bright);
-  font-family: var(--scufris-font-mono);
+  color: var(--dashboardd-color-text-bright);
+  font-family: var(--dashboardd-font-mono);
   font-size: 18px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1167,8 +1167,8 @@ body.editing .dashboard-footer,
 
 .dashboard-card-summary {
   flex: none;
-  color: var(--scufris-color-text-muted);
-  font-family: var(--scufris-font-mono);
+  color: var(--dashboardd-color-text-muted);
+  font-family: var(--dashboardd-font-mono);
   font-size: 10px;
 }
 
@@ -1180,20 +1180,20 @@ body.editing .dashboard-footer,
   min-height: 130px;
   padding: 8px;
   overflow: hidden;
-  border: 1px solid var(--scufris-color-selection);
+  border: 1px solid var(--dashboardd-color-selection);
   border-radius: 4px;
-  background: var(--scufris-color-canvas);
+  background: var(--dashboardd-color-canvas);
 }
 
 .dashboard-preview-widget {
   min-width: 0;
   padding: 4px;
   overflow: hidden;
-  border: 1px solid var(--scufris-color-border);
+  border: 1px solid var(--dashboardd-color-border);
   border-radius: 2px;
-  background: var(--scufris-color-surface);
-  color: var(--scufris-color-text-muted);
-  font-family: var(--scufris-font-mono);
+  background: var(--dashboardd-color-surface);
+  color: var(--dashboardd-color-text-muted);
+  font-family: var(--dashboardd-font-mono);
   font-size: 8px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1202,8 +1202,8 @@ body.editing .dashboard-footer,
 .dashboard-preview-empty {
   grid-area: 1 / 1 / -1 / -1;
   place-self: center;
-  color: var(--scufris-color-text-dim);
-  font-family: var(--scufris-font-mono);
+  color: var(--dashboardd-color-text-dim);
+  font-family: var(--dashboardd-font-mono);
   font-size: 10px;
 }
 
@@ -1212,7 +1212,7 @@ body.editing .dashboard-footer,
   align-items: center;
   gap: 7px;
   margin: 0;
-  color: var(--scufris-color-text-muted);
+  color: var(--dashboardd-color-text-muted);
   font-size: 11px;
 }
 
@@ -1221,21 +1221,21 @@ body.editing .dashboard-footer,
 }
 
 .dashboard-card-health[data-status="healthy"] .status-dot {
-  background: var(--scufris-color-success);
+  background: var(--dashboardd-color-success);
 }
 
 .dashboard-card-health[data-status="empty"] .status-dot {
-  background: var(--scufris-color-text-dim);
+  background: var(--dashboardd-color-text-dim);
 }
 
 .dashboard-card-health[data-status="failed"] .status-dot,
 .dashboard-card-health[data-status="degraded"] .status-dot {
-  background: var(--scufris-color-danger);
+  background: var(--dashboardd-color-danger);
 }
 
 .dashboard-card-health[data-status="stale"] .status-dot,
 .dashboard-card-health[data-status="starting"] .status-dot {
-  background: var(--scufris-color-accent);
+  background: var(--dashboardd-color-accent);
 }
 
 .dashboard-card > footer {
@@ -1254,7 +1254,7 @@ body.editing .dashboard-footer,
 .dashboard-card-menu {
   position: relative;
   margin-left: auto;
-  color: var(--scufris-color-text-muted);
+  color: var(--dashboardd-color-text-muted);
   font-size: 10px;
 }
 
@@ -1269,7 +1269,7 @@ body.editing .dashboard-footer,
 }
 
 .dashboard-card-menu[open] summary {
-  color: var(--scufris-color-accent);
+  color: var(--dashboardd-color-accent);
 }
 
 .dashboard-card-menu > div {
@@ -1280,9 +1280,9 @@ body.editing .dashboard-footer,
   display: grid;
   min-width: 120px;
   padding: 5px;
-  border: 1px solid var(--scufris-color-border);
+  border: 1px solid var(--dashboardd-color-border);
   border-radius: 4px;
-  background: var(--scufris-color-canvas);
+  background: var(--dashboardd-color-canvas);
   box-shadow: 0 8px 24px rgb(0 0 0 / 35%);
 }
 
@@ -1290,7 +1290,7 @@ body.editing .dashboard-footer,
   padding: 7px 9px;
   border: 0;
   background: transparent;
-  color: var(--scufris-color-text-muted);
+  color: var(--dashboardd-color-text-muted);
   cursor: pointer;
   font-size: 10px;
   text-align: left;
@@ -1298,28 +1298,28 @@ body.editing .dashboard-footer,
 
 .home-card-action:hover,
 .home-card-action:focus-visible {
-  background: var(--scufris-color-selection);
-  color: var(--scufris-color-accent);
+  background: var(--dashboardd-color-selection);
+  color: var(--dashboardd-color-accent);
   outline: none;
 }
 
 .home-card-action.danger-text:hover,
 .home-card-action.danger-text:focus-visible {
-  color: var(--scufris-color-danger);
+  color: var(--dashboardd-color-danger);
 }
 
 .dashboard-create-tile {
   display: grid;
   place-content: center;
   gap: 8px;
-  color: var(--scufris-color-text-muted);
+  color: var(--dashboardd-color-text-muted);
   cursor: pointer;
 }
 
 .dashboard-create-tile:hover,
 .dashboard-create-tile:focus-visible {
-  border-color: var(--scufris-color-accent);
-  color: var(--scufris-color-accent);
+  border-color: var(--dashboardd-color-accent);
+  color: var(--dashboardd-color-accent);
   outline: none;
 }
 
@@ -1336,11 +1336,11 @@ body.editing .dashboard-footer,
 }
 
 .dashboard-home-empty h2 {
-  color: var(--scufris-color-text-bright);
+  color: var(--dashboardd-color-text-bright);
 }
 
 .dashboard-home-empty p {
-  color: var(--scufris-color-text-muted);
+  color: var(--dashboardd-color-text-muted);
   line-height: 1.6;
 }
 
@@ -1352,8 +1352,8 @@ body.editing .dashboard-footer,
   max-width: 220px;
   border: 0;
   background: transparent;
-  color: var(--scufris-color-text-muted);
-  font-family: var(--scufris-font-mono);
+  color: var(--dashboardd-color-text-muted);
+  font-family: var(--dashboardd-font-mono);
   font-size: 10px;
 }
 

@@ -7,7 +7,7 @@ description = "RAM and swap usage"
 package = "memory"
 
 [frontend]
-workspace = "@scufris/memory-widget"
+workspace = "@dashboardd/memory-widget"
 
 [[frontend.variants]]
 id = "full"

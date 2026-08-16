@@ -1,5 +1,5 @@
 {
-  description = "Development environment for the Scufris dashboard";
+  description = "Development environment for the dashboardd dashboard";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";

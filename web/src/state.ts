@@ -1,4 +1,4 @@
-import type { WidgetSharedState } from "@scufris/widget-sdk";
+import type { WidgetSharedState } from "@dashboardd/widget-sdk";
 import {
   parseWidgetStateResource,
   type ErrorResponse,

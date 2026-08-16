@@ -178,7 +178,7 @@ mod tests {
 
     fn temporary_path(label: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
-            "scufris-state-{label}-{}-{}.json",
+            "dashboardd-state-{label}-{}-{}.json",
             std::process::id(),
             std::thread::current().name().unwrap_or("test")
         ))

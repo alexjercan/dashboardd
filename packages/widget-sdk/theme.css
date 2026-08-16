@@ -1,18 +1,18 @@
 :root {
-  --scufris-color-canvas: #181818;
-  --scufris-color-surface: #282828;
-  --scufris-color-selection: #453d41;
-  --scufris-color-text: #e4e4ef;
-  --scufris-color-text-bright: #f4f4ff;
-  --scufris-color-text-muted: #65737e;
-  --scufris-color-text-dim: #535057;
-  --scufris-color-accent: #ffdd33;
-  --scufris-color-border: #96a6c8;
-  --scufris-color-success: #73c936;
-  --scufris-color-danger: #f43841;
-  --scufris-color-secondary: #9e95c7;
-  --scufris-font-sans: "Iosevka", ui-sans-serif, system-ui, sans-serif;
-  --scufris-font-mono:
+  --dashboardd-color-canvas: #181818;
+  --dashboardd-color-surface: #282828;
+  --dashboardd-color-selection: #453d41;
+  --dashboardd-color-text: #e4e4ef;
+  --dashboardd-color-text-bright: #f4f4ff;
+  --dashboardd-color-text-muted: #65737e;
+  --dashboardd-color-text-dim: #535057;
+  --dashboardd-color-accent: #ffdd33;
+  --dashboardd-color-border: #96a6c8;
+  --dashboardd-color-success: #73c936;
+  --dashboardd-color-danger: #f43841;
+  --dashboardd-color-secondary: #9e95c7;
+  --dashboardd-font-sans: "Iosevka", ui-sans-serif, system-ui, sans-serif;
+  --dashboardd-font-mono:
     "Iosevka", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  --scufris-radius-widget: 7px;
+  --dashboardd-radius-widget: 7px;
 }

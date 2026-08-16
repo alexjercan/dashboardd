@@ -415,7 +415,7 @@ fn cache_path() -> Option<PathBuf> {
     env::var_os("XDG_CACHE_HOME")
         .map(PathBuf::from)
         .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache")))
-        .map(|directory| directory.join("scufris/claude-usage.json"))
+        .map(|directory| directory.join("dashboardd/claude-usage.json"))
 }
 
 fn credentials_path() -> Option<PathBuf> {

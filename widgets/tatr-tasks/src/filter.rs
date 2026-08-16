@@ -321,7 +321,7 @@ mod tests {
         Task {
             id: "20260814-120000".into(),
             project_id: "project-test".into(),
-            project: "scufris".into(),
+            project: "sample".into(),
             worktree_id: "worktree-test".into(),
             worktree: "Primary".into(),
             title: "Add task widget".into(),
@@ -348,7 +348,7 @@ mod tests {
 
     #[test]
     fn rejects_unknown_fields_and_invalid_operator_types() {
-        assert!(compile(":project eq scufris").is_err());
+        assert!(compile(":project eq sample").is_err());
         assert!(compile(":tags in [widget]").is_err());
         assert!(compile(":status eq MAYBE").is_err());
         assert!(compile(":priority eq high").is_err());

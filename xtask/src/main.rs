@@ -344,8 +344,8 @@ fn validate_manifest(
     {
         return Err("widget name and backend package must be valid".into());
     }
-    if !manifest.frontend.workspace.starts_with("@scufris/") {
-        return Err("frontend workspace must use the @scufris scope".into());
+    if !manifest.frontend.workspace.starts_with("@dashboardd/") {
+        return Err("frontend workspace must use the @dashboardd scope".into());
     }
     if manifest.frontend.variants.is_empty() {
         return Err("frontend must declare at least one variant".into());
