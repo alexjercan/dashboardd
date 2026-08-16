@@ -26,13 +26,38 @@
           rustNightly = pkgs.rust-bin.nightly.latest.default.override {
             extensions = [ "rust-src" "clippy" "rustfmt" ];
           };
+          docs = pkgs.stdenvNoCC.mkDerivation {
+            pname = "dashboardd-docs";
+            version = "0.1.0";
+            src = ./.;
+            nativeBuildInputs = [ pkgs.mdbook pkgs.mdbook-mermaid ];
+            buildPhase = ''
+              runHook preBuild
+              mdbook-mermaid install docs
+              mdbook build docs
+              runHook postBuild
+            '';
+            installPhase = ''
+              runHook preInstall
+              mkdir -p "$out"
+              cp -R docs/book/. "$out/"
+              cp -R schemas "$out/schemas"
+              runHook postInstall
+            '';
+          };
         in {
+          packages.docs = docs;
+          checks.docs = docs;
+
           devShells.default = pkgs.mkShell {
             packages = [
               rustNightly
               pkgs.nodejs_22
               pkgs.chromium
               pkgs.rust-analyzer
+              pkgs.python3
+              pkgs.mdbook
+              pkgs.mdbook-mermaid
             ];
 
             RUST_SRC_PATH = "${rustNightly}/lib/rustlib/src/rust/library";

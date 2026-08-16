@@ -1,0 +1,18 @@
+[book]
+authors = ["Alex Jercan"]
+description = "User and widget author documentation for dashboardd"
+language = "en"
+src = "src"
+title = "dashboardd"
+
+[build]
+build-dir = "book"
+
+[preprocessor.mermaid]
+command = "mdbook-mermaid"
+
+[output.html]
+site-url = "/dashboardd/"
+git-repository-icon = "fab-github"
+git-repository-url = "https://github.com/alexjercan/dashboardd"
+additional-js = ["mermaid.min.js", "mermaid-init.js"]

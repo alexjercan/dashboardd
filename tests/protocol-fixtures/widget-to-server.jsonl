@@ -1,0 +1,5 @@
+{"version":1,"kind":"ready","data":{"widget_id":"today"}}
+{"version":1,"kind":"update","data":{"instance_id":"today-1","payload":{"tasks_remaining":2}}}
+{"version":1,"kind":"pong","data":{"nonce":42}}
+{"version":1,"kind":"error","data":{"instance_id":"today-1","error":{"code":"invalid_command","message":"Unknown command"}}}
+{"version":1,"kind":"error","data":{"instance_id":null,"error":{"code":"startup_failed","message":"Could not read data"}}}

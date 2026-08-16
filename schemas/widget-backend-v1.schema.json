@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://alexjercan.github.io/dashboardd/schemas/widget-backend-v1.schema.json",
+  "title": "dashboardd widget backend protocol v1",
+  "anyOf": [
+    { "$ref": "#/$defs/serverToWidget" },
+    { "$ref": "#/$defs/widgetToServer" }
+  ],
+  "$defs": {
+    "id": { "type": "string", "minLength": 1 },
+    "error": {
+      "type": "object",
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "type": "string", "minLength": 1 },
+        "message": { "type": "string", "minLength": 1 }
+      }
+    },
+    "initialize": {
+      "type": "object",
+      "required": ["version", "kind", "data"],
+      "properties": {
+        "version": { "const": 1 },
+        "kind": { "const": "initialize" },
+        "data": {
+          "type": "object",
+          "required": ["instance_id", "widget_id", "variant_id", "options"],
+          "properties": {
+            "instance_id": { "$ref": "#/$defs/id" },
+            "widget_id": { "$ref": "#/$defs/id" },
+            "variant_id": { "$ref": "#/$defs/id" },
+            "options": { "type": "object" }
+          }
+        }
+      }
+    },
+    "message": {
+      "type": "object",
+      "required": ["version", "kind", "data"],
+      "properties": {
+        "version": { "const": 1 },
+        "kind": { "const": "message" },
+        "data": {
+          "type": "object",
+          "required": ["instance_id", "payload"],
+          "properties": {
+            "instance_id": { "$ref": "#/$defs/id" },
+            "payload": true
+          }
+        }
+      }
+    },
+    "ping": {
+      "type": "object",
+      "required": ["version", "kind", "data"],
+      "properties": {
+        "version": { "const": 1 },
+        "kind": { "const": "ping" },
+        "data": {
+          "type": "object",
+          "required": ["nonce"],
+          "properties": { "nonce": { "type": "integer", "minimum": 0 } }
+        }
+      }
+    },
+    "serverError": {
+      "type": "object",
+      "required": ["version", "kind", "data"],
+      "properties": {
+        "version": { "const": 1 },
+        "kind": { "const": "error" },
+        "data": {
+          "type": "object",
+          "required": ["error"],
+          "properties": { "error": { "$ref": "#/$defs/error" } }
+        }
+      }
+    },
+    "shutdown": {
+      "type": "object",
+      "required": ["version", "kind", "data"],
+      "properties": {
+        "version": { "const": 1 },
+        "kind": { "const": "shutdown" },
+        "data": { "type": "object" }
+      }
+    },
+    "ready": {
+      "type": "object",
+      "required": ["version", "kind", "data"],
+      "properties": {
+        "version": { "const": 1 },
+        "kind": { "const": "ready" },
+        "data": {
+          "type": "object",
+          "required": ["widget_id"],
+          "properties": { "widget_id": { "$ref": "#/$defs/id" } }
+        }
+      }
+    },
+    "update": {
+      "type": "object",
+      "required": ["version", "kind", "data"],
+      "properties": {
+        "version": { "const": 1 },
+        "kind": { "const": "update" },
+        "data": {
+          "type": "object",
+          "required": ["instance_id", "payload"],
+          "properties": {
+            "instance_id": { "$ref": "#/$defs/id" },
+            "payload": true
+          }
+        }
+      }
+    },
+    "pong": {
+      "type": "object",
+      "required": ["version", "kind", "data"],
+      "properties": {
+        "version": { "const": 1 },
+        "kind": { "const": "pong" },
+        "data": {
+          "type": "object",
+          "required": ["nonce"],
+          "properties": { "nonce": { "type": "integer", "minimum": 0 } }
+        }
+      }
+    },
+    "widgetError": {
+      "type": "object",
+      "required": ["version", "kind", "data"],
+      "properties": {
+        "version": { "const": 1 },
+        "kind": { "const": "error" },
+        "data": {
+          "type": "object",
+          "required": ["instance_id", "error"],
+          "properties": {
+            "instance_id": {
+              "oneOf": [{ "$ref": "#/$defs/id" }, { "type": "null" }]
+            },
+            "error": { "$ref": "#/$defs/error" }
+          }
+        }
+      }
+    },
+    "serverToWidget": {
+      "oneOf": [
+        { "$ref": "#/$defs/initialize" },
+        { "$ref": "#/$defs/message" },
+        { "$ref": "#/$defs/ping" },
+        { "$ref": "#/$defs/serverError" },
+        { "$ref": "#/$defs/shutdown" }
+      ]
+    },
+    "widgetToServer": {
+      "oneOf": [
+        { "$ref": "#/$defs/ready" },
+        { "$ref": "#/$defs/update" },
+        { "$ref": "#/$defs/pong" },
+        { "$ref": "#/$defs/widgetError" }
+      ]
+    }
+  }
+}

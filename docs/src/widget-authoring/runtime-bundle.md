@@ -1,0 +1,74 @@
+# Runtime bundle
+
+Runtime manifest schema version 2 is the installed widget discovery contract. The machine-readable schema is [`schemas/widget-runtime-v2.schema.json`](https://github.com/alexjercan/dashboardd/blob/master/schemas/widget-runtime-v2.schema.json).
+
+## Layout
+
+```text
+<widget-root>/
+  <widget-id>/
+    widget.json
+    bin/<backend>
+    frontend/<variant>.js
+```
+
+`DASHBOARDD_WIDGETS_DIR` selects one widget root. Multi-root discovery is planned for external Nix package composition.
+
+Manifest paths must be relative normal paths. Absolute paths, `..`, `.`, roots, and platform prefixes are rejected. Declared files must exist. Symlinked files are accepted, which permits immutable Nix store composition.
+
+## Example
+
+```json
+{
+  "schema_version": 2,
+  "id": "today",
+  "name": "Today",
+  "description": "Daily tasks, habits, and health",
+  "backend": "bin/today-dashboardd-widget",
+  "variants": [
+    {
+      "id": "summary",
+      "name": "Summary",
+      "width": 3,
+      "height": 2,
+      "frontend": "frontend/summary.js",
+      "focus": false
+    }
+  ],
+  "options": [],
+  "inputs": [],
+  "outputs": []
+}
+```
+
+## Identifiers
+
+Widget and variant IDs use lowercase ASCII letters, digits, and internal hyphens. Option and port IDs use lowercase ASCII letters, digits, and internal underscores. IDs are stable persistence keys.
+
+## Variants
+
+Each variant declares:
+
+- A unique ID and non-empty display name.
+- Positive grid width and height.
+- One self-contained frontend ES module.
+- Whether the variant supports Focus.
+
+A frontend bundle must not depend on unserved relative chunks.
+
+## Options
+
+Supported option types are:
+
+- `boolean`
+- `text`, with optional `multiline`
+- `integer`, with `minimum`, `maximum`, and positive `step`
+- `select`, with one or more unique choices
+
+Defaults must satisfy their type and constraints. `variants` limits an option to named variants. An empty list applies to every variant.
+
+Options are public configuration. Never use options for secrets.
+
+## Link ports
+
+Inputs and outputs declare a unique ID, display name, semantic type, applicable variants, and whether an input is required. dashboardd links ports only when their type strings match exactly.

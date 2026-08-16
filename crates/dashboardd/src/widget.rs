@@ -266,14 +266,14 @@ fn read_config(widget_directory: &Path) -> io::Result<WidgetConfig> {
             "unsupported schema_version",
         ));
     }
-    if manifest.id.is_empty()
-        || manifest.name.is_empty()
-        || manifest.description.is_empty()
+    if !valid_kebab_id(&manifest.id)
+        || manifest.name.trim().is_empty()
+        || manifest.description.trim().is_empty()
         || manifest.variants.is_empty()
     {
         return Err(invalid_manifest(
             &manifest_path,
-            "id, name, description, and variants must not be empty",
+            "id must use kebab case; name, description, and variants must not be empty",
         ));
     }
     validate_path(&manifest_path, "backend", &manifest.backend)?;
@@ -290,8 +290,8 @@ fn read_config(widget_directory: &Path) -> io::Result<WidgetConfig> {
     let mut frontends = Vec::new();
     for variant in manifest.variants {
         validate_path(&manifest_path, "frontend", &variant.frontend)?;
-        if variant.id.is_empty()
-            || variant.name.is_empty()
+        if !valid_kebab_id(&variant.id)
+            || variant.name.trim().is_empty()
             || variant.width == 0
             || variant.height == 0
             || !ids.insert(variant.id.clone())
@@ -346,7 +346,7 @@ fn validate_options(
 ) -> io::Result<()> {
     let mut option_ids = HashSet::new();
     for option in options {
-        if option.id.is_empty()
+        if !valid_snake_id(&option.id)
             || option.name.trim().is_empty()
             || option.description.trim().is_empty()
             || !option_ids.insert(&option.id)
@@ -398,7 +398,7 @@ fn validate_ports(
 ) -> io::Result<()> {
     let mut ids = HashSet::new();
     for port in inputs.iter().chain(outputs) {
-        if port.id.is_empty()
+        if !valid_snake_id(&port.id)
             || port.name.trim().is_empty()
             || port.link_type.trim().is_empty()
             || !ids.insert(&port.id)
@@ -420,6 +420,27 @@ fn validate_ports(
         ));
     }
     Ok(())
+}
+
+fn valid_kebab_id(value: &str) -> bool {
+    valid_id(value, b'-')
+}
+
+fn valid_snake_id(value: &str) -> bool {
+    valid_id(value, b'_')
+}
+
+fn valid_id(value: &str, separator: u8) -> bool {
+    !value.is_empty()
+        && !value.starts_with(char::from(separator))
+        && !value.ends_with(char::from(separator))
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == separator)
+        && !value
+            .as_bytes()
+            .windows(2)
+            .any(|pair| pair == [separator; 2])
 }
 
 fn validate_path(manifest: &Path, label: &str, path: &Path) -> io::Result<()> {
@@ -507,6 +528,16 @@ mod tests {
                 .is_err()
         );
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn public_manifest_ids_use_stable_case() {
+        assert!(valid_kebab_id("external-fixture"));
+        assert!(!valid_kebab_id("External-Fixture"));
+        assert!(!valid_kebab_id("external--fixture"));
+        assert!(valid_snake_id("selected_task"));
+        assert!(!valid_snake_id("selected__task"));
+        assert!(!valid_snake_id("selected-task"));
     }
 
     #[test]

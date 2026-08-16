@@ -9,11 +9,16 @@
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
-    "format": "prettier --write \"{packages,web,widgets,tests}/**/*.{ts,js,mjs,html,css,json}\" \"*.json\"",
-    "format:check": "prettier --check \"{packages,web,widgets,tests}/**/*.{ts,js,mjs,html,css,json}\" \"*.json\"",
-    "test": "node tests/browser.mjs"
+    "docs:assets": "mdbook-mermaid install docs",
+    "docs:build": "npm run docs:assets && mdbook build docs",
+    "docs:serve": "npm run docs:assets && mdbook serve docs --open",
+    "format": "prettier --write \"{packages,web,widgets,tests,schemas}/**/*.{ts,js,mjs,html,css,json}\" \"{docs,.github}/**/*.{md,yml}\" \"*.{json,md}\"",
+    "format:check": "prettier --check \"{packages,web,widgets,tests,schemas}/**/*.{ts,js,mjs,html,css,json}\" \"{docs,.github}/**/*.{md,yml}\" \"*.{json,md}\"",
+    "test:contracts": "node tests/contracts.mjs",
+    "test": "npm run test:contracts && node tests/browser.mjs"
   },
   "devDependencies": {
+    "ajv": "^8.17.1",
     "playwright-core": "^1.55.0",
     "prettier": "^3.5.3"
   }

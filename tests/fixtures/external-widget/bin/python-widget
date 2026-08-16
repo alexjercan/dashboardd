@@ -1,0 +1,74 @@
+#!/usr/bin/env python3
+import json
+import sys
+
+WIDGET_ID = "external-fixture"
+instance_id = None
+
+
+def send(kind, data):
+    print(
+        json.dumps(
+            {"version": 1, "kind": kind, "data": data},
+            separators=(",", ":"),
+        ),
+        flush=True,
+    )
+
+
+def fail(code, message):
+    send(
+        "error",
+        {
+            "instance_id": instance_id,
+            "error": {"code": code, "message": message},
+        },
+    )
+
+
+send("ready", {"widget_id": WIDGET_ID})
+for line in sys.stdin:
+    try:
+        envelope = json.loads(line)
+        if envelope.get("version") != 1:
+            fail("unsupported_version", "Backend protocol version must be 1")
+            continue
+        kind = envelope.get("kind")
+        data = envelope.get("data")
+        if not isinstance(data, dict):
+            fail("invalid_message", "Message data must be an object")
+            continue
+        if kind == "initialize":
+            if data.get("widget_id") != WIDGET_ID:
+                fail("invalid_widget", "Widget ID does not match")
+                continue
+            instance_id = data.get("instance_id")
+            if not isinstance(instance_id, str) or not instance_id:
+                fail("invalid_instance", "Instance ID is required")
+                continue
+            send(
+                "update",
+                {
+                    "instance_id": instance_id,
+                    "payload": {"source": "python", "initialized": True},
+                },
+            )
+        elif kind == "message":
+            if data.get("instance_id") != instance_id:
+                fail("invalid_instance", "Instance ID does not match")
+                continue
+            send(
+                "update",
+                {"instance_id": instance_id, "payload": data.get("payload")},
+            )
+        elif kind == "ping":
+            send("pong", {"nonce": data.get("nonce")})
+        elif kind == "error":
+            pass
+        elif kind == "shutdown":
+            break
+        else:
+            fail("invalid_message", "Unsupported message kind")
+    except (BrokenPipeError, json.JSONDecodeError, TypeError) as error:
+        print(str(error), file=sys.stderr, flush=True)
+        raise SystemExit(2) from error

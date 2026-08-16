@@ -1,0 +1,14 @@
+# Summary
+
+- [dashboardd](index.md)
+- [Quick start](quick-start.md)
+- [User guide](user-guide/index.md)
+  - [Navigation](user-guide/navigation.md)
+  - [Configuration](user-guide/configuration.md)
+  - [Bundled widgets](user-guide/widgets.md)
+- [Widget authoring](widget-authoring/index.md)
+  - [Runtime bundle](widget-authoring/runtime-bundle.md)
+  - [Backend protocol](widget-authoring/backend-protocol.md)
+  - [Frontend contract](widget-authoring/frontend.md)
+  - [Compatibility](widget-authoring/compatibility.md)
+- [Development](development.md)

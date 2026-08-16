@@ -1,0 +1,5 @@
+{"version":1,"kind":"initialize","data":{"instance_id":"today-1","widget_id":"today","variant_id":"summary","options":{"days":1}}}
+{"version":1,"kind":"message","data":{"instance_id":"today-1","payload":{"command":"refresh"}}}
+{"version":1,"kind":"ping","data":{"nonce":42}}
+{"version":1,"kind":"error","data":{"error":{"code":"invalid_message","message":"Message was rejected"}}}
+{"version":1,"kind":"shutdown","data":{}}

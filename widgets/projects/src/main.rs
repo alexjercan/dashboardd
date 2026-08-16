@@ -1058,9 +1058,7 @@ fn collect_project_documents(
             continue;
         }
         if metadata.is_dir() {
-            if depth == 0 && entry.file_name() == "docs" {
-                collect_project_documents(root, &path, depth + 1, values);
-            } else if depth > 0 {
+            if depth > 0 || entry.file_name() == "docs" {
                 collect_project_documents(root, &path, depth + 1, values);
             }
             continue;
@@ -1074,10 +1072,8 @@ fn collect_project_documents(
                 name.as_str(),
                 "README" | "README.md" | "AGENTS.md" | "CLAUDE.md"
             );
-        if !root_document || depth > 0 {
-            if !matches!(extension, Some("md" | "txt")) {
-                continue;
-            }
+        if !root_document && !matches!(extension, Some("md" | "txt")) {
+            continue;
         }
         if metadata.len() > MAX_DOCUMENT_BYTES {
             continue;

@@ -1,8 +1,8 @@
 # Support externally authored widget packages with Today
 
-- STATUS: OPEN
+- STATUS: IN_PROGRESS
 - PRIORITY: 100
-- TAGS: widget,sdk,external,packaging,nix,python,today
+- TAGS: widget, sdk, external, packaging, nix, python, today
 
 ## Goal
 
@@ -123,6 +123,20 @@ The proof must start from clean checkouts and demonstrate:
 - The Today Summary variant works in a real dashboard from a clean installation.
 - The documented release and local-development paths are reproducible.
 - All dashboardd, Today, and relevant nix.dotfiles checks pass.
+
+## Contract baseline progress
+
+- Added an mdBook documentation site with Mermaid diagrams, user guides, widget authoring contracts, and a Nix documentation package.
+- Added a GitHub Pages workflow that builds documentation on pull requests and deploys `master`.
+- Reduced the repository README to project purpose, quick start, documentation, and checks. Moved widget-specific README content into the user guide.
+- Added runtime manifest v2 and backend protocol v1 JSON Schemas.
+- Added public protocol fixtures and an executable Python backend fixture outside the Cargo and npm widget workspaces.
+- Added contract tests for schemas, manifest semantics, and the Python ready, initialize, update, ping, message, and shutdown lifecycle.
+- Tightened runtime widget, variant, option, and port ID validation to match the public contract.
+- Added mdBook, mdbook-mermaid, Python, documentation build, and documentation checks to the Nix flake.
+- Fixed Project document traversal expressions found by the complete Nix Clippy checks without changing behavior.
+
+Remaining platform work starts with the built frontend SDK artifact and standalone pack/check command.
 
 ## Out of scope
 
