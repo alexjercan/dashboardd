@@ -45,6 +45,12 @@ Normal mode answers the widget's primary question. Focus adds research detail an
 - Sanitizes Markdown, removes active HTML and images, isolates external links, and disables unresolved local links.
 - Browser payloads retain opaque project identities and relative display paths only.
 
+## Playtest follow-up
+
+- Project navigation was intuitive in normal use.
+- Project scroll thumbs were too narrow for reliable pointer control.
+- Increased vertical and horizontal project scrollbar hit areas to 12 px with a 36 px minimum thumb.
+
 ## Bugs found and fixed
 
 - Shared-state pin mutations required observable update boundaries before a second mutation.

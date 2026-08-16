@@ -141,6 +141,30 @@ h2 {
   overflow: auto;
   border-top: 1px solid var(--dashboardd-color-border);
   scrollbar-color: var(--dashboardd-color-selection) transparent;
+  scrollbar-width: auto;
+}
+
+:is(.focus-content, .document-picker, .document pre) {
+  scrollbar-color: var(--dashboardd-color-selection) transparent;
+  scrollbar-width: auto;
+}
+
+:is(.focus-content, .document-picker, .document pre)::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+:is(.focus-content, .document-picker, .document pre)::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+:is(.focus-content, .document-picker, .document pre)::-webkit-scrollbar-thumb {
+  min-width: 36px;
+  min-height: 36px;
+  border: 2px solid transparent;
+  border-radius: 6px;
+  background: var(--dashboardd-color-selection);
+  background-clip: padding-box;
 }
 
 .document-picker {

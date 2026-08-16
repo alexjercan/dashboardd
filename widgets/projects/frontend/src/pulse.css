@@ -54,7 +54,23 @@ h2 {
   flex: 1;
   overflow-y: auto;
   scrollbar-color: var(--dashboardd-color-selection) transparent;
-  scrollbar-width: thin;
+  scrollbar-width: auto;
+}
+
+:is(.rows, .project-list)::-webkit-scrollbar {
+  width: 12px;
+}
+
+:is(.rows, .project-list)::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+:is(.rows, .project-list)::-webkit-scrollbar-thumb {
+  min-height: 36px;
+  border: 2px solid transparent;
+  border-radius: 6px;
+  background: var(--dashboardd-color-selection);
+  background-clip: padding-box;
 }
 
 .project-row {
@@ -179,6 +195,8 @@ h2 {
   min-height: 0;
   overflow-y: auto;
   border-top: 1px solid var(--dashboardd-color-selection);
+  scrollbar-color: var(--dashboardd-color-selection) transparent;
+  scrollbar-width: auto;
 }
 
 .manage-row {
