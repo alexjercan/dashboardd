@@ -75,7 +75,7 @@
   background: var(--dashboardd-color-canvas);
   box-shadow: 0 12px 28px rgb(0 0 0 / 45%);
   scrollbar-color: var(--dashboardd-color-selection) transparent;
-  scrollbar-width: thin;
+  scrollbar-width: auto;
 }
 
 .artifact-menu button {
@@ -129,7 +129,54 @@
   font-size: 11px;
   line-height: 1.55;
   scrollbar-color: var(--dashboardd-color-selection) transparent;
-  scrollbar-width: thin;
+  scrollbar-width: auto;
+}
+
+:is(
+  .artifact-menu,
+  .document-artifact,
+  .text-artifact,
+  .image-artifact,
+  .document-artifact pre
+) {
+  scrollbar-color: var(--dashboardd-color-selection) transparent;
+  scrollbar-width: auto;
+}
+
+:is(
+  .artifact-menu,
+  .document-artifact,
+  .text-artifact,
+  .image-artifact,
+  .document-artifact pre
+)::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+:is(
+  .artifact-menu,
+  .document-artifact,
+  .text-artifact,
+  .image-artifact,
+  .document-artifact pre
+)::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+:is(
+  .artifact-menu,
+  .document-artifact,
+  .text-artifact,
+  .image-artifact,
+  .document-artifact pre
+)::-webkit-scrollbar-thumb {
+  min-width: 36px;
+  min-height: 36px;
+  border: 2px solid transparent;
+  border-radius: 6px;
+  background: var(--dashboardd-color-selection);
+  background-clip: padding-box;
 }
 
 .text-artifact pre {

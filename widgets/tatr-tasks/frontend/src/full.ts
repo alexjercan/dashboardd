@@ -46,7 +46,7 @@ export function mount(
     tasks: [],
     statuses: new Set<Status>(),
     tags: new Set<string>(),
-    hideClosed: false,
+    hideClosed: true,
     query: "",
     sort: parseSort(context.options.sort),
     direction: defaultDirection(parseSort(context.options.sort)),
@@ -71,7 +71,7 @@ export function mount(
     <article>
       <header>
         <div><h2>Tasks</h2><span class="summary">Waiting for tasks...</span></div>
-        <label class="hide-closed"><input type="checkbox"> Hide closed</label>
+        <label class="hide-closed"><input type="checkbox" checked> Hide closed</label>
       </header>
       <div class="focus-controls">
         <input class="search" type="search" aria-label="Search tasks" placeholder="Search tasks">
@@ -195,6 +195,8 @@ function render(shadow: ShadowRoot, state: ViewState): void {
     state.tasks.length,
   );
   required<HTMLSelectElement>(shadow, ".sort").value = state.sort;
+  required<HTMLInputElement>(shadow, ".hide-closed input").checked =
+    state.hideClosed;
   renderFilters(shadow, state);
   const rows = required<HTMLElement>(shadow, ".rows");
   rows.replaceChildren();

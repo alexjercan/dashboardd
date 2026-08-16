@@ -15,7 +15,7 @@ Complete.
 - Project Pulse is 3x2, retains durable pins, ranks attention-worthy projects, and selects linked project context.
 - Project Brief is 3x2. Normal mode shows project state and useful context. Focus shows safe project documents, changes, and branches.
 - Keep Tatr variant IDs `full` and `details`. Tasks becomes 3x3 and Focus-enabled. Task Artifact remains 3x3 and Focus-enabled.
-- Load all Tatr tasks. Show a visible `Hide closed` toggle, disabled by default.
+- Load all Tatr tasks. Hide closed tasks by default and expose the page-local toggle only in Focus.
 - Keep Task Artifact separate from Tasks Focus.
 - Add provider names to Claude and Codex 1x1 widgets.
 - Reduce RAM Full to 3x2, remove duplicate usage presentation, and improve graph and metric use.
@@ -31,7 +31,7 @@ Normal mode answers the widget's primary question. Focus adds research detail an
 - Replaced the three Projects variants and their dead frontend sources with Project Pulse and Project Brief.
 - Added attention ranking, durable pin management, and page-local worktree selection to Pulse.
 - Added bounded project-document discovery, sanitized Markdown rendering, document selection, changed files, and branches to Brief Focus.
-- Redesigned Tasks as readable two-line rows. Added all-task loading, visible Hide closed control, and Focus-only search, sort, IDs, and tags.
+- Redesigned Tasks as readable two-line rows. Added all-task loading, default closed-task hiding, and Focus-only controls, search, sort, IDs, and tags.
 - Increased Task Artifact, CPU, RAM, and usage-widget typography.
 - Added provider labels to Claude and Codex minimal variants.
 - Reduced RAM Full to 3x2 and replaced duplicate bars with a larger graph and direct metrics.
@@ -50,6 +50,8 @@ Normal mode answers the widget's primary question. Focus adds research detail an
 - Project navigation was intuitive in normal use.
 - Project scroll thumbs were too narrow for reliable pointer control.
 - Increased vertical and horizontal project scrollbar hit areas to 12 px with a 36 px minimum thumb.
+- Applied the same scrollbar sizing to Tasks, Task Artifact content, code blocks, and the artifact picker.
+- Changed Tasks playtest defaults: closed tasks are hidden initially, and their toggle is available only in Focus.
 
 ## Bugs found and fixed
 

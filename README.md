@@ -104,9 +104,9 @@ widgets follow the selected worktree.
 
 The 3x3 Tatr Tasks widget reads every `TASK.md` record directly without
 executing `tatr`. It defaults to recursive discovery under `~/personal`, sorts
-by priority, and provides a visible page-local Hide closed control. Normal mode
-uses readable two-line task summaries; Focus adds search, sort, complete IDs,
-tags, and metadata. The linked 3x3 Task Artifact variant defaults to `TASK.md`
+by priority and hides closed tasks by default. Normal mode uses readable
+two-line task summaries. Focus adds the page-local Hide closed control, search,
+sort, complete IDs, tags, and metadata. The linked 3x3 Task Artifact variant defaults to `TASK.md`
 and can securely select task-local Markdown, sanitized HTML, UTF-8 text, and
 raster images from its normal-mode identity menu. Absolute paths, symlinks,
 active HTML, embedded local assets, and unsupported binaries remain

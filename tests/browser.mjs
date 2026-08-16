@@ -1083,17 +1083,18 @@ try {
   await projectsListFrame
     .locator(".project-row", { hasText: "sample" })
     .click();
-  await tatrFrame.locator(".task-row").nth(2).waitFor();
-  assert.equal(await tatrFrame.locator(".task-row").count(), 3);
+  await tatrFrame.locator(".task-row").nth(1).waitFor();
+  assert.equal(await tatrFrame.locator(".task-row").count(), 2);
   assert.equal(
     await tatrFrame.locator(".task-id").first().isHidden(),
     true,
     "normal mode hides task IDs",
   );
-  await tatrFrame.locator(".hide-closed input").check();
-  assert.equal(await tatrFrame.locator(".task-row").count(), 2);
-  await tatrFrame.locator(".hide-closed input").uncheck();
-  assert.equal(await tatrFrame.locator(".task-row").count(), 3);
+  assert.equal(
+    await tatrFrame.locator(".hide-closed").isHidden(),
+    true,
+    "normal mode hides the closed-task control",
+  );
   await projectsListFrame
     .locator(".project-row", { hasText: "sample" })
     .click();
@@ -1385,6 +1386,14 @@ try {
   await directFocusPage.goto(`${dashboardViewUrl}/focus/${tatrInstance.id}`);
   await directFocusPage.locator("#focus-layer").waitFor();
   await directFocusPage.locator(".focus-controls").waitFor();
+  const directHideClosed = directFocusPage.locator(".hide-closed input");
+  assert.equal(await directHideClosed.isVisible(), true);
+  assert.equal(await directHideClosed.isChecked(), true);
+  assert.equal(await directFocusPage.locator(".task-row").count(), 2);
+  await directHideClosed.uncheck();
+  assert.equal(await directFocusPage.locator(".task-row").count(), 3);
+  await directHideClosed.check();
+  assert.equal(await directFocusPage.locator(".task-row").count(), 2);
   await directFocusPage.locator("#close-focus").click();
   await directFocusPage.waitForURL(dashboardViewUrl);
   await directFocusPage.close();
@@ -1478,13 +1487,10 @@ try {
   await projectsListFrame.locator(".project-row").nth(3).waitFor();
   assert.equal(
     await tatrFrame.locator(".task-row").count(),
-    3,
-    "reload restores the unfiltered all-task view",
+    2,
+    "reload restores the default open-task view",
   );
-  assert.equal(
-    await tatrFrame.locator(".hide-closed input").isChecked(),
-    false,
-  );
+  assert.equal(await tatrFrame.locator(".hide-closed input").isChecked(), true);
   await projectsListFrame.locator(".manage").click();
   await pinManager.waitFor();
   assert.equal(await pinManager.locator(".pin-button.pinned").count(), 2);
@@ -1519,8 +1525,8 @@ try {
   );
   await page.locator("#confirm-link").click();
   assert.equal((await unlinkProjectFilter).status(), 204);
-  await tatrFrame.locator(".task-row").nth(2).waitFor();
-  assert.equal(await tatrFrame.locator(".task-row").count(), 3);
+  await tatrFrame.locator(".task-row").nth(1).waitFor();
+  assert.equal(await tatrFrame.locator(".task-row").count(), 2);
   await projectFilterBadge.click();
   await page
     .locator("#link-source")
@@ -1554,10 +1560,10 @@ try {
   await projectFrame
     .locator(".state", { hasText: "Select a project" })
     .waitFor();
-  await tatrFrame.locator(".task-row").nth(2).waitFor();
+  await tatrFrame.locator(".task-row").nth(1).waitFor();
   assert.equal(
     await tatrFrame.locator(".task-row").count(),
-    3,
+    2,
     "deleting Project Pulse clears linked project context",
   );
   const deleteProject = await page.request.delete(

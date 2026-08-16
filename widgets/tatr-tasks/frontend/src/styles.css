@@ -36,7 +36,7 @@ h2 {
 }
 
 .hide-closed {
-  display: flex;
+  display: none;
   align-items: center;
   gap: 6px;
   color: var(--dashboardd-color-text-muted);
@@ -122,7 +122,23 @@ h2 {
   flex: 1;
   overflow-y: auto;
   scrollbar-color: var(--dashboardd-color-selection) transparent;
-  scrollbar-width: thin;
+  scrollbar-width: auto;
+}
+
+.rows::-webkit-scrollbar {
+  width: 12px;
+}
+
+.rows::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.rows::-webkit-scrollbar-thumb {
+  min-height: 36px;
+  border: 2px solid transparent;
+  border-radius: 6px;
+  background: var(--dashboardd-color-selection);
+  background-clip: padding-box;
 }
 
 .task-row {
@@ -244,6 +260,10 @@ h2 {
 
 :host([data-presentation="focus"]) article {
   padding: 18px 20px;
+}
+
+:host([data-presentation="focus"]) .hide-closed {
+  display: flex;
 }
 
 :host([data-presentation="focus"]) .focus-controls {
