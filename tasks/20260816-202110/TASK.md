@@ -1,5 +1,9 @@
 # Redesign dashboard widgets for readable glance views
 
+- STATUS: CLOSED
+- PRIORITY: 100
+- TAGS: dashboard, composition, navigation, persistence
+
 ## Status
 
 Complete.
