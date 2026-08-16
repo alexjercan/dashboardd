@@ -11,9 +11,10 @@ workspace = "@dashboardd/tatr-tasks-widget"
 
 [[frontend.variants]]
 id = "full"
-name = "Full"
-size = [6, 3]
+name = "Tasks"
+size = [3, 3]
 entry = "src/full.ts"
+focus = true
 
 [[frontend.variants]]
 id = "details"
@@ -63,7 +64,7 @@ id = "filter"
 name = "Filter"
 variants = ["full"]
 description = "Tatr query applied before tasks reach the dashboard"
-default = ":status in [OPEN, IN_PROGRESS]"
+default = ""
 
 [options.text]
 

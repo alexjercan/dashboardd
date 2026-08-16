@@ -49,20 +49,10 @@ export function mount(
           <path class="line"></path>
         </svg>
       </div>
-      <section class="resource ram" aria-label="RAM usage">
-        <div class="resource-heading"><span>RAM</span><span class="resource-percent">--.-%</span></div>
-        <div class="bar"><div class="bar-fill"></div></div>
-        <div class="metrics">
-          <div class="metric-row"><span>Used</span><span class="metric-value" data-memory="used">--</span></div>
-          <div class="metric-row"><span>Available</span><span class="metric-value" data-memory="available">--</span></div>
-        </div>
-      </section>
-      <section class="resource swap" aria-label="Swap usage">
-        <div class="resource-heading"><span>Swap</span><span class="resource-percent">--.-%</span></div>
-        <div class="bar"><div class="bar-fill"></div></div>
-        <div class="metrics">
-          <div class="metric-row"><span>Used</span><span class="metric-value" data-swap="used">--</span></div>
-        </div>
+      <section class="metrics" aria-label="Memory details">
+        <div class="metric"><span>Used</span><strong data-memory="used">--</strong></div>
+        <div class="metric"><span>Available</span><strong data-memory="available">--</strong></div>
+        <div class="metric swap"><span>Swap</span><strong data-swap="used">--</strong></div>
       </section>
     </div>
   `;
@@ -94,14 +84,8 @@ export function mount(
       required<HTMLElement>(shadow, ".total").textContent = formatBytes(
         snapshot.totalBytes,
       );
-      required<HTMLElement>(shadow, ".ram .resource-percent").textContent =
-        `${snapshot.usagePercent.toFixed(1)}%`;
-      updateBar(
-        required<HTMLElement>(shadow, ".ram .bar-fill"),
-        snapshot.usagePercent,
-      );
       required<HTMLElement>(shadow, '[data-memory="used"]').textContent =
-        `${formatBytes(snapshot.usedBytes)} / ${formatBytes(snapshot.totalBytes)}`;
+        formatBytes(snapshot.usedBytes);
       required<HTMLElement>(shadow, '[data-memory="available"]').textContent =
         formatBytes(snapshot.availableBytes);
 
@@ -115,32 +99,11 @@ export function mount(
 }
 
 function renderSwap(shadow: ShadowRoot, swap: SwapSnapshot): void {
-  const percent = required<HTMLElement>(shadow, ".swap .resource-percent");
   const used = required<HTMLElement>(shadow, '[data-swap="used"]');
-  if (swap.totalBytes === 0) {
-    percent.textContent = "Not configured";
-    used.textContent = "0 B / 0 B";
-    updateBar(required<HTMLElement>(shadow, ".swap .bar-fill"), 0);
-    return;
-  }
-
-  percent.textContent = `${swap.usagePercent.toFixed(1)}%`;
-  used.textContent = `${formatBytes(swap.usedBytes)} / ${formatBytes(swap.totalBytes)}`;
-  updateBar(
-    required<HTMLElement>(shadow, ".swap .bar-fill"),
-    swap.usagePercent,
-  );
-}
-
-function updateBar(element: HTMLElement, usagePercent: number): void {
-  element.className = `bar-fill ${severity(usagePercent)}`.trim();
-  element.style.setProperty("--usage", `${usagePercent}%`);
-}
-
-function severity(usagePercent: number): string {
-  if (usagePercent >= 90) return "hot";
-  if (usagePercent >= 70) return "warm";
-  return "";
+  used.textContent =
+    swap.totalBytes === 0
+      ? "Off"
+      : `${formatBytes(swap.usedBytes)} (${swap.usagePercent.toFixed(0)}%)`;
 }
 
 function renderGraph(

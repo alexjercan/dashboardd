@@ -46,9 +46,16 @@ export type Branch = {
   latest_commit_summary: string | null;
 };
 
+export type ProjectDocument = {
+  path: string;
+  content: string;
+};
+
 export type ProjectDetails = ProjectSummary & {
   changes: Change[];
   branches: Branch[];
+  documents: string[];
+  document: ProjectDocument | null;
 };
 
 export function parseSelection(value: unknown): ProjectSelection | null {
@@ -118,17 +125,37 @@ export function parseSummary(value: unknown): ProjectSummary | null {
 export function parseDetails(value: unknown): ProjectDetails | null {
   const summary = parseSummary(value);
   if (!summary || !isRecord(value)) return null;
-  if (!Array.isArray(value.changes) || !Array.isArray(value.branches))
+  if (
+    !Array.isArray(value.changes) ||
+    !Array.isArray(value.branches) ||
+    !Array.isArray(value.documents) ||
+    !value.documents.every((path) => typeof path === "string")
+  )
     return null;
   const changes = value.changes.map(parseChange);
   const branches = value.branches.map(parseBranch);
+  const document =
+    value.document === null ? null : parseDocument(value.document);
   if (changes.some((change) => change === null)) return null;
   if (branches.some((branch) => branch === null)) return null;
+  if (value.document !== null && document === null) return null;
   return {
     ...summary,
     changes: changes as Change[],
     branches: branches as Branch[],
+    documents: value.documents as string[],
+    document,
   };
+}
+
+function parseDocument(value: unknown): ProjectDocument | null {
+  if (
+    !isRecord(value) ||
+    typeof value.path !== "string" ||
+    typeof value.content !== "string"
+  )
+    return null;
+  return { path: value.path, content: value.content };
 }
 
 function parseWorktree(value: unknown): WorktreeDescriptor | null {

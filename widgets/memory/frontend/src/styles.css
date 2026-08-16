@@ -1,9 +1,14 @@
+:host {
+  display: block;
+  height: 100%;
+}
+
 header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 12px 14px 10px;
+  gap: 14px;
+  padding: 12px 14px 9px;
   border-bottom: 1px solid
     color-mix(in srgb, var(--dashboardd-color-border) 28%, transparent);
 }
@@ -11,14 +16,12 @@ header {
 .title {
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  gap: 9px;
 }
 
 .eyebrow {
   color: var(--dashboardd-color-text-muted);
-  font-size: 9px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  font-size: 11px;
 }
 
 h2 {
@@ -39,7 +42,7 @@ h2 {
 .usage {
   color: var(--dashboardd-color-accent);
   font-family: var(--dashboardd-font-sans);
-  font-size: 24px;
+  font-size: 27px;
   font-variant-numeric: tabular-nums;
   font-weight: 700;
   line-height: 1;
@@ -47,12 +50,12 @@ h2 {
 
 .total {
   color: var(--dashboardd-color-secondary);
-  font-size: 11px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 
 .body {
-  padding: 10px 12px 12px;
+  padding: 9px 12px 11px;
 }
 
 .graph-shell {
@@ -66,7 +69,7 @@ h2 {
 svg {
   display: block;
   width: 100%;
-  height: 82px;
+  height: 74px;
 }
 
 .grid {
@@ -92,98 +95,46 @@ svg {
 
 .axis-label {
   fill: var(--dashboardd-color-text-dim);
-  font-size: 9px;
-}
-
-.resource {
-  margin-top: 10px;
-}
-
-.resource-heading,
-.metric-row {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.resource-heading {
-  margin-bottom: 5px;
-  color: var(--dashboardd-color-text-muted);
-  font-size: 9px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
-
-.resource-percent {
-  color: var(--dashboardd-color-text);
-  font-size: 10px;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0;
-}
-
-.bar {
-  height: 7px;
-  overflow: hidden;
-  border: 1px solid
-    color-mix(in srgb, var(--dashboardd-color-border) 24%, transparent);
-  border-radius: 3px;
-  background: var(--dashboardd-color-canvas);
-}
-
-.bar-fill {
-  width: var(--usage, 0%);
-  height: 100%;
-  background: color-mix(
-    in srgb,
-    var(--dashboardd-color-success) 74%,
-    transparent
-  );
-  transition: width 180ms linear;
-}
-
-.bar-fill.warm {
-  background: color-mix(
-    in srgb,
-    var(--dashboardd-color-accent) 78%,
-    transparent
-  );
-}
-
-.bar-fill.hot {
-  background: color-mix(
-    in srgb,
-    var(--dashboardd-color-danger) 82%,
-    transparent
-  );
+  font-size: 11px;
 }
 
 .metrics {
   display: grid;
-  gap: 4px;
-  margin-top: 7px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 8px;
 }
 
-.metric-row {
+.metric {
+  min-width: 0;
+}
+
+.metric span,
+.metric strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.metric span {
   color: var(--dashboardd-color-text-muted);
-  font-size: 9px;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
+  font-size: 11px;
 }
 
-.metric-value {
-  color: var(--dashboardd-color-text);
-  font-size: 10px;
+.metric strong {
+  margin-top: 2px;
+  color: var(--dashboardd-color-text-bright);
+  font-size: 13px;
   font-variant-numeric: tabular-nums;
-  letter-spacing: 0;
-  text-transform: none;
+  font-weight: 550;
 }
 
 .waiting,
 .error {
   padding: 24px 12px;
   color: var(--dashboardd-color-text-muted);
-  font-size: 11px;
+  font-size: 12px;
   text-align: center;
 }
 
@@ -205,7 +156,7 @@ svg {
   }
 
   .usage {
-    font-size: 21px;
+    font-size: 24px;
   }
 
   .eyebrow {

@@ -1,10 +1,12 @@
+import DOMPurify from "dompurify";
+import { marked, Renderer } from "marked";
 import type {
   WidgetContext,
   WidgetFrontend,
   WidgetPresentation,
 } from "@dashboardd/widget-sdk";
 import widgetReset from "@dashboardd/widget-sdk/widget.css";
-import styles from "./project.css";
+import styles from "./brief.css";
 import {
   createViewId,
   isRecord,
@@ -17,7 +19,7 @@ import {
   type ProjectSelection,
 } from "./shared";
 
-type Tab = "overview" | "changes" | "branches";
+type Tab = "document" | "changes" | "branches";
 
 export function mount(
   container: HTMLElement,
@@ -26,23 +28,19 @@ export function mount(
   const shadow = container.attachShadow({ mode: "open" });
   shadow.innerHTML = `
     <style>${widgetReset}\n${styles}</style>
-    <article class="shell">
-      <header class="project-header">
-        <div><h2>Project</h2><span class="identity">Select a project</span></div>
-        <button class="refresh" type="button" hidden>Refresh</button>
-      </header>
+    <article>
+      <header><div><h2>Project Brief</h2><span class="identity">Select a project</span></div><button class="refresh" type="button" hidden>Refresh</button></header>
       <div class="content state">Select a project</div>
-    </article>
-  `;
+    </article>`;
   shadow.host.setAttribute(
     "aria-label",
-    `Project details for ${context.instanceId}`,
+    `Project brief for ${context.instanceId}`,
   );
   const viewId = createViewId();
   let presentation: WidgetPresentation = "tile";
   let selection: ProjectSelection | null = null;
   let details: ProjectDetails | null = null;
-  let tab: Tab = "overview";
+  let tab: Tab = "document";
   let query = "";
   let changeKind = "all";
 
@@ -59,20 +57,22 @@ export function mount(
       })
       .catch(() => renderState(shadow, next.project, "Project unavailable"));
   };
-
   const unsubscribe = context.links.subscribe("project", (payload) => {
     if (payload === null) {
       selection = null;
       details = null;
-      renderState(shadow, "Select a project", "Select a project");
+      renderState(
+        shadow,
+        "Select a project",
+        "Select a project from Project Pulse",
+      );
       void context
         .send({ command: "release_view", view_id: viewId })
         .catch(() => {});
       return;
     }
     const next = parseSelection(payload);
-    if (!next) return;
-    requestSelection(next);
+    if (next) requestSelection(next);
   });
 
   shadow.addEventListener("click", (event) => {
@@ -83,6 +83,17 @@ export function mount(
       tab = tabButton.dataset.tab;
       query = "";
       if (details) renderDetails(shadow, details, tab, query, changeKind);
+      return;
+    }
+    const documentButton = target.closest<HTMLButtonElement>("[data-document]");
+    if (documentButton?.dataset.document) {
+      void context
+        .send({
+          command: "select_document",
+          view_id: viewId,
+          document: documentButton.dataset.document,
+        })
+        .catch(() => {});
       return;
     }
     if (target.closest(".refresh"))
@@ -97,12 +108,7 @@ export function mount(
       target.classList.contains("search")
     ) {
       query = target.value;
-      if (details) {
-        renderDetails(shadow, details, tab, query, changeKind);
-        const search = shadow.querySelector<HTMLInputElement>(".search");
-        search?.focus();
-        search?.setSelectionRange(query.length, query.length);
-      }
+      if (details) rerenderWithFocus(shadow, details, tab, query, changeKind);
     } else if (
       target instanceof HTMLSelectElement &&
       target.classList.contains("change-kind")
@@ -137,7 +143,7 @@ export function mount(
       presentation = next;
       shadow.host.setAttribute("data-presentation", next);
       required<HTMLButtonElement>(shadow, ".refresh").hidden = next !== "focus";
-      if (selection) {
+      if (selection)
         void context
           .send({
             command: "set_focus",
@@ -145,7 +151,6 @@ export function mount(
             focused: next === "focus",
           })
           .catch(() => {});
-      }
       if (details) renderDetails(shadow, details, tab, query, changeKind);
     },
     destroy(): void {
@@ -180,15 +185,10 @@ function renderDetails(
     selectionLabel(details);
   const content = required<HTMLElement>(shadow, ".content");
   content.className = "content";
-  if (shadow.host.getAttribute("data-presentation") === "focus")
+  if (shadow.host.getAttribute("data-presentation") === "focus") {
     renderFocus(content, details, tab, query, changeKind);
-  else renderTile(content, details);
-}
-
-function selectionLabel(selection: ProjectSelection): string {
-  return selection.worktree === "Primary"
-    ? selection.project
-    : `${selection.project} // ${selection.worktree}`;
+    if (tab === "document") secureDocumentLinks(content);
+  } else renderTile(content, details);
 }
 
 function renderTile(content: HTMLElement, details: ProjectDetails): void {
@@ -196,27 +196,20 @@ function renderTile(content: HTMLElement, details: ProjectDetails): void {
     details.clean === true
       ? "Clean"
       : details.clean === false
-        ? `${details.change_count} changes`
+        ? `${details.change_count} ${details.change_count === 1 ? "change" : "changes"}`
         : "Directory";
+  const task = details.in_progress_tasks
+    ? `${details.in_progress_tasks} active ${details.in_progress_tasks === 1 ? "task" : "tasks"}`
+    : details.open_tasks
+      ? `${details.open_tasks} open ${details.open_tasks === 1 ? "task" : "tasks"}`
+      : "No active tasks";
+  const excerpt = documentExcerpt(details.document?.content ?? "");
   content.innerHTML = `
     <section class="tile-view">
       <div class="hero"><strong>${escapeHtml(details.branch ?? "No Git branch")}</strong><span data-state="${details.clean === false ? "dirty" : "clean"}">${status}</span></div>
-      <div class="metrics">
-        <div><span>Tasks</span><strong>${details.open_tasks} open / ${details.in_progress_tasks} active</strong></div>
-        <div><span>Sync</span><strong>${syncLabel(details)}</strong></div>
-        <div><span>Activity</span><strong>${relativeTime(details.latest_commit_unix)}</strong></div>
-      </div>
-      <div class="recent-changes"><span>Recent changes</span>${
-        details.changes
-          .slice(0, 3)
-          .map(
-            (change) =>
-              `<div><b>${changeCode(change)}</b><code>${escapeHtml(change.path)}</code></div>`,
-          )
-          .join("") || "<em>No working tree changes</em>"
-      }</div>
-    </section>
-  `;
+      <p class="excerpt">${escapeHtml(excerpt || details.latest_commit_summary || "No project document")}</p>
+      <div class="facts"><span>${task}</span><span>${relativeTime(details.latest_commit_unix)}</span></div>
+    </section>`;
 }
 
 function renderFocus(
@@ -227,27 +220,53 @@ function renderFocus(
   changeKind: string,
 ): void {
   content.innerHTML = `
-    <nav class="tabs" aria-label="Project details">
-      ${tabButton("overview", "Overview", tab)}
+    <nav class="tabs" aria-label="Project research">
+      ${tabButton("document", "Document", tab)}
       ${tabButton("changes", `Changes ${details.change_count}`, tab)}
       ${tabButton("branches", `Branches ${details.branches.length}`, tab)}
     </nav>
     <section class="focus-content">
-      ${tab === "overview" ? overview(details) : tab === "changes" ? changes(details.changes, query, changeKind) : branches(details.branches, query)}
-    </section>
-  `;
+      ${tab === "document" ? documentView(details) : tab === "changes" ? changes(details.changes, query, changeKind) : branches(details.branches, query)}
+    </section>`;
 }
 
-function overview(details: ProjectDetails): string {
-  return `
-    <div class="overview-grid">
-      <section><span>Worktree</span><strong>${escapeHtml(details.worktree)}</strong><small>${escapeHtml(details.branch ?? "No Git branch")}</small></section>
-      <section><span>Working tree</span><strong>${details.clean === null ? "Not a Git repository" : details.clean ? "Clean" : `${details.change_count} changed files`}</strong><small>${details.changes.filter((change) => change.staged).length} staged</small></section>
-      <section><span>Tatr tasks</span><strong>${details.open_tasks} open</strong><small>${details.in_progress_tasks} in progress</small></section>
-      <section><span>Latest commit</span><strong>${relativeTime(details.latest_commit_unix)}</strong><small>${escapeHtml(details.latest_commit_summary ?? "No local commit")}</small></section>
-    </div>
-    <div class="capabilities"><span class="${details.git ? "active" : ""}">Git</span><span class="${details.tatr ? "active" : ""}">Tatr</span></div>
-  `;
+function documentView(details: ProjectDetails): string {
+  const picker = details.documents.length
+    ? `<div class="document-picker">${details.documents
+        .map(
+          (path) =>
+            `<button type="button" data-document="${escapeAttribute(path)}" class="${details.document?.path === path ? "active" : ""}">${escapeHtml(path)}</button>`,
+        )
+        .join("")}</div>`
+    : "";
+  return `${picker}<div class="document">${renderMarkdown(details.document?.content ?? "No readable project document")}</div>`;
+}
+
+function secureDocumentLinks(content: HTMLElement): void {
+  for (const link of Array.from(
+    content.querySelectorAll<HTMLAnchorElement>(".document a"),
+  )) {
+    const href = link.getAttribute("href") ?? "";
+    if (/^https?:\/\//i.test(href)) {
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+    } else if (!href.startsWith("#")) {
+      link.removeAttribute("href");
+    }
+  }
+}
+
+function renderMarkdown(source: string): string {
+  const renderer = new Renderer();
+  renderer.html = () => "";
+  renderer.image = () => "";
+  return DOMPurify.sanitize(
+    marked.parse(source, { async: false, gfm: true, renderer }),
+    {
+      FORBID_TAGS: ["img", "style", "iframe", "object", "embed"],
+      FORBID_ATTR: ["class", "id", "style"],
+    },
+  );
 }
 
 function changes(values: Change[], query: string, kind: string): string {
@@ -260,10 +279,7 @@ function changes(values: Change[], query: string, kind: string): string {
         (kind === "unstaged" && change.unstaged)) &&
       (!normalized || change.path.toLowerCase().includes(normalized)),
   );
-  return `
-    <div class="section-controls"><input class="search" type="search" aria-label="Search changes" placeholder="Search changed paths" value="${escapeAttribute(query)}"><select class="change-kind" aria-label="Filter changes"><option value="all">All changes</option>${["staged", "unstaged", "added", "modified", "deleted", "renamed", "untracked"].map((value) => `<option value="${value}"${kind === value ? " selected" : ""}>${capitalize(value)}</option>`).join("")}</select></div>
-    <div class="detail-list changes-list">${filtered.map((change) => `<div><b>${changeCode(change)}</b><code>${escapeHtml(change.path)}</code><span>${change.staged ? "staged" : ""}${change.staged && change.unstaged ? " + " : ""}${change.unstaged ? "unstaged" : ""}</span><small>${lineStats(change)}</small></div>`).join("") || "<p>No matching changes</p>"}</div>
-  `;
+  return `<div class="section-controls"><input class="search" type="search" aria-label="Search changes" placeholder="Search changed paths" value="${escapeAttribute(query)}"><select class="change-kind" aria-label="Filter changes"><option value="all">All changes</option>${["staged", "unstaged", "added", "modified", "deleted", "renamed", "untracked"].map((value) => `<option value="${value}"${kind === value ? " selected" : ""}>${capitalize(value)}</option>`).join("")}</select></div><div class="detail-list changes-list">${filtered.map((change) => `<div><b>${changeCode(change)}</b><code>${escapeHtml(change.path)}</code><span>${change.staged ? "staged" : ""}${change.staged && change.unstaged ? " + " : ""}${change.unstaged ? "unstaged" : ""}</span><small>${lineStats(change)}</small></div>`).join("") || "<p>No matching changes</p>"}</div>`;
 }
 
 function branches(values: Branch[], query: string): string {
@@ -271,21 +287,48 @@ function branches(values: Branch[], query: string): string {
   const filtered = values.filter((branch) =>
     branch.name.toLowerCase().includes(normalized),
   );
-  return `
-    <div class="section-controls"><input class="search" type="search" aria-label="Search branches" placeholder="Search local branches" value="${escapeAttribute(query)}"></div>
-    <div class="detail-list branches-list">${filtered.map((branch) => `<div class="${branch.current ? "current" : ""}"><strong>${escapeHtml(branch.name)}</strong><span>${escapeHtml(branch.upstream ?? "No upstream")}</span><small>${branch.ahead || branch.behind ? `${branch.ahead} ahead / ${branch.behind} behind` : relativeTime(branch.latest_commit_unix)}</small><em>${escapeHtml(branch.latest_commit_summary ?? "")}</em></div>`).join("") || "<p>No matching branches</p>"}</div>
-  `;
+  return `<div class="section-controls"><input class="search" type="search" aria-label="Search branches" placeholder="Search local branches" value="${escapeAttribute(query)}"></div><div class="detail-list branches-list">${filtered.map((branch) => `<div class="${branch.current ? "current" : ""}"><strong>${escapeHtml(branch.name)}</strong><span>${escapeHtml(branch.upstream ?? "No upstream")}</span><small>${branch.ahead || branch.behind ? `${branch.ahead} ahead / ${branch.behind} behind` : relativeTime(branch.latest_commit_unix)}</small><em>${escapeHtml(branch.latest_commit_summary ?? "")}</em></div>`).join("") || "<p>No matching branches</p>"}</div>`;
+}
+
+function rerenderWithFocus(
+  shadow: ShadowRoot,
+  details: ProjectDetails,
+  tab: Tab,
+  query: string,
+  changeKind: string,
+): void {
+  renderDetails(shadow, details, tab, query, changeKind);
+  const search = shadow.querySelector<HTMLInputElement>(".search");
+  search?.focus();
+  search?.setSelectionRange(query.length, query.length);
+}
+
+function documentExcerpt(source: string): string {
+  return (
+    source
+      .replace(/^---[\s\S]*?---\s*/u, "")
+      .split(/\n\s*\n/u)
+      .map((part) =>
+        part
+          .replace(/^#{1,6}\s+/u, "")
+          .replace(/\[([^\]]+)\]\([^)]*\)/gu, "$1")
+          .replace(/[*_`>#-]/gu, " ")
+          .replace(/\s+/gu, " ")
+          .trim(),
+      )
+      .find((part) => part.length > 20)
+      ?.slice(0, 180) ?? ""
+  );
+}
+
+function selectionLabel(selection: ProjectSelection): string {
+  return selection.worktree === "Primary"
+    ? selection.project
+    : `${selection.project} // ${selection.worktree}`;
 }
 
 function tabButton(value: Tab, label: string, active: Tab): string {
   return `<button type="button" data-tab="${value}" class="${value === active ? "active" : ""}" aria-pressed="${value === active}">${label}</button>`;
-}
-
-function syncLabel(details: ProjectDetails): string {
-  if (!details.git) return "Not tracked";
-  if (details.ahead || details.behind)
-    return `${details.ahead} ahead / ${details.behind} behind`;
-  return "Up to date locally";
 }
 
 function changeCode(change: Change): string {
@@ -306,7 +349,7 @@ function capitalize(value: string): string {
 }
 
 function isTab(value: string): value is Tab {
-  return value === "overview" || value === "changes" || value === "branches";
+  return value === "document" || value === "changes" || value === "branches";
 }
 
 function escapeHtml(value: string): string {
@@ -324,6 +367,6 @@ function escapeAttribute(value: string): string {
 
 function required<T extends Element>(root: ParentNode, selector: string): T {
   const element = root.querySelector<T>(selector);
-  if (!element) throw new Error(`missing Project element: ${selector}`);
+  if (!element) throw new Error(`missing Project Brief element: ${selector}`);
   return element;
 }

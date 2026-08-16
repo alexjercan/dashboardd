@@ -16,7 +16,7 @@ header {
 
 .eyebrow {
   color: var(--dashboardd-color-text-muted);
-  font-size: 9px;
+  font-size: 11px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
@@ -92,7 +92,7 @@ svg {
 
 .axis-label {
   fill: var(--dashboardd-color-text-dim);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .loads {
@@ -102,7 +102,7 @@ svg {
   gap: 8px;
   margin: 8px 1px 9px;
   color: var(--dashboardd-color-text-muted);
-  font-size: 9px;
+  font-size: 11px;
   letter-spacing: 0.05em;
   text-transform: uppercase;
 }
@@ -110,7 +110,7 @@ svg {
 .load-value {
   margin-left: 3px;
   color: var(--dashboardd-color-text);
-  font-size: 10px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0;
 }
@@ -167,7 +167,7 @@ svg {
   inset: 50% 2px auto;
   transform: translateY(-42%);
   color: var(--dashboardd-color-text-bright);
-  font-size: 9px;
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
   font-weight: 650;
   text-align: center;

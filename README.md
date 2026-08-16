@@ -89,31 +89,27 @@ paths or device names. The Network widget aggregates active non-loopback
 interfaces without exposing interface names, addresses, or MAC addresses. Both
 refresh once per second and use IEC units.
 
-The Projects widget provides 3x3 List and Project variants plus a compact 3x1
-Pinned variant. List scans
-immediate children of configured local roots and publishes page-local project
-selection. List supports page-local fuzzy name search, Name or Recent sorting,
-and Dirty or Active tasks filters without clearing hidden selections.
-Repositories remain one row when they have multiple Git worktrees; a
-page-local selector replaces the row summary with the chosen checkout.
-Project shows read-only Git and Tatr summaries for that checkout and supports
-Focus Overview, Changes, and Branches. Git inspection uses fixed bounded local
-commands without shell, remote, or write operations. Absolute paths, remote
-URLs, and author identities remain outside browser payloads. A linked Projects
-List can page-locally filter Tatr Tasks, and task and Artifact reads follow the
-selected worktree. List and Pinned share up to three durable ordered repository
-pins. Filled stars, the Pinned Manage dialog, reloads, and tabs synchronize
-through dashboard-owned shared state. Pinned can replace List as the compact
-project-selection source for Project or Tatr.
+The Projects widget provides 3x2 Project Pulse and Project Brief variants.
+Pulse scans immediate children of configured local roots, ranks pinned and
+attention-worthy projects, and publishes page-local project selection. Its
+Manage dialog controls up to three durable ordered pins and page-local Git
+worktree selection. Brief shows branch, working-tree state, task activity, and
+a project-document excerpt. Its Focus presentation securely renders bounded
+root and `docs/` Markdown or text documents and provides changed-file and local
+branch research views. Git inspection uses fixed bounded local commands without
+shell, remote, or write operations. Documents reject symlinks, hidden paths,
+oversized files, active HTML, and embedded images. Absolute paths, remote URLs,
+and author identities remain outside browser payloads. Linked Tasks and Brief
+widgets follow the selected worktree.
 
-The 6x3 Tatr Tasks widget reads `TASK.md` records directly without executing
-`tatr`. It defaults to recursive discovery under `~/personal`, filters to open
-and in-progress tasks, and sorts by priority. Rows include the complete Task ID.
-Its root accepts absolute paths and `~/...`. Status and tag controls apply
-temporary browser-local filters. The linked 3x3 Artifact variant defaults to
-`TASK.md` and can securely select task-local Markdown, sanitized HTML, UTF-8
-text, and raster images from its normal-mode identity menu. Absolute paths,
-symlinks, active HTML, embedded local assets, and unsupported binaries remain
+The 3x3 Tatr Tasks widget reads every `TASK.md` record directly without
+executing `tatr`. It defaults to recursive discovery under `~/personal`, sorts
+by priority, and provides a visible page-local Hide closed control. Normal mode
+uses readable two-line task summaries; Focus adds search, sort, complete IDs,
+tags, and metadata. The linked 3x3 Task Artifact variant defaults to `TASK.md`
+and can securely select task-local Markdown, sanitized HTML, UTF-8 text, and
+raster images from its normal-mode identity menu. Absolute paths, symlinks,
+active HTML, embedded local assets, and unsupported binaries remain
 unavailable. Its Focus presentation provides a larger document and image
 surface while retaining the selected artifact.
 

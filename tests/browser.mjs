@@ -267,13 +267,7 @@ try {
     catalog
       .find((widget) => widget.id === "projects")
       .outputs.map((port) => [port.id, port.type, port.variants]),
-    [
-      [
-        "selected_project",
-        "dashboardd.project-selection/v1",
-        ["list", "pinned"],
-      ],
-    ],
+    [["selected_project", "dashboardd.project-selection/v1", ["pulse"]]],
   );
   assert.deepEqual(
     catalog
@@ -329,7 +323,7 @@ try {
         ["compact", 1, 1],
       ],
       memory: [
-        ["full", 3, 3],
+        ["full", 3, 2],
         ["compact", 1, 1],
       ],
       network: [
@@ -337,12 +331,11 @@ try {
         ["compact", 1, 1],
       ],
       projects: [
-        ["list", 3, 3],
-        ["pinned", 3, 1],
-        ["project", 3, 3],
+        ["pulse", 3, 2],
+        ["brief", 3, 2],
       ],
       "tatr-tasks": [
-        ["full", 6, 3],
+        ["full", 3, 3],
         ["details", 3, 3],
       ],
     },
@@ -611,7 +604,9 @@ try {
   await page
     .locator(`[data-instance-id="${keyboardAdded.id}"]`)
     .waitFor({ state: "detached" });
-  await page.keyboard.press("Escape");
+  if (await page.locator("#editor-header").isVisible())
+    await page.locator("#finish-editing").click();
+  else await page.keyboard.press("Escape");
   await page.locator("#edit-layout").waitFor();
 
   await page.reload();
@@ -871,7 +866,7 @@ try {
   await page.locator(".widget-choice", { hasText: "Tatr Tasks" }).click();
   const textOptions = page.locator('.widget-option input[type="text"]');
   await textOptions.nth(0).fill(tatrRoot);
-  await textOptions.nth(1).fill(":status in [OPEN, IN_PROGRESS]");
+  await textOptions.nth(1).fill("");
   const tatrResponsePromise = page.waitForResponse(
     (response) =>
       response.url().includes("/api/v1/dashboards/") &&
@@ -885,7 +880,7 @@ try {
   assert.deepEqual(tatrInstance.layout, {
     column: 0,
     row: 3,
-    width: 6,
+    width: 3,
     height: 3,
   });
   assert.equal(tatrInstance.options.root, tatrRoot);
@@ -953,7 +948,7 @@ try {
 
   await page.locator('.dashboard-slot[data-column="3"][data-row="6"]').click();
   await page.locator('.widget-choice[data-widget-id="projects"]').click();
-  await page.locator(".variant-choice", { hasText: "Project" }).click();
+  await page.locator(".variant-choice", { hasText: "Project Brief" }).click();
   await page.locator(".widget-option textarea").fill(tatrRoot);
   assert.match(
     await page.locator("#widget-links select option").textContent(),
@@ -975,30 +970,6 @@ try {
   await projectFrame
     .locator(".state", { hasText: "Select a project" })
     .waitFor();
-
-  await page.locator('.dashboard-slot[data-column="6"][data-row="6"]').click();
-  await page.locator('.widget-choice[data-widget-id="projects"]').click();
-  await page.locator(".variant-choice", { hasText: "Pinned" }).click();
-  await page.locator(".widget-option textarea").fill(tatrRoot);
-  const pinnedResponsePromise = page.waitForResponse(
-    (response) =>
-      response.url().includes("/api/v1/dashboards/") &&
-      response.url().endsWith("/instances") &&
-      response.request().method() === "POST",
-  );
-  await page.locator("#confirm-add").click();
-  const pinnedResponse = await pinnedResponsePromise;
-  assert.equal(pinnedResponse.status(), 201);
-  const pinnedInstance = await pinnedResponse.json();
-  assert.deepEqual(pinnedInstance.layout, {
-    column: 6,
-    row: 6,
-    width: 3,
-    height: 1,
-  });
-  const pinnedFrame = page.locator(`[data-instance-id="${pinnedInstance.id}"]`);
-  await pinnedFrame.locator(".empty-card").first().waitFor();
-  assert.equal(await pinnedFrame.locator(".empty-card").count(), 3);
 
   const projectFilterBadge = tatrFrame.locator(".widget-link-badge.input");
   assert.equal(
@@ -1046,96 +1017,26 @@ try {
   await page.locator("#finish-editing").click();
   await page.waitForURL(dashboardViewUrl);
 
-  const projectSearch = projectsListFrame.locator(".search");
-  const projectSort = projectsListFrame.locator(".sort");
   const projectRows = projectsListFrame.locator(".project-row");
   assert.deepEqual(await projectRows.locator("strong").allTextContents(), [
-    "idle",
-    "other",
-    "sample",
-    "tatr",
-  ]);
-  await projectSearch.click();
-  await projectSearch.pressSequentially("iehjkl");
-  assert.equal(await projectSearch.inputValue(), "iehjkl");
-  assert.equal(page.url(), dashboardViewUrl);
-  assert.equal(await page.locator("#keyboard-mode").textContent(), "WIDGET");
-  await projectSearch.fill("");
-  await projectSort.selectOption("recent");
-  assert.deepEqual(await projectRows.locator("strong").allTextContents(), [
     "sample",
     "tatr",
     "idle",
     "other",
-  ]);
-  await projectSort.selectOption("name");
-  await projectSearch.fill("SMP LE");
-  assert.deepEqual(await projectRows.locator("strong").allTextContents(), [
-    "sample",
   ]);
   assert.equal(
-    await projectsListFrame.locator(".summary").textContent(),
-    "1 of 4 projects",
+    await projectRows.first().locator(".attention").textContent(),
+    "1 active task",
   );
-  await projectSearch.fill("l");
-  assert.deepEqual(await projectRows.locator("strong").allTextContents(), [
-    "idle",
-    "sample",
-  ]);
-  await projectSearch.fill("[");
-  await projectsListFrame
-    .locator(".empty", { hasText: "No matching projects" })
-    .waitFor();
-  await projectSearch.fill("");
-
-  await projectsListFrame.locator(".filters summary").click();
-  const dirtyFilter = projectsListFrame.locator(
-    '.filter-menu input[value="dirty"]',
-  );
-  const activeTasksFilter = projectsListFrame.locator(
-    '.filter-menu input[value="active-tasks"]',
-  );
-  await dirtyFilter.check();
-  assert.deepEqual(await projectRows.locator("strong").allTextContents(), [
-    "sample",
-  ]);
-  await activeTasksFilter.check();
-  assert.deepEqual(await projectRows.locator("strong").allTextContents(), [
-    "sample",
-  ]);
-  await dirtyFilter.uncheck();
-  assert.deepEqual(await projectRows.locator("strong").allTextContents(), [
-    "sample",
-    "tatr",
-  ]);
-  await activeTasksFilter.uncheck();
-  await projectsListFrame.locator(".filters summary").click();
-
-  await projectsListFrame
-    .locator(".project-row", { hasText: "sample" })
-    .locator(".project-choice")
-    .click();
+  await projectRows.filter({ hasText: "sample" }).click();
   await projectFrame.locator('.identity:text-is("sample")').waitFor();
-  await projectSearch.fill("tatr");
-  const hiddenProjectSelection = projectsListFrame.locator(".hidden-selection");
-  await hiddenProjectSelection
-    .locator("span", { hasText: "Selected: sample" })
+  await projectFrame
+    .locator(".excerpt", { hasText: "Projects fixture change" })
     .waitFor();
-  assert.equal(
-    await projectFrame.locator(".identity").textContent(),
-    "sample",
-    "search does not clear hidden selection",
-  );
   await page.screenshot({
-    path: path.join(artifacts, "projects-list-filtered-narrow.png"),
+    path: path.join(artifacts, "project-pulse-brief-narrow.png"),
     fullPage: true,
   });
-  await hiddenProjectSelection.locator("button", { hasText: "Clear" }).click();
-  await projectFrame
-    .locator(".state", { hasText: "Select a project" })
-    .waitFor();
-  await projectSearch.fill("");
-  await tatrFrame.locator(".task-row").nth(1).waitFor();
 
   const initialProjectState = await page.request.get(
     `${baseUrl}/api/v1/widget-state/projects`,
@@ -1145,116 +1046,54 @@ try {
     revision: 0,
     value: {},
   });
-  const secondProjectsListFrame = secondPage.locator(
-    `[data-instance-id="${projectsListInstance.id}"]`,
-  );
-  await secondProjectsListFrame.locator(".project-row").nth(3).waitFor();
-  await Promise.all([
-    projectsListFrame
-      .locator(".project-row", { hasText: "sample" })
-      .locator(".pin-button")
-      .click(),
-    secondProjectsListFrame
-      .locator(".project-row", { hasText: "tatr" })
-      .locator(".pin-button")
-      .click(),
-  ]);
-  await pinnedFrame.locator(".project-card", { hasText: "sample" }).waitFor();
-  await pinnedFrame.locator(".project-card", { hasText: "tatr" }).waitFor();
-  await projectsListFrame
-    .locator(".project-row", { hasText: "idle" })
+  await projectsListFrame.locator(".manage").click();
+  const pinManager = projectsListFrame.locator(".manager");
+  await pinManager.waitFor();
+  await pinManager
+    .locator(".manage-row", { hasText: "sample" })
     .locator(".pin-button")
     .click();
-  await pinnedFrame.locator(".project-card", { hasText: "idle" }).waitFor();
-  assert.equal(await pinnedFrame.locator(".empty-card").count(), 0);
-  assert.equal(
-    await projectsListFrame.locator(".pin-button.pinned").count(),
-    3,
-  );
-  const otherPin = projectsListFrame
-    .locator(".project-row", { hasText: "other" })
-    .locator(".pin-button");
-  assert.equal(await otherPin.isDisabled(), true);
-  assert.equal(
-    await otherPin.getAttribute("title"),
-    "Pinned project limit reached",
-  );
-  await secondPage
-    .locator(`[data-instance-id="${pinnedInstance.id}"] .project-card`, {
-      hasText: "idle",
+  await pinManager
+    .locator(".limit", {
+      hasText: "1 of 3 pinned - pinned projects appear first",
     })
     .waitFor();
-
-  await pinnedFrame.locator(".manage").click();
-  const pinManager = pinnedFrame.locator(".manager");
-  await pinManager.waitFor();
-  const cardsBeforeMove = await pinnedFrame
-    .locator(".cards .project-card strong")
-    .allTextContents();
   await pinManager
-    .locator(".pinned-row")
-    .first()
-    .locator(".move-button", { hasText: "Later" })
-    .click();
-  await pinnedFrame
-    .locator(".cards .project-card strong")
-    .nth(1)
-    .filter({ hasText: cardsBeforeMove[0] })
-    .waitFor();
-  assert.deepEqual(
-    await pinnedFrame.locator(".cards .project-card strong").allTextContents(),
-    [cardsBeforeMove[1], cardsBeforeMove[0], cardsBeforeMove[2]],
-  );
-  await pinManager.locator(".search").fill("OTH");
-  const managerOtherPin = pinManager
-    .locator(".manage-row", { hasText: "other" })
-    .locator(".pin-button");
-  assert.equal(await managerOtherPin.isDisabled(), true);
-  await pinManager
-    .locator(".pinned-row", { hasText: "idle" })
+    .locator(".manage-row", { hasText: "tatr" })
     .locator(".pin-button")
     .click();
-  await managerOtherPin.click();
-  await pinnedFrame.locator(".project-card", { hasText: "other" }).waitFor();
+  await pinManager
+    .locator(".limit", {
+      hasText: "2 of 3 pinned - pinned projects appear first",
+    })
+    .waitFor();
+  await pinManager.locator(".search").fill("OTH");
+  assert.equal(await pinManager.locator(".manage-row").count(), 1);
   await page.screenshot({
-    path: path.join(artifacts, "pinned-projects-manage-narrow.png"),
+    path: path.join(artifacts, "project-pulse-manage-narrow.png"),
   });
   await pinManager.locator(".done").click();
-  await page.screenshot({
-    path: path.join(artifacts, "pinned-projects-narrow.png"),
-    fullPage: true,
-  });
   const persistedPins = await page.request.get(
     `${baseUrl}/api/v1/widget-state/projects`,
   );
   const persistedPinState = await persistedPins.json();
-  assert.equal(persistedPinState.value.pins.length, 3);
-  assert.ok(persistedPinState.revision >= 5);
+  assert.equal(persistedPinState.value.pins.length, 2);
+  assert.ok(persistedPinState.revision >= 2);
 
-  assert.equal(await tatrFrame.locator(".task-row").count(), 2);
+  await projectsListFrame
+    .locator(".project-row", { hasText: "sample" })
+    .click();
+  await tatrFrame.locator(".task-row").nth(2).waitFor();
+  assert.equal(await tatrFrame.locator(".task-row").count(), 3);
   assert.equal(
-    await tatrFrame.locator(".task-id").first().textContent(),
-    "20260814-120000",
+    await tatrFrame.locator(".task-id").first().isHidden(),
+    true,
+    "normal mode hides task IDs",
   );
-  assert.equal(await tatrFrame.locator(".table-head").isHidden(), true);
-  assert.equal(await tatrFrame.locator(".mobile-sort").isVisible(), true);
-  assert.equal(
-    await tatrFrame
-      .locator(".task-row")
-      .first()
-      .evaluate(
-        (element) =>
-          getComputedStyle(element).gridTemplateRows.split(" ").length,
-      ),
-    2,
-  );
-  await tatrFrame.locator(".status", { hasText: "In progress" }).click();
-  assert.equal(await tatrFrame.locator(".task-row").count(), 1);
-  await tatrFrame.locator(".clear").click();
+  await tatrFrame.locator(".hide-closed input").check();
   assert.equal(await tatrFrame.locator(".task-row").count(), 2);
-  await tatrFrame.locator(".tags button", { hasText: "widget" }).click();
-  assert.equal(await tatrFrame.locator(".task-row").count(), 1);
-  await tatrFrame.locator(".clear").click();
+  await tatrFrame.locator(".hide-closed input").uncheck();
+  assert.equal(await tatrFrame.locator(".task-row").count(), 3);
   await projectsListFrame
     .locator(".project-row", { hasText: "sample" })
     .click();
@@ -1263,29 +1102,6 @@ try {
     .waitFor();
   assert.equal(await tatrFrame.locator(".task-row").count(), 1);
   await projectFrame.locator(".identity", { hasText: "sample" }).waitFor();
-  await projectFrame
-    .locator(".recent-changes code", { hasText: "README.md" })
-    .waitFor();
-  await secondPage
-    .locator(`[data-instance-id="${projectInstance.id}"] .state`, {
-      hasText: "Select a project",
-    })
-    .waitFor();
-  await projectsListFrame
-    .locator(".project-row", { hasText: "sample" })
-    .click();
-  await tatrFrame.locator(".task-row").nth(1).waitFor();
-  assert.equal(await tatrFrame.locator(".task-row").count(), 2);
-  assert.equal(
-    await projectFrame.locator(".state").textContent(),
-    "Select a project",
-  );
-  await projectsListFrame
-    .locator(".project-row", { hasText: "sample" })
-    .click();
-  await tatrFrame
-    .locator(".project-filter", { hasText: "Project: sample" })
-    .waitFor();
   await tatrFrame.locator(".title", { hasText: "Add Tatr widget" }).click();
   await detailsFrame
     .locator(".markdown h1", { hasText: "Add Tatr widget" })
@@ -1308,16 +1124,19 @@ try {
     "noopener noreferrer",
   );
 
-  const sampleProjectRow = projectsListFrame.locator(".project-row", {
+  await projectsListFrame.locator(".manage").click();
+  await pinManager.locator(".search").fill("sample");
+  const sampleManagerRow = pinManager.locator(".manage-row", {
     hasText: "sample",
   });
   assert.deepEqual(
-    await sampleProjectRow.locator(".worktree option").allTextContents(),
+    await sampleManagerRow.locator("select option").allTextContents(),
     ["Primary", "feature/projects"],
   );
-  await sampleProjectRow
-    .locator(".worktree")
+  await sampleManagerRow
+    .locator("select")
     .selectOption({ label: "feature/projects" });
+  await pinManager.locator(".done").click();
   await tatrFrame
     .locator(".project-filter", {
       hasText: "Project: sample // feature/projects",
@@ -1331,21 +1150,16 @@ try {
     .locator(".identity", { hasText: "sample // feature/projects" })
     .waitFor();
   await projectFrame
-    .locator(".recent-changes code", { hasText: "worktree-notes.txt" })
+    .locator(".excerpt", { hasText: "Worktree fixture change" })
     .waitFor();
   assert.equal(
     await secondPage
       .locator(`[data-instance-id="${projectsListInstance.id}"] .project-row`, {
         hasText: "sample",
       })
-      .locator(".worktree")
-      .inputValue(),
-    await secondPage
-      .locator(`[data-instance-id="${projectsListInstance.id}"] .project-row`, {
-        hasText: "sample",
-      })
-      .locator('.worktree option:text-is("Primary")')
-      .getAttribute("value"),
+      .locator(".project-context")
+      .textContent(),
+    "main",
     "worktree choice remains page-local",
   );
   await tatrFrame
@@ -1362,9 +1176,9 @@ try {
     path: path.join(artifacts, "projects-worktree-narrow.png"),
     fullPage: true,
   });
-  await sampleProjectRow
-    .locator(".worktree")
-    .selectOption({ label: "Primary" });
+  await projectsListFrame.locator(".manage").click();
+  await sampleManagerRow.locator("select").selectOption({ label: "Primary" });
+  await pinManager.locator(".done").click();
   await detailsFrame.locator(".state", { hasText: "Select a task" }).waitFor();
   await tatrFrame.locator(".title", { hasText: "Add Tatr widget" }).waitFor();
   await projectFrame.locator('.identity:text-is("sample")').waitFor();
@@ -1500,9 +1314,9 @@ try {
     true,
   );
   assert.equal(
-    await tatrFrame.locator(".widget-focus-button").isHidden(),
+    await tatrFrame.locator(".widget-focus-button").isVisible(),
     true,
-    "variants must opt in to Focus",
+    "Tasks supports a research-focused view",
   );
   await detailsFrame.locator(".widget-focus-button").click();
   await page.waitForURL(`${dashboardViewUrl}/focus/${detailsInstance.id}`);
@@ -1569,12 +1383,10 @@ try {
   await directFocusPage.locator("#close-focus").click();
   await directFocusPage.waitForURL(dashboardViewUrl);
   await directFocusPage.goto(`${dashboardViewUrl}/focus/${tatrInstance.id}`);
+  await directFocusPage.locator("#focus-layer").waitFor();
+  await directFocusPage.locator(".focus-controls").waitFor();
+  await directFocusPage.locator("#close-focus").click();
   await directFocusPage.waitForURL(dashboardViewUrl);
-  await directFocusPage
-    .locator("#dashboard-error", {
-      hasText: "Could not focus widget: variant does not support Focus",
-    })
-    .waitFor();
   await directFocusPage.close();
   await page.screenshot({
     path: path.join(artifacts, "tatr-tasks-narrow.png"),
@@ -1582,9 +1394,9 @@ try {
   });
   await projectFrame.locator(".widget-focus-button").click();
   await page.waitForURL(`${dashboardViewUrl}/focus/${projectInstance.id}`);
-  await projectFrame.locator(".overview-grid").waitFor();
+  await projectFrame.locator(".document h1", { hasText: "sample" }).waitFor();
   await page.screenshot({
-    path: path.join(artifacts, "project-focus-overview-narrow.png"),
+    path: path.join(artifacts, "project-focus-document-narrow.png"),
   });
   await projectFrame.locator('[data-tab="changes"]').click();
   await projectFrame
@@ -1610,29 +1422,26 @@ try {
   assert.equal(await page.locator("#keyboard-mode").textContent(), "DASHBOARD");
   await page.keyboard.press("Escape");
   await page.waitForURL(dashboardViewUrl);
-  await projectSearch.click();
-  await projectSearch.pressSequentially("iehjkl");
-  assert.equal(await projectSearch.inputValue(), "iehjkl");
-  assert.equal(page.url(), dashboardViewUrl);
-  await projectSearch.fill("");
-  await page.keyboard.press("Escape");
-  assert.equal(await page.locator("#keyboard-mode").textContent(), "DASHBOARD");
-  assert.equal(await tatrFrame.locator(".table-head").isVisible(), true);
-  assert.equal(await tatrFrame.locator(".mobile-sort").isHidden(), true);
-  await tatrFrame.locator('[data-sort="title"]').click();
-  assert.equal(
-    await tatrFrame.locator(".title").first().textContent(),
-    "Add Tatr widget",
-  );
+  await tatrFrame.locator(".widget-focus-button").click();
+  await page.waitForURL(`${dashboardViewUrl}/focus/${tatrInstance.id}`);
+  await tatrFrame.locator(".focus-controls").waitFor();
+  await tatrFrame.locator(".search").fill("Add Tatr");
+  assert.equal(await tatrFrame.locator(".task-row").count(), 1);
+  assert.equal(await tatrFrame.locator(".task-id").first().isVisible(), true);
+  await page.screenshot({
+    path: path.join(artifacts, "tatr-tasks-focus-wide.png"),
+  });
+  await page.locator("#close-focus").click();
+  await page.waitForURL(dashboardViewUrl);
   await page.screenshot({
     path: path.join(artifacts, "tatr-linked-wide.png"),
     fullPage: true,
   });
   await projectFrame.locator(".widget-focus-button").click();
   await page.waitForURL(`${dashboardViewUrl}/focus/${projectInstance.id}`);
-  await projectFrame.locator('[data-tab="overview"]').click();
+  await projectFrame.locator('[data-tab="document"]').click();
   await page.screenshot({
-    path: path.join(artifacts, "project-focus-overview-wide.png"),
+    path: path.join(artifacts, "project-focus-document-wide.png"),
   });
   await projectFrame.locator('[data-tab="changes"]').click();
   await page.screenshot({
@@ -1651,7 +1460,7 @@ try {
     false,
     "task rendering does not expose the absolute root",
   );
-  for (const frame of [projectsListFrame, pinnedFrame, projectFrame]) {
+  for (const frame of [projectsListFrame, projectFrame]) {
     assert.equal(
       await frame
         .locator(".dashboard-widget-mount")
@@ -1667,79 +1476,29 @@ try {
   await page.reload();
   await tatrFrame.locator(".task-row").first().waitFor();
   await projectsListFrame.locator(".project-row").nth(3).waitFor();
-  await pinnedFrame.locator(".project-card").nth(2).waitFor();
-  assert.equal(await pinnedFrame.locator(".empty-card").count(), 0);
-  assert.equal(
-    await projectsListFrame.locator(".pin-button.pinned").count(),
-    3,
-    "pins persist across browser reload",
-  );
-  const pinSnapshotResponse = await page.request.get(
-    `${baseUrl}/api/v1/widget-state/projects`,
-  );
-  const pinSnapshot = await pinSnapshotResponse.json();
-  const displacedPin = pinSnapshot.value.pins[2];
-  const unavailableState = await page.request.put(
-    `${baseUrl}/api/v1/widget-state/projects`,
-    {
-      data: {
-        revision: pinSnapshot.revision,
-        value: {
-          pins: [
-            ...pinSnapshot.value.pins.slice(0, 2),
-            { project_id: "project-unavailable", project: "missing-project" },
-          ],
-        },
-      },
-    },
-  );
-  assert.equal(unavailableState.status(), 200);
-  await pinnedFrame
-    .locator(".project-card.unavailable", { hasText: "missing-project" })
-    .waitFor();
-  await pinnedFrame.locator(".manage").click();
-  await pinnedFrame
-    .locator(".pinned-row", { hasText: "missing-project" })
-    .locator(".pin-button")
-    .click();
-  await pinnedFrame.locator(".done").click();
-  await projectsListFrame
-    .locator(".project-row", { hasText: displacedPin.project })
-    .locator(".pin-button")
-    .click();
-  await pinnedFrame
-    .locator(".project-card", { hasText: displacedPin.project })
-    .waitFor();
-  assert.equal(await projectsListFrame.locator(".search").inputValue(), "");
-  assert.equal(await projectsListFrame.locator(".sort").inputValue(), "name");
-  assert.equal(
-    await projectsListFrame
-      .locator('.filter-menu input[type="checkbox"]:checked')
-      .count(),
-    0,
-    "reload resets page-local project controls",
-  );
-  await detailsFrame.locator(".state", { hasText: "Select a task" }).waitFor();
   assert.equal(
     await tatrFrame.locator(".task-row").count(),
-    2,
-    "browser reload requests the unchanged task snapshot",
+    3,
+    "reload restores the unfiltered all-task view",
   );
   assert.equal(
-    await tatrFrame.locator(".task-id").first().textContent(),
-    "20260814-120000",
+    await tatrFrame.locator(".hide-closed input").isChecked(),
+    false,
   );
+  await projectsListFrame.locator(".manage").click();
+  await pinManager.waitFor();
+  assert.equal(await pinManager.locator(".pin-button.pinned").count(), 2);
+  await pinManager.locator(".search").fill("sample");
   assert.equal(
-    await projectsListFrame
-      .locator(".project-row", { hasText: "sample" })
-      .locator(".worktree")
-      .inputValue(),
-    await projectsListFrame
-      .locator(".project-row", { hasText: "sample" })
-      .locator('.worktree option:text-is("Primary")')
+    await pinManager.locator(".manage-row select").inputValue(),
+    await pinManager
+      .locator('.manage-row option:text-is("Primary")')
       .getAttribute("value"),
-    "reload resets worktree choice to Primary",
+    "reload resets the page-local worktree choice",
   );
+  await pinManager.locator(".done").click();
+  await detailsFrame.locator(".state", { hasText: "Select a task" }).waitFor();
+
   await projectsListFrame
     .locator(".project-row", { hasText: "sample" })
     .click();
@@ -1749,17 +1508,6 @@ try {
   await tatrFrame.locator(".title", { hasText: "Add Tatr widget" }).click();
   await detailsFrame.locator(".markdown").waitFor();
   await page.locator("#edit-layout").click();
-  await detailsFrame.locator(".widget-link-badge.input").click();
-  assert.equal(await page.locator("#link-widget").isVisible(), true);
-  const relinkResponse = page.waitForResponse(
-    (response) =>
-      response
-        .url()
-        .includes(`${dashboardApi}/links/${detailsInstance.id}/task`) &&
-      response.request().method() === "PUT",
-  );
-  await page.locator("#confirm-link").click();
-  assert.equal((await relinkResponse).status(), 200);
   await projectFilterBadge.click();
   await page.locator("#link-source").selectOption("");
   const unlinkProjectFilter = page.waitForResponse(
@@ -1771,12 +1519,8 @@ try {
   );
   await page.locator("#confirm-link").click();
   assert.equal((await unlinkProjectFilter).status(), 204);
-  await tatrFrame.locator(".task-row").nth(1).waitFor();
-  assert.equal(await tatrFrame.locator(".task-row").count(), 2);
-  assert.equal(
-    await projectFilterBadge.textContent(),
-    "Project filter: Not linked",
-  );
+  await tatrFrame.locator(".task-row").nth(2).waitFor();
+  assert.equal(await tatrFrame.locator(".task-row").count(), 3);
   await projectFilterBadge.click();
   await page
     .locator("#link-source")
@@ -1790,64 +1534,18 @@ try {
   );
   await page.locator("#confirm-link").click();
   assert.equal((await restoreProjectFilter).status(), 200);
-  await tatrFrame
-    .locator(".project-filter", { hasText: "Project: sample" })
-    .waitFor();
-
-  const projectInputBadge = projectFrame.locator(".widget-link-badge.input");
-  await projectInputBadge.click();
-  await page
-    .locator("#link-source")
-    .selectOption(`${pinnedInstance.id}\u0000selected_project`);
-  const projectFromPinned = page.waitForResponse(
-    (response) =>
-      response
-        .url()
-        .includes(`${dashboardApi}/links/${projectInstance.id}/project`) &&
-      response.request().method() === "PUT",
-  );
-  await page.locator("#confirm-link").click();
-  assert.equal((await projectFromPinned).status(), 200);
-  await projectFilterBadge.click();
-  await page
-    .locator("#link-source")
-    .selectOption(`${pinnedInstance.id}\u0000selected_project`);
-  const tatrFromPinned = page.waitForResponse(
-    (response) =>
-      response
-        .url()
-        .includes(`${dashboardApi}/links/${tatrInstance.id}/project`) &&
-      response.request().method() === "PUT",
-  );
-  await page.locator("#confirm-link").click();
-  assert.equal((await tatrFromPinned).status(), 200);
   await page.locator("#finish-editing").click();
-  await pinnedFrame.locator(".project-card", { hasText: "sample" }).click();
-  await projectFrame.locator('.identity:text-is("sample")').waitFor();
+  await projectsListFrame
+    .locator(".project-row", { hasText: "sample" })
+    .click();
+  await projectsListFrame
+    .locator(".project-row", { hasText: "sample" })
+    .click();
   await tatrFrame
     .locator(".project-filter", { hasText: "Project: sample" })
     .waitFor();
-  assert.equal(
-    await pinnedFrame
-      .locator(".project-card", { hasText: "sample" })
-      .evaluate((element) => element.classList.contains("selected")),
-    true,
-    "Pinned publishes the Primary project selection",
-  );
 
   await page.locator("#edit-layout").click();
-  await projectInputBadge.click();
-  await page
-    .locator("#link-source")
-    .selectOption(`${projectsListInstance.id}\u0000selected_project`);
-  await page.locator("#confirm-link").click();
-  await projectFilterBadge.click();
-  await page
-    .locator("#link-source")
-    .selectOption(`${projectsListInstance.id}\u0000selected_project`);
-  await page.locator("#confirm-link").click();
-  await projectFrame.locator('.identity:text-is("sample")').waitFor();
-
   const deleteProjectsList = await page.request.delete(
     `${dashboardApiUrl}/instances/${projectsListInstance.id}`,
   );
@@ -1856,26 +1554,21 @@ try {
   await projectFrame
     .locator(".state", { hasText: "Select a project" })
     .waitFor();
-  await tatrFrame.locator(".task-row").nth(1).waitFor();
+  await tatrFrame.locator(".task-row").nth(2).waitFor();
   assert.equal(
     await tatrFrame.locator(".task-row").count(),
-    2,
-    "deleting the project source clears the page-local Tatr filter",
+    3,
+    "deleting Project Pulse clears linked project context",
   );
   const deleteProject = await page.request.delete(
     `${dashboardApiUrl}/instances/${projectInstance.id}`,
   );
   assert.equal(deleteProject.status(), 204);
   await projectFrame.waitFor({ state: "detached" });
-  const deletePinned = await page.request.delete(
-    `${dashboardApiUrl}/instances/${pinnedInstance.id}`,
-  );
-  assert.equal(deletePinned.status(), 204);
-  await pinnedFrame.waitFor({ state: "detached" });
   const retainedPins = await page.request.get(
     `${baseUrl}/api/v1/widget-state/projects`,
   );
-  assert.equal((await retainedPins.json()).value.pins.length, 3);
+  assert.equal((await retainedPins.json()).value.pins.length, 2);
   const deleteTatr = await page.request.delete(
     `${dashboardApiUrl}/instances/${tatrInstance.id}`,
   );
@@ -1982,7 +1675,7 @@ try {
     ["disk", ["full", "compact"]],
     ["memory", ["full", "compact"]],
     ["network", ["full", "compact"]],
-    ["projects", ["list", "pinned", "project"]],
+    ["projects", ["pulse", "brief"]],
     ["claude-usage", ["full", "compact", "minimal"]],
     ["codex-usage", ["compact", "minimal"]],
     ["tatr-tasks", ["full", "details"]],
@@ -2133,7 +1826,7 @@ try {
   assert.equal(
     JSON.parse(readFileSync(stateFile, "utf8")).widget_state.projects.pins
       .length,
-    3,
+    2,
     "shared widget state persists without Projects instances",
   );
   dashboardd = startDashboardd();

@@ -53,7 +53,7 @@ h2 {
   overflow: hidden;
   color: var(--dashboardd-color-text-muted);
   font-family: var(--dashboardd-font-mono);
-  font-size: 9px;
+  font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }

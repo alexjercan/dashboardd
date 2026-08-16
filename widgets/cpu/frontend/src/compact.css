@@ -33,7 +33,7 @@ h2 {
   gap: 6px;
   color: var(--dashboardd-color-text-muted);
   font-family: var(--dashboardd-font-mono);
-  font-size: 10px;
+  font-size: 12px;
   white-space: nowrap;
 }
 

@@ -1,0 +1,264 @@
+:host {
+  display: block;
+  height: 100%;
+}
+
+article {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+  padding: 13px 14px;
+  overflow: hidden;
+  background: var(--dashboardd-color-surface);
+}
+
+article > header,
+.manager header {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+article > header {
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--dashboardd-color-selection);
+}
+
+h2 {
+  margin: 0;
+  color: var(--dashboardd-color-text-bright);
+  font-size: 17px;
+}
+
+.summary {
+  display: block;
+  margin-top: 2px;
+  color: var(--dashboardd-color-text-muted);
+  font-size: 12px;
+}
+
+.manage,
+.done,
+.move {
+  border: 0;
+  background: transparent;
+  color: var(--dashboardd-color-accent);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.rows {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  scrollbar-color: var(--dashboardd-color-selection) transparent;
+  scrollbar-width: thin;
+}
+
+.project-row {
+  display: grid;
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3px 10px;
+  padding: 8px 5px;
+  border: 0;
+  border-bottom: 1px solid var(--dashboardd-color-selection);
+  background: transparent;
+  color: var(--dashboardd-color-text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.project-row:hover,
+.project-row:focus-visible,
+.project-row.selected {
+  background: var(--dashboardd-color-selection);
+  outline: none;
+}
+
+.project-row.selected {
+  box-shadow: inset 2px 0 var(--dashboardd-color-accent);
+}
+
+.project-row strong,
+.project-context {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-row strong {
+  color: var(--dashboardd-color-text-bright);
+  font-size: 14px;
+}
+
+.project-context,
+.project-row small {
+  color: var(--dashboardd-color-text-muted);
+  font-size: 12px;
+}
+
+.project-row small {
+  text-align: right;
+}
+
+.attention {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: center;
+  color: var(--dashboardd-color-text-muted);
+  font-size: 12px;
+}
+
+.attention[data-state="active"] {
+  color: var(--dashboardd-color-secondary);
+}
+
+.attention[data-state="dirty"] {
+  color: var(--dashboardd-color-accent);
+}
+
+.empty {
+  display: grid;
+  height: 100%;
+  place-items: center;
+  color: var(--dashboardd-color-text-muted);
+  font-size: 13px;
+}
+
+.manager {
+  width: min(560px, calc(100% - 24px));
+  max-height: calc(100% - 24px);
+  padding: 0;
+  border: 1px solid var(--dashboardd-color-border);
+  border-radius: 6px;
+  background: var(--dashboardd-color-surface);
+  color: var(--dashboardd-color-text);
+}
+
+.manager::backdrop {
+  background: color-mix(in srgb, black 62%, transparent);
+}
+
+.manager section {
+  display: flex;
+  max-height: min(620px, calc(100vh - 48px));
+  flex-direction: column;
+  padding: 15px;
+}
+
+.manager header {
+  padding-bottom: 11px;
+}
+
+.search {
+  min-height: 36px;
+  padding: 6px 9px;
+  border: 1px solid var(--dashboardd-color-border);
+  border-radius: 4px;
+  background: var(--dashboardd-color-canvas);
+  color: var(--dashboardd-color-text);
+  font-size: 13px;
+}
+
+.search:focus {
+  border-color: var(--dashboardd-color-accent);
+  outline: none;
+}
+
+.limit {
+  padding: 8px 0;
+  color: var(--dashboardd-color-text-muted);
+  font-size: 12px;
+}
+
+.project-list {
+  min-height: 0;
+  overflow-y: auto;
+  border-top: 1px solid var(--dashboardd-color-selection);
+}
+
+.manage-row {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid var(--dashboardd-color-selection);
+}
+
+.manage-row strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--dashboardd-color-text-bright);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row-controls {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+}
+
+.row-controls select {
+  max-width: 130px;
+  min-height: 28px;
+  border: 1px solid var(--dashboardd-color-border);
+  border-radius: 3px;
+  background: var(--dashboardd-color-canvas);
+  color: var(--dashboardd-color-text);
+  font-size: 12px;
+}
+
+.move {
+  color: var(--dashboardd-color-text-muted);
+}
+
+.move:disabled {
+  opacity: 0.3;
+}
+
+.pin-button {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  padding: 6px;
+  border: 0;
+  background: transparent;
+  color: var(--dashboardd-color-text-dim);
+  cursor: pointer;
+  place-items: center;
+}
+
+.pin-button svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+}
+
+.pin-button.pinned {
+  color: var(--dashboardd-color-accent);
+}
+
+.pin-button.pinned svg {
+  fill: currentColor;
+}
+
+.pin-button:disabled {
+  opacity: 0.3;
+}
+
+.manager-empty {
+  padding: 18px;
+  color: var(--dashboardd-color-text-muted);
+  font-size: 13px;
+  text-align: center;
+}

@@ -32,6 +32,8 @@ const MAX_WORKTREES: usize = 16;
 const MAX_GIT_CONCURRENCY: usize = 8;
 const MAX_CHANGES: usize = 500;
 const MAX_BRANCHES: usize = 200;
+const MAX_DOCUMENTS: usize = 32;
+const MAX_DOCUMENT_BYTES: u64 = 128 * 1024;
 const MAX_VIEWS: usize = 64;
 
 #[derive(Clone)]
@@ -119,6 +121,14 @@ struct ProjectDetails {
     summary: ProjectSummary,
     changes: Vec<Change>,
     branches: Vec<Branch>,
+    documents: Vec<String>,
+    document: Option<ProjectDocument>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+struct ProjectDocument {
+    path: String,
+    content: String,
 }
 
 #[derive(Default)]
@@ -133,6 +143,7 @@ struct ProjectView {
     worktree_id: String,
     worktree: String,
     focused: bool,
+    document: Option<String>,
     next_refresh: Instant,
     previous: Option<Result<Value, String>>,
 }
@@ -189,14 +200,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 Some(line) => match dashboard_protocol::parse::<ServerToWidget>(&line) {
                     Ok(ServerToWidget::Initialize { instance_id, widget_id, variant_id, options }) if widget_id == WIDGET_ID => {
                         match (Settings::from_options(&options), variant_id.as_str()) {
-                            (Ok(settings), "list" | "pinned") => runtime = Some(Runtime::List {
+                            (Ok(settings), "pulse") => runtime = Some(Runtime::List {
                                 instance_id,
                                 settings,
                                 discovery: DiscoveryCache::default(),
                                 summaries: HashMap::new(),
                                 views: HashMap::new(),
                             }),
-                            (Ok(settings), "project") => runtime = Some(Runtime::Project {
+                            (Ok(settings), "brief") => runtime = Some(Runtime::Project {
                                 instance_id,
                                 settings,
                                 discovery: DiscoveryCache::default(),
@@ -360,6 +371,7 @@ fn handle_command(runtime: &mut Runtime, payload: &Value) -> bool {
                                 .get("focused")
                                 .and_then(Value::as_bool)
                                 .unwrap_or(false),
+                            document: None,
                             next_refresh: Instant::now(),
                             previous: None,
                         },
@@ -375,6 +387,22 @@ fn handle_command(runtime: &mut Runtime, payload: &Value) -> bool {
                     };
                     view.focused = focused;
                     view.next_refresh = Instant::now();
+                    true
+                }
+                "select_document" => {
+                    let Some(view) = views.get_mut(view_id) else {
+                        return false;
+                    };
+                    let Some(document) = payload
+                        .get("document")
+                        .and_then(Value::as_str)
+                        .filter(|value| valid_document_path(value))
+                    else {
+                        return false;
+                    };
+                    view.document = Some(document.into());
+                    view.next_refresh = Instant::now();
+                    view.previous = None;
                     true
                 }
                 "refresh" => {
@@ -480,10 +508,16 @@ async fn publish_runtime<W: AsyncWrite + Unpin>(
                                 && worktree.worktree == view.worktree
                         })
                     }) {
-                    Some(project) => inspect_project(project).await.and_then(|details| {
-                        serde_json::to_value(json!({ "view_id": view_id, "details": details }))
-                            .map_err(|error| error.to_string())
-                    }),
+                    Some(project) => {
+                        inspect_project_with_document(project, true, view.document.as_deref())
+                            .await
+                            .and_then(|details| {
+                                serde_json::to_value(
+                                    json!({ "view_id": view_id, "details": details }),
+                                )
+                                .map_err(|error| error.to_string())
+                            })
+                    }
                     None => Err("Selected project is unavailable".into()),
                 };
                 publish_changed(
@@ -775,7 +809,9 @@ async fn load_summaries(
                 break;
             };
             running.spawn(async move {
-                let result = inspect_project(&worktree).await.map(|value| value.summary);
+                let result = inspect_project_with_document(&worktree, false, None)
+                    .await
+                    .map(|value| value.summary);
                 (project, worktree, result)
             });
         }
@@ -842,8 +878,22 @@ fn fallback_summary(project: &ProjectLocation) -> ProjectSummary {
     }
 }
 
+#[cfg(test)]
 async fn inspect_project(project: &ProjectLocation) -> Result<ProjectDetails, String> {
+    inspect_project_with_document(project, true, None).await
+}
+
+async fn inspect_project_with_document(
+    project: &ProjectLocation,
+    include_documents: bool,
+    selected_document: Option<&str>,
+) -> Result<ProjectDetails, String> {
     let (open_tasks, in_progress_tasks) = task_counts(&project.path);
+    let (documents, document) = if include_documents {
+        load_project_documents(&project.path, selected_document)
+    } else {
+        (Vec::new(), None)
+    };
     if !project.git {
         return Ok(ProjectDetails {
             summary: ProjectSummary {
@@ -866,6 +916,8 @@ async fn inspect_project(project: &ProjectLocation) -> Result<ProjectDetails, St
             },
             changes: Vec::new(),
             branches: Vec::new(),
+            documents,
+            document,
         });
     }
 
@@ -940,7 +992,125 @@ async fn inspect_project(project: &ProjectLocation) -> Result<ProjectDetails, St
         },
         changes: parsed.changes,
         branches,
+        documents,
+        document,
     })
+}
+
+fn load_project_documents(
+    root: &Path,
+    selected_document: Option<&str>,
+) -> (Vec<String>, Option<ProjectDocument>) {
+    let Ok(root) = root.canonicalize() else {
+        return (Vec::new(), None);
+    };
+    let mut documents = Vec::new();
+    collect_project_documents(&root, &root, 0, &mut documents);
+    documents.sort_by(|left, right| {
+        document_rank(left)
+            .cmp(&document_rank(right))
+            .then_with(|| left.cmp(right))
+    });
+    documents.dedup();
+    documents.truncate(MAX_DOCUMENTS);
+    let selected = selected_document
+        .filter(|candidate| documents.iter().any(|path| path == candidate))
+        .or_else(|| documents.first().map(String::as_str));
+    let document = selected.and_then(|relative| {
+        let path = root.join(relative);
+        let metadata = fs::symlink_metadata(&path).ok()?;
+        if !metadata.file_type().is_file() || metadata.len() > MAX_DOCUMENT_BYTES {
+            return None;
+        }
+        let content = fs::read_to_string(path).ok()?;
+        Some(ProjectDocument {
+            path: relative.into(),
+            content,
+        })
+    });
+    (documents, document)
+}
+
+fn collect_project_documents(
+    root: &Path,
+    directory: &Path,
+    depth: usize,
+    values: &mut Vec<String>,
+) {
+    if values.len() >= MAX_DOCUMENTS || depth > 2 {
+        return;
+    }
+    let Ok(mut entries) =
+        fs::read_dir(directory).and_then(|entries| entries.collect::<Result<Vec<_>, _>>())
+    else {
+        return;
+    };
+    entries.sort_by_key(fs::DirEntry::file_name);
+    for entry in entries {
+        if values.len() >= MAX_DOCUMENTS {
+            break;
+        }
+        let path = entry.path();
+        let Ok(metadata) = fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if metadata.file_type().is_symlink() {
+            continue;
+        }
+        if metadata.is_dir() {
+            if depth == 0 && entry.file_name() == "docs" {
+                collect_project_documents(root, &path, depth + 1, values);
+            } else if depth > 0 {
+                collect_project_documents(root, &path, depth + 1, values);
+            }
+            continue;
+        }
+        let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        let extension = path.extension().and_then(|value| value.to_str());
+        let root_document = depth == 0
+            && matches!(
+                name.as_str(),
+                "README" | "README.md" | "AGENTS.md" | "CLAUDE.md"
+            );
+        if !root_document || depth > 0 {
+            if !matches!(extension, Some("md" | "txt")) {
+                continue;
+            }
+        }
+        if metadata.len() > MAX_DOCUMENT_BYTES {
+            continue;
+        }
+        let Ok(relative) = path.strip_prefix(root) else {
+            continue;
+        };
+        let Some(relative) = relative.to_str() else {
+            continue;
+        };
+        if valid_document_path(relative) {
+            values.push(relative.replace('\\', "/"));
+        }
+    }
+}
+
+fn document_rank(path: &str) -> u8 {
+    match path {
+        "README.md" | "README" => 0,
+        "AGENTS.md" => 1,
+        "CLAUDE.md" => 2,
+        _ => 3,
+    }
+}
+
+fn valid_document_path(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 512
+        && !value.starts_with('/')
+        && !value.contains('\\')
+        && value
+            .split('/')
+            .all(|part| !part.is_empty() && part != "." && part != ".." && !part.starts_with('.'))
 }
 
 struct ParsedStatus {
@@ -1390,7 +1560,12 @@ mod tests {
         run(&["config", "user.email", "fixture@example.invalid"]);
         let mut file = fs::File::create(project.join("README.md")).unwrap();
         writeln!(file, "fixture").unwrap();
-        run(&["add", "README.md"]);
+        fs::create_dir(project.join("docs")).unwrap();
+        fs::write(project.join("docs/guide.md"), "# Guide\n").unwrap();
+        fs::write(project.join(".secret.md"), "secret").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("/etc/passwd", project.join("docs/linked.md")).unwrap();
+        run(&["add", "."]);
         run(&["commit", "-q", "-m", "Initial fixture"]);
         writeln!(file, "change").unwrap();
         let canonical = project.canonicalize().unwrap();
@@ -1411,6 +1586,18 @@ mod tests {
         assert_eq!(details.summary.branch.as_deref(), Some("main"));
         assert_eq!(details.summary.change_count, 1);
         assert_eq!(details.changes[0].path, "README.md");
+        assert_eq!(details.documents, ["README.md", "docs/guide.md"]);
+        assert_eq!(details.document.as_ref().unwrap().path, "README.md");
+        assert!(
+            details
+                .document
+                .as_ref()
+                .unwrap()
+                .content
+                .contains("fixture")
+        );
+        assert!(!payload.contains(".secret.md"));
+        assert!(!payload.contains("linked.md"));
         assert!(!payload.contains(root.to_string_lossy().as_ref()));
         assert!(!payload.contains("fixture@example.invalid"));
 
@@ -1471,6 +1658,22 @@ mod tests {
                 "project": "sample",
                 "worktree_id": "worktree-1",
                 "worktree": "Primary"
+            })
+        ));
+        assert!(handle_command(
+            &mut runtime,
+            &json!({
+                "command": "select_document",
+                "view_id": "page-1",
+                "document": "docs/guide.md"
+            })
+        ));
+        assert!(!handle_command(
+            &mut runtime,
+            &json!({
+                "command": "select_document",
+                "view_id": "page-1",
+                "document": "../secret"
             })
         ));
         assert!(!handle_command(

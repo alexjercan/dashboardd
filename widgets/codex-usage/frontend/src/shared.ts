@@ -115,7 +115,7 @@ function render(
   article.dataset.severity = severity(important.remaining_percent);
   article.classList.toggle("stale", snapshot.stale);
   if (variant === "minimal") {
-    article.innerHTML = `<strong class="minimal-value">${important.remaining_percent}%</strong>`;
+    article.innerHTML = `<span class="minimal-name">Codex</span><strong class="minimal-value">${important.remaining_percent}%</strong>`;
     shadow.host.setAttribute(
       "aria-label",
       `Codex ${important.label} weekly usage, ${important.remaining_percent} percent remaining`,

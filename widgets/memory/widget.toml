@@ -12,7 +12,7 @@ workspace = "@dashboardd/memory-widget"
 [[frontend.variants]]
 id = "full"
 name = "Full"
-size = [3, 3]
+size = [3, 2]
 entry = "src/full.ts"
 
 [[frontend.variants]]

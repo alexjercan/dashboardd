@@ -1,4 +1,8 @@
-import type { WidgetContext, WidgetFrontend } from "@dashboardd/widget-sdk";
+import type {
+  WidgetContext,
+  WidgetFrontend,
+  WidgetPresentation,
+} from "@dashboardd/widget-sdk";
 import widgetReset from "@dashboardd/widget-sdk/widget.css";
 import styles from "./styles.css";
 
@@ -23,6 +27,8 @@ type ViewState = {
   tasks: Task[];
   statuses: Set<Status>;
   tags: Set<string>;
+  hideClosed: boolean;
+  query: string;
   sort: Sort;
   direction: Direction;
   project: ProjectSelection | null;
@@ -37,9 +43,11 @@ export function mount(
 ): WidgetFrontend {
   const shadow = container.attachShadow({ mode: "open" });
   const state: ViewState = {
-    tasks: [] as Task[],
+    tasks: [],
     statuses: new Set<Status>(),
     tags: new Set<string>(),
+    hideClosed: false,
+    query: "",
     sort: parseSort(context.options.sort),
     direction: defaultDirection(parseSort(context.options.sort)),
     project: null,
@@ -58,30 +66,44 @@ export function mount(
     },
   };
   const viewId = createViewId();
-  shadow.innerHTML = `<style>${widgetReset}\n${styles}</style><article><header><div><h2>Tatr Tasks</h2><span class="summary">Waiting for tasks...</span></div><label class="mobile-sort">Sort<select aria-label="Sort tasks"><option value="priority">Priority</option><option value="created">Created</option><option value="title">Title</option></select></label></header><div class="filters" hidden><span class="filter-list"></span><button class="clear" type="button">Clear</button></div><div class="table"><div class="table-head"><span>Status</span><span>Project</span><span>Task ID</span><button type="button" data-sort="title">Title</button><span>Tags</span><button type="button" data-sort="priority">Priority</button></div><div class="rows"><div class="empty">Waiting for tasks...</div></div></div></article>`;
+  shadow.innerHTML = `
+    <style>${widgetReset}\n${styles}</style>
+    <article>
+      <header>
+        <div><h2>Tasks</h2><span class="summary">Waiting for tasks...</span></div>
+        <label class="hide-closed"><input type="checkbox"> Hide closed</label>
+      </header>
+      <div class="focus-controls">
+        <input class="search" type="search" aria-label="Search tasks" placeholder="Search tasks">
+        <select class="sort" aria-label="Sort tasks"><option value="priority">Priority</option><option value="created">Created</option><option value="title">Title</option></select>
+        <button class="clear" type="button">Clear filters</button>
+      </div>
+      <div class="filters" hidden><span class="filter-list"></span></div>
+      <div class="rows"><div class="empty">Waiting for tasks...</div></div>
+    </article>`;
   shadow.host.setAttribute(
     "aria-label",
     `Tatr tasks for ${context.instanceId}`,
   );
 
-  for (const button of shadow.querySelectorAll<HTMLButtonElement>(
-    "[data-sort]",
-  ))
-    button.addEventListener("click", () => {
-      const sort = parseSort(button.dataset.sort);
-      if (state.sort === sort)
-        state.direction =
-          state.direction === "ascending" ? "descending" : "ascending";
-      else {
-        state.sort = sort;
-        state.direction = defaultDirection(sort);
-      }
+  required<HTMLInputElement>(shadow, ".hide-closed input").addEventListener(
+    "change",
+    (event) => {
+      state.hideClosed = (event.currentTarget as HTMLInputElement).checked;
       render(shadow, state);
-    });
-  const select = required<HTMLSelectElement>(shadow, ".mobile-sort select");
-  select.value = state.sort;
-  select.addEventListener("change", () => {
-    state.sort = parseSort(select.value);
+    },
+  );
+  required<HTMLInputElement>(shadow, ".search").addEventListener(
+    "input",
+    (event) => {
+      state.query = (event.currentTarget as HTMLInputElement).value;
+      render(shadow, state);
+    },
+  );
+  const sort = required<HTMLSelectElement>(shadow, ".sort");
+  sort.value = state.sort;
+  sort.addEventListener("change", () => {
+    state.sort = parseSort(sort.value);
     state.direction = defaultDirection(state.sort);
     render(shadow, state);
   });
@@ -90,6 +112,8 @@ export function mount(
     () => {
       state.statuses.clear();
       state.tags.clear();
+      state.query = "";
+      required<HTMLInputElement>(shadow, ".search").value = "";
       render(shadow, state);
     },
   );
@@ -128,6 +152,16 @@ export function mount(
       state.tasks = snapshot.tasks;
       render(shadow, state);
     },
+    setPresentation(presentation: WidgetPresentation): void {
+      shadow.host.setAttribute("data-presentation", presentation);
+      if (presentation === "tile") {
+        state.query = "";
+        state.statuses.clear();
+        state.tags.clear();
+        required<HTMLInputElement>(shadow, ".search").value = "";
+        render(shadow, state);
+      }
+    },
     destroy(): void {
       unsubscribeProject();
       void context
@@ -139,12 +173,18 @@ export function mount(
 }
 
 function render(shadow: ShadowRoot, state: ViewState): void {
+  const normalized = state.query.trim().toLocaleLowerCase();
   const filtered = state.tasks.filter(
     (task) =>
       (state.project === null ||
         task.worktree_id === state.project.worktree_id) &&
+      (!state.hideClosed || task.status !== "CLOSED") &&
       (state.statuses.size === 0 || state.statuses.has(task.status)) &&
-      [...state.tags].every((tag) => task.tags.includes(tag)),
+      [...state.tags].every((tag) => task.tags.includes(tag)) &&
+      (!normalized ||
+        `${task.title} ${task.project} ${task.id} ${task.tags.join(" ")}`
+          .toLocaleLowerCase()
+          .includes(normalized)),
   );
   const tasks = [...filtered].sort((left, right) => {
     const order = compare(left, right, state.sort);
@@ -154,15 +194,7 @@ function render(shadow: ShadowRoot, state: ViewState): void {
     filtered.length,
     state.tasks.length,
   );
-  const select = required<HTMLSelectElement>(shadow, ".mobile-sort select");
-  select.value = state.sort;
-  for (const button of shadow.querySelectorAll<HTMLButtonElement>(
-    "[data-sort]",
-  )) {
-    const active = button.dataset.sort === state.sort;
-    button.classList.toggle("active", active);
-    button.setAttribute("aria-sort", active ? state.direction : "none");
-  }
+  required<HTMLSelectElement>(shadow, ".sort").value = state.sort;
   renderFilters(shadow, state);
   const rows = required<HTMLElement>(shadow, ".rows");
   rows.replaceChildren();
@@ -170,11 +202,7 @@ function render(shadow: ShadowRoot, state: ViewState): void {
     const empty = document.createElement("div");
     empty.className = "empty";
     empty.textContent =
-      state.tasks.length === 0
-        ? "No tasks"
-        : state.project
-          ? `No tasks for ${selectionLabel(state.project)}`
-          : "No matching tasks";
+      state.tasks.length === 0 ? "No tasks" : "No matching tasks";
     rows.append(empty);
     return;
   }
@@ -217,34 +245,33 @@ function taskRow(
     render(shadow, state);
   });
 
-  const project = document.createElement("span");
-  project.className = "project";
-  project.textContent = task.project;
-  project.title = task.project;
-
-  const taskId = document.createElement("span");
-  taskId.className = "task-id";
-  taskId.textContent = task.id;
-
   const title = document.createElement("button");
   title.type = "button";
   title.className = "title";
   title.textContent = task.title;
-  title.title = `Show details for ${task.title}`;
   title.addEventListener("click", (event) => {
     event.stopPropagation();
     select();
   });
 
-  const metadata = document.createElement("span");
-  metadata.className = "metadata";
+  const project = document.createElement("span");
+  project.className = "project";
+  project.textContent = selectionLabel(task);
+
+  const priority = document.createElement("span");
+  priority.className = "priority";
+  priority.textContent = `P${task.priority}`;
+
+  const taskId = document.createElement("span");
+  taskId.className = "task-id";
+  taskId.textContent = task.id;
 
   const tags = document.createElement("span");
   tags.className = "tags";
   for (const value of task.tags) {
     const tag = document.createElement("button");
     tag.type = "button";
-    tag.textContent = value;
+    tag.textContent = `#${value}`;
     tag.classList.toggle("selected", state.tags.has(value));
     tag.addEventListener("click", (event) => {
       event.stopPropagation();
@@ -254,45 +281,36 @@ function taskRow(
     tags.append(tag);
   }
 
-  const priority = document.createElement("span");
-  priority.className = "priority";
-  priority.textContent = `P${task.priority}`;
-
+  const secondary = document.createElement("div");
+  secondary.className = "secondary";
+  secondary.append(project, priority);
+  const metadata = document.createElement("div");
+  metadata.className = "metadata";
   metadata.append(taskId, tags);
-  row.append(status, project, metadata, title, priority);
+  row.append(status, title, secondary, metadata);
   return row;
 }
 
-function renderFilters(
-  shadow: ShadowRoot,
-  state: {
-    project: ProjectSelection | null;
-    statuses: Set<Status>;
-    tags: Set<string>;
-  },
-): void {
+function renderFilters(shadow: ShadowRoot, state: ViewState): void {
   const filters = required<HTMLElement>(shadow, ".filters");
   const list = required<HTMLElement>(shadow, ".filter-list");
   list.replaceChildren();
   if (state.project) {
-    const chip = document.createElement("span");
-    chip.className = "project-filter";
-    chip.textContent = `Project: ${selectionLabel(state.project)}`;
-    list.append(chip);
+    const project = chip(`Project: ${selectionLabel(state.project)}`);
+    project.className = "project-filter";
+    list.append(project);
   }
-  for (const status of state.statuses) {
-    const chip = document.createElement("span");
-    chip.textContent = statusLabel(status);
-    list.append(chip);
-  }
-  for (const tag of state.tags) {
-    const chip = document.createElement("span");
-    chip.textContent = `#${tag}`;
-    list.append(chip);
-  }
-  const hasLocalFilters = state.statuses.size > 0 || state.tags.size > 0;
-  required<HTMLButtonElement>(shadow, ".clear").hidden = !hasLocalFilters;
-  filters.hidden = state.project === null && !hasLocalFilters;
+  for (const status of state.statuses) list.append(chip(statusLabel(status)));
+  for (const tag of state.tags) list.append(chip(`#${tag}`));
+  filters.hidden = list.childElementCount === 0;
+  required<HTMLButtonElement>(shadow, ".clear").hidden =
+    state.statuses.size === 0 && state.tags.size === 0 && state.query === "";
+}
+
+function chip(text: string): HTMLElement {
+  const element = document.createElement("span");
+  element.textContent = text;
+  return element;
 }
 
 function taskKey(task: Task): string {

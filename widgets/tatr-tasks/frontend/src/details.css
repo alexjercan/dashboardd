@@ -36,7 +36,7 @@
   color: var(--dashboardd-color-text-muted);
   cursor: pointer;
   font-family: var(--dashboardd-font-mono);
-  font-size: 9px;
+  font-size: 11px;
   line-height: 1.35;
   list-style: none;
   overflow-wrap: anywhere;
@@ -88,7 +88,7 @@
   color: var(--dashboardd-color-text-muted);
   cursor: pointer;
   font-family: var(--dashboardd-font-mono);
-  font-size: 9px;
+  font-size: 11px;
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -117,7 +117,7 @@
   display: grid;
   place-items: center;
   color: var(--dashboardd-color-text-muted);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .document-artifact,
@@ -137,7 +137,7 @@
   margin: 0;
   color: var(--dashboardd-color-text);
   font-family: var(--dashboardd-font-mono);
-  font-size: 9px;
+  font-size: 11px;
   line-height: 1.55;
   white-space: pre-wrap;
 }
@@ -203,7 +203,7 @@
   background: var(--dashboardd-color-canvas);
   color: var(--dashboardd-color-secondary);
   font-family: var(--dashboardd-font-mono);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .document-artifact pre {
