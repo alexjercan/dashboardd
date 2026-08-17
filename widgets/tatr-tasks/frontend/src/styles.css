@@ -18,6 +18,7 @@ header {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  padding-inline-end: var(--dashboardd-focus-control-clearance);
   padding-bottom: 9px;
   border-bottom: 1px solid var(--dashboardd-color-selection);
 }

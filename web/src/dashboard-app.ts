@@ -55,11 +55,7 @@ app.innerHTML = `
       </footer>
     </div>
   </section>
-  <section id="focus-layer" class="focus-layer" aria-labelledby="focus-title" hidden>
-    <header class="focus-header">
-      <h1 id="focus-title" tabindex="-1">Widget Focus</h1>
-      <button id="close-focus" class="button" type="button">Close</button>
-    </header>
+  <section id="focus-layer" class="focus-layer" aria-label="Widget Focus" hidden>
     <div id="focus-stage" class="focus-stage"></div>
   </section>
   <dialog id="add-widget" class="modal">
@@ -149,8 +145,6 @@ const widgetsElement = required<HTMLElement>("#widgets");
 const dashboardShell = required<HTMLElement>(".dashboard-shell");
 const focusLayer = required<HTMLElement>("#focus-layer");
 const focusStage = required<HTMLElement>("#focus-stage");
-const focusTitle = required<HTMLElement>("#focus-title");
-const closeFocusButton = required<HTMLButtonElement>("#close-focus");
 const errorElement = required<HTMLElement>("#dashboard-error");
 const announcementElement = required<HTMLElement>("#dashboard-announcement");
 const editorHeader = required<HTMLElement>("#editor-header");
@@ -324,7 +318,6 @@ increaseColumns.addEventListener(
   "click",
   () => void updateDashboardColumns(dashboardLayout.columns + 1),
 );
-closeFocusButton.addEventListener("click", closeFocus);
 document.addEventListener("pointerdown", handleCanvasPointerDown, true);
 healthDialog.addEventListener("close", () => {
   healthInstanceId = null;
@@ -996,7 +989,10 @@ async function mountWidget(instance: Instance): Promise<void> {
     "aria-label",
     `Focus ${descriptor.name} ${variantFor(instance, descriptor).name}`,
   );
-  focusButton.addEventListener("click", () => openFocus(instance.id));
+  focusButton.addEventListener("click", () => {
+    if (focusedInstanceId === instance.id) closeFocus();
+    else openFocus(instance.id);
+  });
   const dragHandle = document.createElement("button");
   dragHandle.className = "drag-handle";
   dragHandle.type = "button";
@@ -1161,7 +1157,11 @@ function syncRoute(focus: boolean): void {
       : "dashboardd Dashboard";
   renderCanvas();
   if (!focus) return;
-  if (focusedInstanceId) closeFocusButton.focus();
+  if (focusedInstanceId)
+    containers
+      .get(focusedInstanceId)
+      ?.querySelector<HTMLButtonElement>(".widget-focus-button")
+      ?.focus();
   else if (previousFocusedInstanceId)
     containers
       .get(previousFocusedInstanceId)
@@ -1257,7 +1257,24 @@ function renderCanvas(): void {
 function renderFocusControl(instanceId: string, frame: HTMLElement): void {
   const button = frame.querySelector<HTMLButtonElement>(".widget-focus-button");
   if (!button) return;
-  button.hidden = editing || !supportsFocus(instanceId);
+  const instance = resources.get(instanceId);
+  const descriptor = instance && descriptors.get(instance.widget_id);
+  const variant = instance && descriptor && variantFor(instance, descriptor);
+  if (!descriptor || !variant) {
+    button.hidden = true;
+    return;
+  }
+  const focused = focusedInstanceId === instanceId;
+  button.hidden = editing || !variant.focus;
+  button.id = focused ? "close-focus" : "";
+  button.textContent = focused ? "x" : "Focus";
+  button.setAttribute(
+    "aria-label",
+    focused
+      ? `Close ${descriptor.name} ${variant.name} Focus`
+      : `Focus ${descriptor.name} ${variant.name}`,
+  );
+  button.title = focused ? "Close focus" : "";
 }
 
 function supportsFocus(instanceId: string): boolean {
@@ -1297,11 +1314,7 @@ function renderFocusLayer(): void {
   }
   if (!instance || !descriptor || !variant || !frame) return;
 
-  focusTitle.textContent = `${descriptor.name} - ${variant.name}`;
-  closeFocusButton.setAttribute(
-    "aria-label",
-    `Close ${descriptor.name} ${variant.name} Focus`,
-  );
+  focusLayer.setAttribute("aria-label", `${descriptor.name} - ${variant.name}`);
   focusLayer.hidden = false;
   dashboardShell.inert = true;
   dashboardShell.setAttribute("aria-hidden", "true");

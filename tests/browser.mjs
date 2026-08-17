@@ -1351,7 +1351,7 @@ try {
     "the mounted frontend receives the Focus lifecycle state",
   );
   const focusedBox = await detailsFrame.boundingBox();
-  assert.ok(focusedBox.width > 380 && focusedBox.height > 750);
+  assert.deepEqual(focusedBox, { x: 0, y: 0, width: 420, height: 900 });
   await page.screenshot({
     path: path.join(artifacts, "tatr-artifact-focus-markdown-narrow.png"),
   });
@@ -1391,7 +1391,7 @@ try {
   await directFocusPage.goto(`${dashboardViewUrl}/focus/${detailsInstance.id}`);
   await directFocusPage.locator("#focus-layer").waitFor();
   assert.equal(
-    await directFocusPage.locator("#focus-title").textContent(),
+    await directFocusPage.locator("#focus-layer").getAttribute("aria-label"),
     "Tatr Tasks - Artifact",
   );
   await directFocusPage.locator("#close-focus").click();
@@ -1417,6 +1417,14 @@ try {
   await projectFrame.locator(".widget-focus-button").click();
   await page.waitForURL(`${dashboardViewUrl}/focus/${projectInstance.id}`);
   await projectFrame.locator(".document h1", { hasText: "sample" }).waitFor();
+  const projectRefreshBox = await projectFrame
+    .locator(".refresh")
+    .boundingBox();
+  const projectCloseBox = await page.locator("#close-focus").boundingBox();
+  assert.ok(
+    projectRefreshBox.x + projectRefreshBox.width <= projectCloseBox.x,
+    "Project Brief controls clear the shell Focus control",
+  );
   await page.screenshot({
     path: path.join(artifacts, "project-focus-document-narrow.png"),
   });
@@ -1447,6 +1455,14 @@ try {
   await tatrFrame.locator(".widget-focus-button").click();
   await page.waitForURL(`${dashboardViewUrl}/focus/${tatrInstance.id}`);
   await tatrFrame.locator(".focus-controls").waitFor();
+  const tasksHeaderControlBox = await tatrFrame
+    .locator(".hide-closed")
+    .boundingBox();
+  const tasksCloseBox = await page.locator("#close-focus").boundingBox();
+  assert.ok(
+    tasksHeaderControlBox.x + tasksHeaderControlBox.width <= tasksCloseBox.x,
+    "Tasks controls clear the shell Focus control",
+  );
   await tatrFrame.locator(".search").fill("Add Tatr");
   assert.equal(await tatrFrame.locator(".task-row").count(), 1);
   assert.equal(await tatrFrame.locator(".task-id").first().isVisible(), true);

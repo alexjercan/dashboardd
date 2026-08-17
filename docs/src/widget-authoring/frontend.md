@@ -95,4 +95,6 @@ import widgetReset from "@dashboardd/widget-sdk/widget.css";
 
 `theme.css` defines supported dashboard custom properties for dashboard-compatible hosts and development previews. Widgets inherit those variables from dashboardd without importing the file. `widget.css` provides the Shadow DOM host and box-sizing reset. A bundler must load that import as a source string when it is inserted into a Shadow root.
 
+`--dashboardd-focus-control-clearance` is `0px` in tiles and `52px` in Focus. A focus-capable widget must reserve this inline-end space in its top control row so the shell-owned Focus control does not cover widget controls. Do not apply it to the complete widget width.
+
 Keep important tile text readable and reserve detailed controls for Focus.

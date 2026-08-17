@@ -28,7 +28,7 @@ The Add Widget dialog supports `j` and `k` navigation. Use `l` or `Enter` to con
 
 ## Focus
 
-Focus starts in Widget mode. The first `Escape` leaves widget interaction. The second closes Focus. The close button and browser Back also close Focus.
+Focus starts in Widget mode and lets the widget fill the viewport. The shell-owned `x` control sits on the focused widget, so widget frontends do not implement host navigation. The first `Escape` leaves widget interaction. The second closes Focus. The `x` control and browser Back also close Focus.
 
 ## Health
 

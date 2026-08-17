@@ -15,4 +15,5 @@
   --dashboardd-font-mono:
     "Iosevka", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   --dashboardd-radius-widget: 7px;
+  --dashboardd-focus-control-clearance: 0px;
 }

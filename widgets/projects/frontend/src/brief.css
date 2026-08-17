@@ -18,6 +18,7 @@ article > header {
   justify-content: space-between;
   gap: 12px;
   padding: 12px 14px 9px;
+  padding-inline-end: calc(14px + var(--dashboardd-focus-control-clearance));
   border-bottom: 1px solid var(--dashboardd-color-selection);
 }
 
