@@ -6,6 +6,7 @@ import {
   openSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -28,6 +29,16 @@ const browserPort = await reservePort();
 const stateFile = path.join(artifacts, `dashboard-${process.pid}.json`);
 const configFile = path.join(artifacts, `config-${process.pid}.toml`);
 const tatrRoot = path.join(artifacts, `tatr-${process.pid}`);
+const externalWidgetRoot = path.join(
+  artifacts,
+  `external-widgets-${process.pid}`,
+);
+mkdirSync(externalWidgetRoot, { recursive: true });
+symlinkSync(
+  path.join(root, "tests/fixtures/external-widget"),
+  path.join(externalWidgetRoot, "external-fixture"),
+  "dir",
+);
 writeTatrTask(
   "sample",
   "20260814-120000",
@@ -245,6 +256,7 @@ try {
       "codex-usage": "Codex Usage",
       cpu: "CPU",
       disk: "Disk",
+      "external-fixture": "External Fixture",
       memory: "RAM",
       network: "Network",
       projects: "Projects",
@@ -322,6 +334,7 @@ try {
         ["full", 3, 2],
         ["compact", 1, 1],
       ],
+      "external-fixture": [["summary", 3, 2]],
       memory: [
         ["full", 3, 2],
         ["compact", 1, 1],
@@ -732,7 +745,7 @@ try {
   assert.equal(invalidOptions.status(), 400);
 
   await page.locator('.dashboard-slot[data-column="3"][data-row="0"]').click();
-  assert.equal(await page.locator(".widget-choice").count(), 8);
+  assert.equal(await page.locator(".widget-choice").count(), 9);
   await page.locator(".widget-choice", { hasText: "CPU" }).click();
   await page.locator(".variant-choice", { hasText: "Full" }).click();
   await page.locator('.widget-option input[type="number"]').fill("20");
@@ -1943,6 +1956,7 @@ position = [1, 1]
   if (existsSync(stateFile)) unlinkSync(stateFile);
   if (existsSync(configFile)) unlinkSync(configFile);
   rmSync(tatrRoot, { recursive: true, force: true });
+  rmSync(externalWidgetRoot, { recursive: true, force: true });
 }
 
 async function exerciseUsageCommands(page, widgetId) {
@@ -2151,7 +2165,10 @@ function startDashboardd() {
     env: {
       ...process.env,
       DASHBOARDD_PORT: String(dashboardPort),
-      DASHBOARDD_WIDGETS_DIR: path.join(root, ".build/widgets"),
+      DASHBOARDD_WIDGET_PATH: [
+        path.join(root, ".build/widgets"),
+        externalWidgetRoot,
+      ].join(path.delimiter),
       DASHBOARDD_STATE_FILE: stateFile,
       DASHBOARDD_CONFIG_FILE: configFile,
     },

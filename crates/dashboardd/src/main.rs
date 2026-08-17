@@ -11,6 +11,7 @@ mod widget;
 use std::{
     env,
     error::Error,
+    ffi::OsString,
     io,
     net::{IpAddr, SocketAddr, TcpListener},
     path::PathBuf,
@@ -31,13 +32,15 @@ use crate::{
 
 const DEFAULT_HOST: &str = "127.0.0.1";
 const PORT_RANGE: std::ops::Range<u16> = 7000..8000;
-const DEFAULT_WIDGETS_DIR: &str = ".build/widgets";
+const DEFAULT_WIDGET_PATH: &str = ".build/widgets";
+const DEFAULT_WEB_DIR: &str = "web/dist";
 
 #[derive(Clone)]
 struct AppState {
     widgets: WidgetsManager,
     instances: InstanceManager,
     themes: ThemeManager,
+    web_dir: PathBuf,
     shutdown: broadcast::Sender<()>,
 }
 
@@ -45,7 +48,8 @@ struct AppState {
 struct Config {
     host: IpAddr,
     port: Option<u16>,
-    widgets_dir: PathBuf,
+    widget_roots: Vec<PathBuf>,
+    web_dir: PathBuf,
     state_file: PathBuf,
     config_file: PathBuf,
 }
@@ -62,9 +66,10 @@ impl Config {
         if port == Some(0) {
             return Err("DASHBOARDD_PORT must be between 1 and 65535".into());
         }
-        let widgets_dir = env::var_os("DASHBOARDD_WIDGETS_DIR")
+        let widget_roots = resolve_widget_roots(env::var_os("DASHBOARDD_WIDGET_PATH"))?;
+        let web_dir = env::var_os("DASHBOARDD_WEB_DIR")
             .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from(DEFAULT_WIDGETS_DIR));
+            .unwrap_or_else(|| PathBuf::from(DEFAULT_WEB_DIR));
         let state_file = resolve_state_file()?;
         let config_file = configuration::resolve_path()?;
         let config_file = if config_file.is_absolute() {
@@ -76,7 +81,8 @@ impl Config {
         Ok(Self {
             host,
             port,
-            widgets_dir,
+            widget_roots,
+            web_dir,
             state_file,
             config_file,
         })
@@ -90,7 +96,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let config = Config::from_environment()?;
     let (shutdown, _) = broadcast::channel(1);
-    let widgets = WidgetsManager::discover(&config.widgets_dir)?;
+    let widgets = WidgetsManager::discover(&config.widget_roots)?;
     let user_configuration = configuration::load(&config.config_file)?;
     let layout = DashboardLayout::default();
     let themes = ThemeManager::new(user_configuration.theme.effective()?);
@@ -112,11 +118,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
         widgets,
         instances,
         themes,
+        web_dir: config.web_dir.clone(),
         shutdown,
     };
     info!(
         count = state.widgets.len(),
-        root = %config.widgets_dir.display(),
+        roots = ?config.widget_roots,
         "discovered widgets"
     );
 
@@ -139,6 +146,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     info!("dashboardd stopped");
     Ok(())
+}
+
+fn resolve_widget_roots(value: Option<OsString>) -> Result<Vec<PathBuf>, Box<dyn Error>> {
+    let Some(value) = value else {
+        return Ok(vec![PathBuf::from(DEFAULT_WIDGET_PATH)]);
+    };
+    if value.is_empty() {
+        return Ok(Vec::new());
+    }
+    let roots = env::split_paths(&value).collect::<Vec<_>>();
+    if roots.iter().any(|root| root.as_os_str().is_empty()) {
+        return Err("DASHBOARDD_WIDGET_PATH must not contain empty entries".into());
+    }
+    Ok(roots)
 }
 
 fn resolve_state_file() -> Result<PathBuf, Box<dyn Error>> {
@@ -185,5 +206,39 @@ async fn shutdown_signal(shutdown: broadcast::Sender<()>) {
             let _ = shutdown.send(());
         }
         Err(error) => tracing::error!(%error, "failed to listen for Ctrl-C"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn widget_path_uses_platform_list_semantics() {
+        assert_eq!(
+            resolve_widget_roots(None).unwrap(),
+            [PathBuf::from(DEFAULT_WIDGET_PATH)]
+        );
+        assert!(
+            resolve_widget_roots(Some(OsString::new()))
+                .unwrap()
+                .is_empty()
+        );
+        let joined = env::join_paths(["first", "second"]).unwrap();
+        assert_eq!(
+            resolve_widget_roots(Some(joined)).unwrap(),
+            [PathBuf::from("first"), PathBuf::from("second")]
+        );
+    }
+
+    #[test]
+    fn widget_path_rejects_empty_entries() {
+        let separator = if cfg!(windows) { ";" } else { ":" };
+        let value = OsString::from(format!("first{separator}{separator}second"));
+
+        assert_eq!(
+            resolve_widget_roots(Some(value)).unwrap_err().to_string(),
+            "DASHBOARDD_WIDGET_PATH must not contain empty entries"
+        );
     }
 }

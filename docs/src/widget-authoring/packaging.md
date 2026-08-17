@@ -82,3 +82,24 @@ $out/share/dashboardd/widgets/<widget-id>/
 ```
 
 The packer does not rewrite runtime closures. Use a Nix-generated executable wrapper when a backend needs Python modules, shared libraries, or other store paths.
+
+The dashboardd flake exports:
+
+- `dashboardd` - runnable server with web assets and built-in widgets.
+- `dashboardd-unwrapped` - server binary only.
+- `bundled-widgets` - built-in runtime bundles under the standard path.
+- `dashboardd-widget` - standalone pack/check command.
+- `widget-sdk` - packed frontend SDK tarball.
+- `docs` - rendered mdBook site.
+
+Compose independent widget packages as a search path:
+
+```nix
+environment.variables.DASHBOARDD_WIDGET_PATH =
+  lib.makeSearchPath "share/dashboardd/widgets" [
+    inputs.dashboardd.packages.${pkgs.system}.bundled-widgets
+    inputs.today.packages.${pkgs.system}.dashboardd-widget
+  ];
+```
+
+An explicit search path replaces the complete dashboard package's built-in default, so include `bundled-widgets` when built-in widgets are required. dashboardd rejects duplicate widget IDs instead of applying search path precedence.

@@ -139,9 +139,7 @@ The proof must start from clean checkouts and demonstrate:
 - Converted `@dashboardd/widget-sdk` into a compiled public package with JavaScript, declarations, CSS exports, package metadata, and a minimal package README.
 - Added an external consumer test that packs the SDK, installs only its tarball outside the workspace, compiles TypeScript and CSS imports, checks runtime exports, and enforces exact package contents.
 - Added a reproducible `dashboardd#widget-sdk` Nix tarball package and flake check.
-- Added focused SDK CI and tag-driven GitHub Release upload workflows. No release is published until the local commit is reviewed and pushed.
-
-Remaining platform work starts with the standalone pack/check command.
+- Added focused SDK CI and tag-driven GitHub Release upload workflows. Published the first SDK release.
 
 ## Standalone pack/check design
 
@@ -166,7 +164,33 @@ Remaining platform work starts with the standalone pack/check command.
 - Documented source manifests, pack/check commands, Nix installation layout, and the static-only check boundary.
 - Passed workspace Clippy, Rust tests, contract and SDK tests, all bundled widget preparation, Chromium integration, documentation builds, and all Nix flake checks.
 
-Remaining platform work starts with multi-root external widget discovery and Nix composition.
+## Multi-root and Nix composition design
+
+- Replace `DASHBOARDD_WIDGETS_DIR` with `DASHBOARDD_WIDGET_PATH` without compatibility handling.
+- Parse the search path with platform path-list semantics. Unset uses `.build/widgets` for source development. An explicitly empty value discovers no widgets. Empty entries in a non-empty value are invalid.
+- Preserve configured root order, sort bundles inside each root, sort the final catalog by widget ID, and reject duplicate IDs with both bundle paths. Missing, unreadable, or invalid roots stop startup.
+- Add `DASHBOARDD_WEB_DIR`, defaulting to `web/dist`, so packaged dashboardd does not change process working directory.
+- Export `dashboardd-unwrapped`, `bundled-widgets`, and a complete `dashboardd` package alongside `dashboardd-widget`, `widget-sdk`, and `docs`.
+- Install built-in bundles under `$out/share/dashboardd/widgets/<widget-id>/` and web files under `$out/share/dashboardd/web/`.
+- The complete dashboardd wrapper supplies packaged web and built-in widget paths only when their environment variables are unset. Explicit widget composition replaces the built-in default.
+- Compose external packages with `lib.makeSearchPath "share/dashboardd/widgets"` rather than merging widget trees.
+- Build frontend assets reproducibly from the npm lock, use Nix-built backend packages, and pack every built-in widget with `dashboardd-widget`.
+- Add Rust discovery tests, browser coverage with a second external root, Nix layout and startup checks, and user and author documentation.
+
+## Multi-root and Nix composition progress
+
+- Replaced the single-root variable with platform-aware `DASHBOARDD_WIDGET_PATH` parsing and added the packaged `DASHBOARDD_WEB_DIR` boundary.
+- Added deterministic multi-root discovery, explicit empty-root behavior, missing-root errors, final ID sorting, and duplicate rejection with both bundle paths.
+- Added Rust tests for path parsing, empty entries, no roots, missing roots, multiple roots, sorting, and duplicate IDs.
+- Added an external Python bundle root to the complete Chromium integration scenario.
+- Added reproducible npm frontend builds and Nix packing for every built-in widget with Nix-built Rust backends.
+- Exported complete `dashboardd`, raw `dashboardd-unwrapped`, and composable `bundled-widgets` packages under the standard installed layout.
+- Added a Nix package check that statically checks every built-in bundle, composes a second external root, starts packaged dashboardd, and verifies the complete widget catalog.
+- Added Git to the Projects and Tatr Tasks Nix build environments because their existing package tests create Git fixtures.
+- Documented packaged startup, package outputs, search-path semantics, and external Nix composition.
+- Passed Rust tests and Clippy, complete contract, SDK, and Chromium integration with two roots, documentation builds, packaged startup, and all Nix flake checks.
+
+Remaining work starts with the external Today repository implementation and its out-of-workspace end-to-end fixture.
 
 ## Out of scope
 

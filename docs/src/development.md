@@ -26,7 +26,7 @@ nix flake check
 ```bash
 npm run build
 cargo xtask widget prepare --all
-DASHBOARDD_WIDGETS_DIR=.build/widgets cargo run -p dashboardd
+DASHBOARDD_WIDGET_PATH=.build/widgets cargo run -p dashboardd
 DASHBOARDD_STATE_FILE=/tmp/dashboard.json cargo run -p dashboardd
 RUST_LOG=dashboardd=debug,tower_http=debug cargo run -p dashboardd
 ```
@@ -42,6 +42,16 @@ Build one frontend workspace with:
 ```bash
 npm run build -w @dashboardd/cpu-widget
 ```
+
+## Nix packages
+
+```bash
+nix build .#dashboardd
+nix build .#bundled-widgets
+nix build .#dashboardd-widget
+```
+
+`dashboardd` is the complete runnable package. `dashboardd-unwrapped` contains only the Rust server. `bundled-widgets` contains the built-in runtime bundles for explicit search-path composition.
 
 ## Widget SDK
 

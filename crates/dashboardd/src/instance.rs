@@ -2189,7 +2189,7 @@ mod tests {
         fs::write(cpu.join("backend"), "backend").unwrap();
         make_executable(&cpu.join("backend"));
         fs::write(cpu.join("compact.js"), "frontend").unwrap();
-        let widgets = WidgetsManager::discover(&root).unwrap();
+        let widgets = WidgetsManager::discover(std::slice::from_ref(&root)).unwrap();
         let initial = InitialWidget {
             widget: "cpu".into(),
             variant: "compact".into(),
@@ -2236,7 +2236,7 @@ mod tests {
         make_executable(&widget.join("backend"));
         fs::write(widget.join("full.js"), "frontend").unwrap();
         fs::write(widget.join("details.js"), "frontend").unwrap();
-        let widgets = WidgetsManager::discover(&root.join("widgets")).unwrap();
+        let widgets = WidgetsManager::discover(&[root.join("widgets")]).unwrap();
         let state_path = root.join("dashboard.json");
         let store = Arc::new(StateStore::new(state_path));
         let instances = vec![

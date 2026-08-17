@@ -188,16 +188,35 @@ pub struct WidgetsManager {
 }
 
 impl WidgetsManager {
-    pub fn discover(root: &Path) -> io::Result<Self> {
-        let mut directories = fs::read_dir(root)?.collect::<Result<Vec<_>, _>>()?;
-        directories.sort_by_key(fs::DirEntry::file_name);
-        let widgets = directories
-            .into_iter()
-            .filter(|entry| entry.path().is_dir())
-            .map(|entry| read_config(&entry.path()).map(Arc::new))
-            .collect::<io::Result<Vec<_>>>()?;
+    pub fn discover(roots: &[PathBuf]) -> io::Result<Self> {
+        let mut widgets: BTreeMap<String, (PathBuf, Arc<WidgetConfig>)> = BTreeMap::new();
+        for root in roots {
+            let mut directories = fs::read_dir(root)
+                .map_err(|error| root_error(root, error))?
+                .collect::<Result<Vec<_>, _>>()?;
+            directories.sort_by_key(fs::DirEntry::file_name);
+            for directory in directories
+                .into_iter()
+                .filter(|entry| entry.path().is_dir())
+            {
+                let path = directory.path();
+                let config = Arc::new(read_config(&path)?);
+                let id = config.descriptor.id.clone();
+                if let Some((existing, _)) = widgets.get(&id) {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!(
+                            "duplicate widget id {id:?} in {} and {}",
+                            existing.display(),
+                            path.display()
+                        ),
+                    ));
+                }
+                widgets.insert(id, (path, config));
+            }
+        }
         Ok(Self {
-            widgets: Arc::new(widgets),
+            widgets: Arc::new(widgets.into_values().map(|(_, config)| config).collect()),
         })
     }
 
@@ -218,6 +237,13 @@ impl WidgetsManager {
             .find(|widget| widget.descriptor.id == widget_id)
             .cloned()
     }
+}
+
+fn root_error(root: &Path, error: io::Error) -> io::Error {
+    io::Error::new(
+        error.kind(),
+        format!("could not read widget root {}: {error}", root.display()),
+    )
 }
 
 fn read_config(widget_directory: &Path) -> io::Result<WidgetConfig> {
@@ -313,6 +339,27 @@ impl From<dashboardd_widget::WidgetOptionChoice> for WidgetOptionChoice {
 mod tests {
     use super::*;
 
+    fn write_test_widget(root: &Path, id: &str) -> PathBuf {
+        let directory = root.join(id);
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(
+            directory.join("widget.json"),
+            format!(
+                r#"{{"schema_version":2,"id":"{id}","name":"{id}","description":"Test widget","backend":"backend","variants":[{{"id":"full","name":"Full","width":1,"height":1,"frontend":"full.js","focus":false}}],"options":[],"inputs":[],"outputs":[]}}"#
+            ),
+        )
+        .unwrap();
+        fs::write(directory.join("backend"), "backend").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(directory.join("backend"), fs::Permissions::from_mode(0o755))
+                .unwrap();
+        }
+        fs::write(directory.join("full.js"), "frontend").unwrap();
+        directory
+    }
+
     #[test]
     fn discovers_widget_variants() {
         let root = std::env::temp_dir().join(format!("dashboardd-widgets-{}", std::process::id()));
@@ -331,7 +378,7 @@ mod tests {
         }
         fs::write(cpu.join("full.js"), "export function mount() {}").unwrap();
 
-        let widgets = WidgetsManager::discover(&root).unwrap();
+        let widgets = WidgetsManager::discover(std::slice::from_ref(&root)).unwrap();
         let config = widgets.get("cpu").unwrap();
 
         assert_eq!(widgets.len(), 1);
@@ -381,6 +428,67 @@ mod tests {
     }
 
     #[test]
+    fn discovers_multiple_roots_and_sorts_the_catalog() {
+        let base = std::env::temp_dir().join(format!(
+            "dashboardd-widget-roots-{}-{}",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        let first = base.join("first");
+        let second = base.join("second");
+        write_test_widget(&first, "zeta");
+        write_test_widget(&second, "alpha");
+
+        let widgets = WidgetsManager::discover(&[first, second]).unwrap();
+
+        assert_eq!(
+            widgets
+                .list()
+                .into_iter()
+                .map(|widget| widget.id)
+                .collect::<Vec<_>>(),
+            ["alpha", "zeta"]
+        );
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn rejects_duplicate_ids_with_both_bundle_paths() {
+        let base = std::env::temp_dir().join(format!(
+            "dashboardd-widget-duplicates-{}-{}",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        let first = base.join("first");
+        let second = base.join("second");
+        let first_bundle = write_test_widget(&first, "duplicate");
+        let second_bundle = write_test_widget(&second, "duplicate");
+
+        let error = WidgetsManager::discover(&[first, second]).unwrap_err();
+        let message = error.to_string();
+
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(message.contains(&first_bundle.display().to_string()));
+        assert!(message.contains(&second_bundle.display().to_string()));
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn accepts_no_roots_and_reports_missing_roots() {
+        assert_eq!(WidgetsManager::discover(&[]).unwrap().len(), 0);
+        let missing = std::env::temp_dir().join(format!(
+            "dashboardd-missing-widget-root-{}-{}",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+
+        let error = WidgetsManager::discover(std::slice::from_ref(&missing)).unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::NotFound);
+        assert!(error.to_string().contains(&missing.display().to_string()));
+    }
+
+    #[test]
     fn rejects_invalid_option_manifests() {
         let root =
             std::env::temp_dir().join(format!("dashboardd-invalid-options-{}", std::process::id()));
@@ -394,7 +502,7 @@ mod tests {
         fs::write(cpu.join("backend"), "executable").unwrap();
         fs::write(cpu.join("full.js"), "export function mount() {}").unwrap();
 
-        let error = WidgetsManager::discover(&root).unwrap_err();
+        let error = WidgetsManager::discover(std::slice::from_ref(&root)).unwrap_err();
 
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
         fs::remove_dir_all(root).unwrap();
@@ -412,7 +520,7 @@ mod tests {
         )
         .unwrap();
 
-        let error = WidgetsManager::discover(&root).unwrap_err();
+        let error = WidgetsManager::discover(std::slice::from_ref(&root)).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
         fs::remove_dir_all(root).unwrap();
     }

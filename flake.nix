@@ -21,11 +21,68 @@
         "aarch64-darwin"
       ];
 
-      perSystem = { config, pkgs, ... }:
+      perSystem = { config, lib, pkgs, ... }:
         let
           rustNightly = pkgs.rust-bin.nightly.latest.default.override {
             extensions = [ "rust-src" "clippy" "rustfmt" ];
           };
+          dashboarddUnwrapped = config.rust-project.crates.dashboardd.crane.outputs.drv.crate;
+          widgetTool = config.rust-project.crates.dashboardd-widget.crane.outputs.drv.crate;
+          widgetIds = [
+            "claude-usage"
+            "codex-usage"
+            "cpu"
+            "disk"
+            "memory"
+            "network"
+            "projects"
+            "tatr-tasks"
+          ];
+          widgetBackends = lib.genAttrs widgetIds
+            (id: config.rust-project.crates.${id}.crane.outputs.drv.crate);
+          packWidgets = lib.concatMapStringsSep "\n" (id: ''
+            mkdir -p widgets/${id}/dist/bin
+            cp ${widgetBackends.${id}}/bin/${id} widgets/${id}/dist/bin/${id}
+            dashboardd-widget pack widgets/${id}/widget.toml --output packed/${id}
+          '') widgetIds;
+          dashboardAssets = pkgs.buildNpmPackage {
+            pname = "dashboardd-assets";
+            version = "0.1.0";
+            src = ./.;
+            npmDepsHash = "sha256-3LPlqDfDZs53EHeWxxSvZSk7NGuO0Xaqh6h/Cyg3bIs=";
+            nativeBuildInputs = [ widgetTool ];
+            postBuild = ''
+              mkdir packed
+              ${packWidgets}
+            '';
+            installPhase = ''
+              runHook preInstall
+              mkdir -p "$out/share/dashboardd/web" "$out/share/dashboardd/widgets"
+              cp -R web/dist/. "$out/share/dashboardd/web/"
+              cp -R packed/. "$out/share/dashboardd/widgets/"
+              runHook postInstall
+            '';
+          };
+          bundledWidgets = pkgs.runCommand "dashboardd-bundled-widgets-0.1.0" {
+            meta.description = "Built-in dashboardd runtime widget bundles";
+          } ''
+            mkdir -p "$out/share/dashboardd"
+            ln -s ${dashboardAssets}/share/dashboardd/widgets "$out/share/dashboardd/widgets"
+          '';
+          dashboardd = pkgs.runCommand "dashboardd-0.1.0" {
+            nativeBuildInputs = [ pkgs.makeWrapper ];
+            meta = {
+              description = "Local-first dashboard with web assets and built-in widgets";
+              mainProgram = "dashboardd";
+            };
+          } ''
+            mkdir -p "$out/bin" "$out/share/dashboardd"
+            ln -s ${dashboardAssets}/share/dashboardd/web "$out/share/dashboardd/web"
+            ln -s ${dashboardAssets}/share/dashboardd/widgets "$out/share/dashboardd/widgets"
+            makeWrapper ${dashboarddUnwrapped}/bin/dashboardd "$out/bin/dashboardd" \
+              --set-default DASHBOARDD_WEB_DIR "$out/share/dashboardd/web" \
+              --set-default DASHBOARDD_WIDGET_PATH "$out/share/dashboardd/widgets"
+          '';
           widgetSdk = pkgs.stdenvNoCC.mkDerivation {
             pname = "dashboardd-widget-sdk";
             version = "0.1.0";
@@ -67,6 +124,12 @@
             '';
           };
         in {
+          rust-project.crates.projects.crane.args.nativeBuildInputs = [ pkgs.git ];
+          rust-project.crates.tatr-tasks.crane.args.nativeBuildInputs = [ pkgs.git ];
+
+          packages.bundled-widgets = bundledWidgets;
+          packages.dashboardd = lib.mkForce dashboardd;
+          packages.dashboardd-unwrapped = dashboarddUnwrapped;
           packages.docs = docs;
           packages.widget-sdk = widgetSdk;
           checks.docs = docs;
@@ -78,6 +141,40 @@
             dashboardd-widget pack source/widget.toml --output external-fixture
             dashboardd-widget check external-fixture
             touch $out
+          '';
+          checks.dashboardd-package = pkgs.runCommand "dashboardd-package-check" {
+            nativeBuildInputs = [ dashboardd pkgs.curl pkgs.jq widgetTool ];
+          } ''
+            test -f ${dashboardd}/share/dashboardd/web/index.html
+            for bundle in ${dashboardd}/share/dashboardd/widgets/*; do
+              dashboardd-widget check "$bundle"
+            done
+            mkdir external-widgets
+            ln -s ${./tests/fixtures/external-widget} external-widgets/external-fixture
+            export DASHBOARDD_WIDGET_PATH="${bundledWidgets}/share/dashboardd/widgets:$PWD/external-widgets"
+            export DASHBOARDD_PORT=17321
+            export DASHBOARDD_STATE_FILE="$TMPDIR/dashboard.json"
+            export DASHBOARDD_CONFIG_FILE="$TMPDIR/config.toml"
+            dashboardd >dashboardd.log 2>&1 &
+            pid=$!
+            trap 'kill "$pid" 2>/dev/null || true' EXIT
+            ready=0
+            for _ in $(seq 1 50); do
+              if curl --fail --silent http://127.0.0.1:17321/health >/dev/null; then
+                ready=1
+                break
+              fi
+              sleep 0.1
+            done
+            if [ "$ready" -ne 1 ]; then
+              cat dashboardd.log
+              exit 1
+            fi
+            test "$(curl --fail --silent http://127.0.0.1:17321/api/v1/widgets | jq '.widgets | length')" -eq ${toString (builtins.length widgetIds + 1)}
+            kill -INT "$pid"
+            wait "$pid"
+            trap - EXIT
+            touch "$out"
           '';
           checks.widget-sdk = widgetSdk;
 

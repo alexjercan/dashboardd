@@ -5,6 +5,14 @@
 - Nix with flakes enabled.
 - Chromium for browser integration tests. The Nix shell provides it.
 
+## Run packaged
+
+```bash
+nix run github:alexjercan/dashboardd#dashboardd
+```
+
+The package supplies the dashboard frontend and built-in widgets. Open the URL printed by dashboardd.
+
 ## Run from source
 
 ```bash
@@ -14,7 +22,7 @@ nix develop
 npm install
 npm run build
 cargo xtask widget prepare --all
-DASHBOARDD_WIDGETS_DIR=.build/widgets cargo run -p dashboardd
+DASHBOARDD_WIDGET_PATH=.build/widgets cargo run -p dashboardd
 ```
 
 Open the URL printed by dashboardd. `/` is the dashboard home. The logged `/docs` path is the OpenAPI interface.

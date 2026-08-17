@@ -9,13 +9,7 @@ dashboardd combines machine telemetry, AI usage, project attention, and tasks in
 Requires Nix with flakes enabled.
 
 ```bash
-git clone https://github.com/alexjercan/dashboardd.git
-cd dashboardd
-nix develop
-npm install
-npm run build
-cargo xtask widget prepare --all
-DASHBOARDD_WIDGETS_DIR=.build/widgets cargo run -p dashboardd
+nix run github:alexjercan/dashboardd#dashboardd
 ```
 
 Open the URL printed by dashboardd.

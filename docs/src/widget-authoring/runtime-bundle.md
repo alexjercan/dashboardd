@@ -12,7 +12,7 @@ Runtime manifest schema version 2 is the installed widget discovery contract. Th
     frontend/<variant>.js
 ```
 
-`DASHBOARDD_WIDGETS_DIR` selects one widget root. Multi-root discovery is planned for external Nix package composition.
+`DASHBOARDD_WIDGET_PATH` selects platform-separated widget roots. dashboardd reads roots in configured order, sorts bundles inside each root, and sorts the final catalog by widget ID. Missing roots, invalid bundles, and duplicate widget IDs stop startup. Search path order never overrides a duplicate.
 
 Manifest paths must be relative normal paths. Absolute paths, `..`, `.`, roots, and platform prefixes are rejected. Declared files must be readable, and the backend must be executable. Symlinked files are accepted, which permits immutable Nix store composition. The bundle directory name must equal the manifest widget ID.
 

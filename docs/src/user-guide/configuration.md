@@ -41,6 +41,19 @@ Widget options are public instance configuration. Do not place credentials, toke
 
 - `DASHBOARDD_CONFIG_FILE` - configuration file override.
 - `DASHBOARDD_STATE_FILE` - state file override.
-- `DASHBOARDD_WIDGETS_DIR` - installed widget root.
+- `DASHBOARDD_WIDGET_PATH` - platform-separated installed widget roots. An explicit value replaces the packaged default. Empty means no widgets. Missing roots, empty path entries, invalid bundles, and duplicate widget IDs stop startup.
+- `DASHBOARDD_WEB_DIR` - dashboard frontend asset directory. Defaults to `web/dist` for source development.
 - `DASHBOARDD_PORT` - listen port.
 - `RUST_LOG` - Rust tracing filter.
+
+Nix can compose widget packages without copying them:
+
+```nix
+environment.variables.DASHBOARDD_WIDGET_PATH =
+  lib.makeSearchPath "share/dashboardd/widgets" [
+    inputs.dashboardd.packages.${pkgs.system}.bundled-widgets
+    inputs.today.packages.${pkgs.system}.dashboardd-widget
+  ];
+```
+
+Search path order does not provide overrides. Every widget ID must be unique.

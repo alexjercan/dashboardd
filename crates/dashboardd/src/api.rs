@@ -36,8 +36,6 @@ use crate::{
     widget::{WidgetDescriptor, WidgetLinkPort, WidgetVariant},
 };
 
-const WEB_DIST: &str = "web/dist";
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct WidgetList {
     pub widgets: Vec<WidgetDescriptor>,
@@ -202,6 +200,8 @@ pub struct SetWidgetState {
 struct ApiDoc;
 
 pub fn build_router(state: AppState) -> Router {
+    let index = state.web_dir.join("index.html");
+    let web_dir = state.web_dir.clone();
     Router::new()
         .route("/health", get(health))
         .route("/api/v1/theme", get(get_theme))
@@ -261,24 +261,18 @@ pub fn build_router(state: AppState) -> Router {
             post(swap_instances),
         )
         .route("/api/v1/events", get(dashboard_events))
-        .route_service(
-            "/d/{dashboard_id}",
-            ServeFile::new(format!("{WEB_DIST}/index.html")),
-        )
-        .route_service(
-            "/d/{dashboard_id}/edit",
-            ServeFile::new(format!("{WEB_DIST}/index.html")),
-        )
+        .route_service("/d/{dashboard_id}", ServeFile::new(index.clone()))
+        .route_service("/d/{dashboard_id}/edit", ServeFile::new(index.clone()))
         .route_service(
             "/d/{dashboard_id}/focus/{instance_id}",
-            ServeFile::new(format!("{WEB_DIST}/index.html")),
+            ServeFile::new(index),
         )
         .route(
             "/widgets/{widget_id}/variants/{variant_id}/frontend.js",
             get(widget_frontend),
         )
         .merge(SwaggerUi::new("/docs").url("/api-docs/openapi.json", ApiDoc::openapi()))
-        .fallback_service(ServeDir::new(WEB_DIST).append_index_html_on_directories(true))
+        .fallback_service(ServeDir::new(web_dir).append_index_html_on_directories(true))
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }
@@ -980,6 +974,8 @@ impl IntoResponse for ApiError {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use axum::{
         body::{Body, to_bytes},
         http::Request,
@@ -999,6 +995,7 @@ mod tests {
             widgets: WidgetsManager::default(),
             instances: InstanceManager::default(),
             themes: ThemeManager::new(Theme::default()),
+            web_dir: PathBuf::from("web/dist"),
             shutdown: broadcast::channel(1).0,
         })
     }
@@ -1027,12 +1024,13 @@ mod tests {
             .unwrap();
         }
         std::fs::write(widget.join("pinned.js"), "frontend").unwrap();
-        let widgets = WidgetsManager::discover(&root).unwrap();
+        let widgets = WidgetsManager::discover(std::slice::from_ref(&root)).unwrap();
         (
             build_router(AppState {
                 widgets,
                 instances: InstanceManager::default(),
                 themes: ThemeManager::new(Theme::default()),
+                web_dir: PathBuf::from("web/dist"),
                 shutdown: broadcast::channel(1).0,
             }),
             root,
