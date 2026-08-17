@@ -1,31 +1,30 @@
-schema_version = 1
+schema_version = 2
 id = "claude-usage"
 name = "Claude Usage"
 description = "Weekly Claude subscription limits"
 
-[backend]
-package = "claude-usage"
+backend = "dist/bin/claude-usage"
 
-[frontend]
-workspace = "@dashboardd/claude-usage-widget"
-
-[[frontend.variants]]
+[[variants]]
 id = "full"
 name = "Full"
-size = [3, 2]
-entry = "src/full.ts"
+width = 3
+height = 2
+frontend = "frontend/dist/full.js"
 
-[[frontend.variants]]
+[[variants]]
 id = "compact"
 name = "Compact"
-size = [3, 1]
-entry = "src/compact.ts"
+width = 3
+height = 1
+frontend = "frontend/dist/compact.js"
 
-[[frontend.variants]]
+[[variants]]
 id = "minimal"
 name = "Minimal"
-size = [1, 1]
-entry = "src/minimal.ts"
+width = 1
+height = 1
+frontend = "frontend/dist/minimal.js"
 
 [[options]]
 id = "display_mode"
@@ -33,8 +32,7 @@ name = "Display"
 description = "Show subscription usage or remaining allowance"
 variants = ["full"]
 default = "remaining"
-
-[options.select]
+type = "select"
 choices = [
   { value = "usage", name = "Usage" },
   { value = "remaining", name = "Remaining" },

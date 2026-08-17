@@ -15,11 +15,12 @@ graph TD
 
 The three extension contracts are versioned independently:
 
+- [Packaging and checks](packaging.md) - source manifests and standalone bundles.
 - [Runtime bundle](runtime-bundle.md) - discovery and metadata.
 - [Backend protocol](backend-protocol.md) - process communication.
 - [Frontend contract](frontend.md) - browser lifecycle and capabilities.
 
-The current repository packer is development tooling for bundled widgets. A standalone external packer is planned. External authors can already construct the documented runtime layout directly.
+`dashboardd-widget` packages already-built artifacts without assuming a language or build system. The repository `xtask` uses the same packer after it builds bundled widgets.
 
 ## Trust boundary
 

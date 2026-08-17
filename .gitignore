@@ -3,9 +3,11 @@
 /packages/widget-sdk/dist
 /web/dist
 /widgets/*/frontend/dist
+/widgets/*/dist
 /.build
 /tests/artifacts
 /docs/book
 /docs/mermaid-init.js
 /docs/mermaid.min.js
 /result
+/result-*

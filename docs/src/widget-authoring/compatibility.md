@@ -2,6 +2,10 @@
 
 Widget contracts use independent versions because they change at different rates.
 
+## Source manifest
+
+`schema_version` in `widget.toml` selects the packer input shape. Source version 2 contains built artifact paths and no build-system fields. It is versioned independently from the generated runtime manifest.
+
 ## Runtime manifest
 
 `schema_version` in `widget.json` selects the complete manifest shape. dashboardd rejects unsupported versions. A breaking metadata or discovery change requires a new schema version.
@@ -24,7 +28,7 @@ The frontend bundle imports SDK code at build time. dashboardd does not inject a
 
 ## Prototype policy
 
-No external widget release exists yet. Until the first tagged SDK and packaging release, dashboardd can replace these contracts cleanly without compatibility adapters. After release, supported versions and removal dates must be stated in release notes before removal.
+The released frontend SDK follows its semantic-version rules. Packaging and runtime contracts can still change cleanly before their first tagged dashboardd release. After release, supported versions and removal dates must be stated in release notes before removal.
 
 ## Widget identity
 

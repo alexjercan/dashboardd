@@ -31,6 +31,12 @@ DASHBOARDD_STATE_FILE=/tmp/dashboard.json cargo run -p dashboardd
 RUST_LOG=dashboardd=debug,tower_http=debug cargo run -p dashboardd
 ```
 
+`xtask` builds each repository backend and frontend, stages the backend artifact, and calls the shared `dashboardd-widget` packer. It contains the repository-specific Cargo and npm orchestration. Test the generated bundle with:
+
+```bash
+cargo run -p dashboardd-widget -- check .build/widgets/cpu
+```
+
 Build one frontend workspace with:
 
 ```bash

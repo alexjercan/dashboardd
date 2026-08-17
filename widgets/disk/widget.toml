@@ -1,22 +1,20 @@
-schema_version = 1
+schema_version = 2
 id = "disk"
 name = "Disk"
 description = "Root filesystem capacity and I/O"
 
-[backend]
-package = "disk"
+backend = "dist/bin/disk"
 
-[frontend]
-workspace = "@dashboardd/disk-widget"
-
-[[frontend.variants]]
+[[variants]]
 id = "full"
 name = "Full"
-size = [3, 2]
-entry = "src/full.ts"
+width = 3
+height = 2
+frontend = "frontend/dist/full.js"
 
-[[frontend.variants]]
+[[variants]]
 id = "compact"
 name = "Compact"
-size = [1, 1]
-entry = "src/compact.ts"
+width = 1
+height = 1
+frontend = "frontend/dist/compact.js"

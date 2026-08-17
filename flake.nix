@@ -21,7 +21,7 @@
         "aarch64-darwin"
       ];
 
-      perSystem = { pkgs, ... }:
+      perSystem = { config, pkgs, ... }:
         let
           rustNightly = pkgs.rust-bin.nightly.latest.default.override {
             extensions = [ "rust-src" "clippy" "rustfmt" ];
@@ -70,6 +70,15 @@
           packages.docs = docs;
           packages.widget-sdk = widgetSdk;
           checks.docs = docs;
+          checks.widget-bundle = pkgs.runCommand "dashboardd-widget-bundle-check" {
+            nativeBuildInputs = [ config.packages.dashboardd-widget ];
+          } ''
+            cp -R ${./tests/fixtures/external-widget} source
+            chmod -R u+w source
+            dashboardd-widget pack source/widget.toml --output external-fixture
+            dashboardd-widget check external-fixture
+            touch $out
+          '';
           checks.widget-sdk = widgetSdk;
 
           devShells.default = pkgs.mkShell {

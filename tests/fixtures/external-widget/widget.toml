@@ -1,0 +1,13 @@
+schema_version = 2
+id = "external-fixture"
+name = "External Fixture"
+description = "Language-neutral external widget contract fixture"
+backend = "bin/python-widget"
+
+[[variants]]
+id = "summary"
+name = "Summary"
+width = 3
+height = 2
+frontend = "frontend/summary.js"
+focus = false

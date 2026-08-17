@@ -2053,9 +2053,17 @@ fn handle_backend_message(
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    use std::{fs, path::Path};
 
     use super::*;
+
+    fn make_executable(path: &Path) {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+    }
 
     #[tokio::test]
     async fn empty_manager_lists_no_instances() {
@@ -2175,10 +2183,11 @@ mod tests {
         fs::create_dir_all(&cpu).unwrap();
         fs::write(
             cpu.join("widget.json"),
-            r#"{"schema_version":2,"id":"cpu","name":"CPU","description":"Processor usage","backend":"backend","variants":[{"id":"compact","name":"Compact","width":1,"height":1,"frontend":"compact.js"}],"options":[]}"#,
+            r#"{"schema_version":2,"id":"cpu","name":"CPU","description":"Processor usage","backend":"backend","variants":[{"id":"compact","name":"Compact","width":1,"height":1,"frontend":"compact.js","focus":false}],"options":[],"inputs":[],"outputs":[]}"#,
         )
         .unwrap();
         fs::write(cpu.join("backend"), "backend").unwrap();
+        make_executable(&cpu.join("backend"));
         fs::write(cpu.join("compact.js"), "frontend").unwrap();
         let widgets = WidgetsManager::discover(&root).unwrap();
         let initial = InitialWidget {
@@ -2220,10 +2229,11 @@ mod tests {
         fs::create_dir_all(&widget).unwrap();
         fs::write(
             widget.join("widget.json"),
-            r#"{"schema_version":2,"id":"tatr-tasks","name":"Tatr Tasks","description":"Tasks","backend":"backend","variants":[{"id":"full","name":"Full","width":1,"height":1,"frontend":"full.js"},{"id":"details","name":"Details","width":1,"height":1,"frontend":"details.js"}],"options":[],"inputs":[{"id":"task","name":"Task","type":"tatr.task/v1","variants":["details"],"required":true}],"outputs":[{"id":"selected_task","name":"Selected","type":"tatr.task/v1","variants":["full"],"required":false}]}"#,
+            r#"{"schema_version":2,"id":"tatr-tasks","name":"Tatr Tasks","description":"Tasks","backend":"backend","variants":[{"id":"full","name":"Full","width":1,"height":1,"frontend":"full.js","focus":false},{"id":"details","name":"Details","width":1,"height":1,"frontend":"details.js","focus":false}],"options":[],"inputs":[{"id":"task","name":"Task","type":"tatr.task/v1","variants":["details"],"required":true}],"outputs":[{"id":"selected_task","name":"Selected","type":"tatr.task/v1","variants":["full"],"required":false}]}"#,
         )
         .unwrap();
         fs::write(widget.join("backend"), "backend").unwrap();
+        make_executable(&widget.join("backend"));
         fs::write(widget.join("full.js"), "frontend").unwrap();
         fs::write(widget.join("details.js"), "frontend").unwrap();
         let widgets = WidgetsManager::discover(&root.join("widgets")).unwrap();

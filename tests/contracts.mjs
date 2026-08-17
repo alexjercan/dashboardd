@@ -7,14 +7,18 @@ import { spawn } from "node:child_process";
 import Ajv2020 from "ajv/dist/2020.js";
 
 const root = path.resolve(import.meta.dirname, "..");
+const sourceSchema = json("schemas/widget-source-v2.schema.json");
 const runtimeSchema = json("schemas/widget-runtime-v2.schema.json");
 const protocolSchema = json("schemas/widget-backend-v1.schema.json");
 const fixtureRoot = path.join(root, "tests/fixtures/external-widget");
 const fixtureManifest = json("tests/fixtures/external-widget/widget.json");
 const ajv = new Ajv2020({ allErrors: true, strict: true });
+ajv.addSchema(sourceSchema);
 ajv.addSchema(runtimeSchema);
 ajv.addSchema(protocolSchema);
 
+const validateSource = requiredSchema(sourceSchema.$id);
+assertValid(validateSource, fixtureManifest, "source manifest representation");
 const validateRuntime = requiredSchema(runtimeSchema.$id);
 assertValid(validateRuntime, fixtureManifest, "external runtime fixture");
 validateRuntimeSemantics(fixtureManifest);

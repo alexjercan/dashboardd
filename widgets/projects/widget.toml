@@ -1,34 +1,33 @@
-schema_version = 1
+schema_version = 2
 id = "projects"
 name = "Projects"
 description = "Local project selection and read-only Git status"
 
-[backend]
-package = "projects"
+backend = "dist/bin/projects"
 
-[frontend]
-workspace = "@dashboardd/projects-widget"
-
-[[frontend.variants]]
+[[variants]]
 id = "pulse"
 name = "Project Pulse"
-size = [3, 2]
-entry = "src/pulse.ts"
+width = 3
+height = 2
+frontend = "frontend/dist/pulse.js"
 
-[[frontend.variants]]
+[[variants]]
 id = "brief"
 name = "Project Brief"
-size = [3, 2]
-entry = "src/brief.ts"
+width = 3
+height = 2
+frontend = "frontend/dist/brief.js"
 focus = true
 
-[[links.outputs]]
+[[outputs]]
 id = "selected_project"
 name = "Selected project"
 type = "dashboardd.project-selection/v1"
 variants = ["pulse"]
+required = false
 
-[[links.inputs]]
+[[inputs]]
 id = "project"
 name = "Project list"
 type = "dashboardd.project-selection/v1"
@@ -39,7 +38,7 @@ required = true
 id = "roots"
 name = "Roots"
 description = "One absolute or ~/ project root per line"
+variants = []
 default = "~/personal\n~/personal/_tests\n~/work\n~/third-party"
-
-[options.text]
+type = "text"
 multiline = true

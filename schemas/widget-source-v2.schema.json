@@ -1,0 +1,162 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://alexjercan.github.io/dashboardd/schemas/widget-source-v2.schema.json",
+  "title": "dashboardd source widget manifest v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "id",
+    "name",
+    "description",
+    "backend",
+    "variants"
+  ],
+  "properties": {
+    "schema_version": { "const": 2 },
+    "id": { "$ref": "#/$defs/kebabId" },
+    "name": { "$ref": "#/$defs/nonEmptyString" },
+    "description": { "$ref": "#/$defs/nonEmptyString" },
+    "backend": { "$ref": "#/$defs/relativePath" },
+    "variants": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/variant" }
+    },
+    "options": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/option" }
+    },
+    "inputs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/port" }
+    },
+    "outputs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/port" }
+    }
+  },
+  "$defs": {
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S"
+    },
+    "kebabId": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "snakeId": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:_[a-z0-9]+)*$"
+    },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.?(?:/|$))[^\\\\\\u0000]+$"
+    },
+    "variantList": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/kebabId" },
+      "uniqueItems": true
+    },
+    "variant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "width", "height", "frontend"],
+      "properties": {
+        "id": { "$ref": "#/$defs/kebabId" },
+        "name": { "$ref": "#/$defs/nonEmptyString" },
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 },
+        "frontend": { "$ref": "#/$defs/relativePath" },
+        "focus": { "type": "boolean" }
+      }
+    },
+    "option": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "description", "variants", "default", "type"],
+      "properties": {
+        "id": { "$ref": "#/$defs/snakeId" },
+        "name": { "$ref": "#/$defs/nonEmptyString" },
+        "description": { "$ref": "#/$defs/nonEmptyString" },
+        "variants": { "$ref": "#/$defs/variantList" },
+        "default": {},
+        "type": { "enum": ["boolean", "text", "integer", "select"] },
+        "multiline": { "type": "boolean" },
+        "minimum": { "type": "integer" },
+        "maximum": { "type": "integer" },
+        "step": { "type": "integer", "minimum": 1 },
+        "choices": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/choice" }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "boolean" } } },
+          "then": { "properties": { "default": { "type": "boolean" } } }
+        },
+        {
+          "if": { "properties": { "type": { "const": "text" } } },
+          "then": {
+            "required": ["multiline"],
+            "properties": {
+              "default": { "type": "string" },
+              "multiline": { "type": "boolean" }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "integer" } } },
+          "then": {
+            "required": ["minimum", "maximum", "step"],
+            "properties": {
+              "default": { "type": "integer" },
+              "minimum": { "type": "integer" },
+              "maximum": { "type": "integer" },
+              "step": { "type": "integer", "minimum": 1 }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "select" } } },
+          "then": {
+            "required": ["choices"],
+            "properties": {
+              "default": { "type": "string" },
+              "choices": {
+                "type": "array",
+                "minItems": 1,
+                "items": { "$ref": "#/$defs/choice" }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "choice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "name"],
+      "properties": {
+        "value": { "type": "string", "minLength": 1 },
+        "name": { "$ref": "#/$defs/nonEmptyString" }
+      }
+    },
+    "port": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "type", "variants", "required"],
+      "properties": {
+        "id": { "$ref": "#/$defs/snakeId" },
+        "name": { "$ref": "#/$defs/nonEmptyString" },
+        "type": { "type": "string", "minLength": 1 },
+        "variants": { "$ref": "#/$defs/variantList" },
+        "required": { "type": "boolean" }
+      }
+    }
+  }
+}

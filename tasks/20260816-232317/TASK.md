@@ -38,7 +38,7 @@ Prove that dashboardd is an external widget platform by building and installing 
 
 - Replace public dependence on the monorepo-specific `cargo xtask widget prepare` flow with a standalone `dashboardd-widget` command.
 - `dashboardd-widget pack <manifest> --output <directory>` consumes already-built artifacts, validates them, generates `widget.json`, and creates a standalone runtime bundle.
-- `dashboardd-widget check <bundle>` validates paths and metadata, starts the backend, verifies `ready`, `initialize`, `ping`/`pong`, error handling, and clean shutdown.
+- `dashboardd-widget check <bundle>` performs static bundle validation. Backend protocol conformance remains a separate test concern.
 - Keep project build orchestration outside the public packer. Each widget repository chooses Python, Rust, npm, or another build system.
 - Replace build-system fields in the source manifest with explicit backend and frontend artifact paths. Use a breaking source-manifest revision rather than compatibility machinery.
 - Retain a thin dashboardd repository convenience command for building all bundled widgets if useful.
@@ -142,6 +142,31 @@ The proof must start from clean checkouts and demonstrate:
 - Added focused SDK CI and tag-driven GitHub Release upload workflows. No release is published until the local commit is reviewed and pushed.
 
 Remaining platform work starts with the standalone pack/check command.
+
+## Standalone pack/check design
+
+- Add a `dashboardd-widget` binary and shared Rust library.
+- `dashboardd-widget pack <widget.toml> --output <bundle>` consumes built artifacts only. It does not invoke a build system.
+- Source manifest schema version 2 removes Cargo and npm workspace fields. Backend and frontend fields are explicit artifact paths inside the manifest directory.
+- Pack writes the standard runtime names `bin/<widget-id>` and `frontend/<variant-id>.js`, generates runtime manifest v2, and refuses an existing output directory.
+- `dashboardd-widget check <bundle>` performs static validation only. It validates the manifest semantics, path containment, bundle directory name, artifact existence and readability, and backend executable permission. It never starts the backend and is not a protocol fuzzer.
+- One shared library owns source parsing, runtime parsing, semantic validation, packing, and static checks. dashboardd uses its runtime validator.
+- `cargo xtask widget prepare` remains repository convenience tooling. It builds each bundled backend and frontend, stages the backend artifact, and calls the shared packer.
+- Export the binary through Nix and document the standalone workflow.
+
+## Standalone pack/check progress
+
+- Added the `dashboardd-widget` Rust package with a standalone binary and shared library.
+- Added source manifest schema version 2 with explicit built backend and frontend artifact paths.
+- Added strict source and runtime parsing, semantic validation, path containment, readable artifact checks, executable backend checks, stable runtime names, deterministic permissions, and atomic installation into a new output directory.
+- Added external temporary-project CLI tests and invalid traversal, missing artifact, permission, output collision, directory identity, unknown field, and deterministic output cases.
+- Migrated dashboardd runtime discovery to the shared validator.
+- Migrated every bundled `widget.toml` and changed `xtask` into repository build orchestration followed by the shared packer.
+- Exported `dashboardd#dashboardd-widget` through Nix and added a native pack/check fixture check.
+- Documented source manifests, pack/check commands, Nix installation layout, and the static-only check boundary.
+- Passed workspace Clippy, Rust tests, contract and SDK tests, all bundled widget preparation, Chromium integration, documentation builds, and all Nix flake checks.
+
+Remaining platform work starts with multi-root external widget discovery and Nix composition.
 
 ## Out of scope
 

@@ -1,6 +1,6 @@
 # Runtime bundle
 
-Runtime manifest schema version 2 is the installed widget discovery contract. The machine-readable schema is [`schemas/widget-runtime-v2.schema.json`](https://github.com/alexjercan/dashboardd/blob/master/schemas/widget-runtime-v2.schema.json).
+Runtime manifest schema version 2 is the installed widget discovery contract. The machine-readable schema is [`schemas/widget-runtime-v2.schema.json`](https://github.com/alexjercan/dashboardd/blob/master/schemas/widget-runtime-v2.schema.json). [`dashboardd-widget pack`](packaging.md) generates this manifest from a source `widget.toml`.
 
 ## Layout
 
@@ -14,7 +14,7 @@ Runtime manifest schema version 2 is the installed widget discovery contract. Th
 
 `DASHBOARDD_WIDGETS_DIR` selects one widget root. Multi-root discovery is planned for external Nix package composition.
 
-Manifest paths must be relative normal paths. Absolute paths, `..`, `.`, roots, and platform prefixes are rejected. Declared files must exist. Symlinked files are accepted, which permits immutable Nix store composition.
+Manifest paths must be relative normal paths. Absolute paths, `..`, `.`, roots, and platform prefixes are rejected. Declared files must be readable, and the backend must be executable. Symlinked files are accepted, which permits immutable Nix store composition. The bundle directory name must equal the manifest widget ID.
 
 ## Example
 

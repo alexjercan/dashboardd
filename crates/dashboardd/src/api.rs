@@ -1013,10 +1013,19 @@ mod tests {
         std::fs::create_dir_all(&widget).unwrap();
         std::fs::write(
             widget.join("widget.json"),
-            r#"{"schema_version":2,"id":"projects","name":"Projects","description":"Projects","backend":"backend","variants":[{"id":"pinned","name":"Pinned","width":3,"height":1,"frontend":"pinned.js"}],"options":[]}"#,
+            r#"{"schema_version":2,"id":"projects","name":"Projects","description":"Projects","backend":"backend","variants":[{"id":"pinned","name":"Pinned","width":3,"height":1,"frontend":"pinned.js","focus":false}],"options":[],"inputs":[],"outputs":[]}"#,
         )
         .unwrap();
         std::fs::write(widget.join("backend"), "backend").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(
+                widget.join("backend"),
+                std::fs::Permissions::from_mode(0o755),
+            )
+            .unwrap();
+        }
         std::fs::write(widget.join("pinned.js"), "frontend").unwrap();
         let widgets = WidgetsManager::discover(&root).unwrap();
         (

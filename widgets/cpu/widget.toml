@@ -1,25 +1,23 @@
-schema_version = 1
+schema_version = 2
 id = "cpu"
 name = "CPU"
 description = "Processor usage and temperatures"
 
-[backend]
-package = "cpu"
+backend = "dist/bin/cpu"
 
-[frontend]
-workspace = "@dashboardd/cpu-widget"
-
-[[frontend.variants]]
+[[variants]]
 id = "full"
 name = "Full"
-size = [3, 3]
-entry = "src/full.ts"
+width = 3
+height = 3
+frontend = "frontend/dist/full.js"
 
-[[frontend.variants]]
+[[variants]]
 id = "compact"
 name = "Compact"
-size = [1, 1]
-entry = "src/compact.ts"
+width = 1
+height = 1
+frontend = "frontend/dist/compact.js"
 
 [[options]]
 id = "show_core_temperatures"
@@ -27,8 +25,7 @@ name = "Show core temperatures"
 description = "Show temperature inside each CPU core square"
 variants = ["full"]
 default = true
-
-[options.boolean]
+type = "boolean"
 
 [[options]]
 id = "history_points"
@@ -36,8 +33,7 @@ name = "History length"
 description = "Number of samples retained in the graph"
 variants = ["full"]
 default = 40
-
-[options.integer]
+type = "integer"
 minimum = 20
 maximum = 120
 step = 10

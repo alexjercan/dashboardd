@@ -1,25 +1,23 @@
-schema_version = 1
+schema_version = 2
 id = "codex-usage"
 name = "Codex Usage"
 description = "Weekly Codex subscription limit"
 
-[backend]
-package = "codex-usage"
+backend = "dist/bin/codex-usage"
 
-[frontend]
-workspace = "@dashboardd/codex-usage-widget"
-
-[[frontend.variants]]
+[[variants]]
 id = "compact"
 name = "Compact"
-size = [3, 1]
-entry = "src/compact.ts"
+width = 3
+height = 1
+frontend = "frontend/dist/compact.js"
 
-[[frontend.variants]]
+[[variants]]
 id = "minimal"
 name = "Minimal"
-size = [1, 1]
-entry = "src/minimal.ts"
+width = 1
+height = 1
+frontend = "frontend/dist/minimal.js"
 
 [[options]]
 id = "display_mode"
@@ -27,8 +25,7 @@ name = "Display"
 description = "Show subscription usage or remaining allowance"
 variants = ["compact"]
 default = "remaining"
-
-[options.select]
+type = "select"
 choices = [
   { value = "usage", name = "Usage" },
   { value = "remaining", name = "Remaining" },

@@ -1,9 +1,9 @@
 //! Installed widget definitions discovered from the filesystem.
 
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::BTreeMap,
     fs, io,
-    path::{Component, Path, PathBuf},
+    path::{Path, PathBuf},
     sync::Arc,
 };
 
@@ -187,33 +187,6 @@ pub struct WidgetsManager {
     widgets: Arc<Vec<Arc<WidgetConfig>>>,
 }
 
-#[derive(Debug, Deserialize)]
-struct ManifestFile {
-    schema_version: u32,
-    id: String,
-    name: String,
-    description: String,
-    backend: PathBuf,
-    variants: Vec<VariantFile>,
-    #[serde(default)]
-    options: Vec<WidgetOption>,
-    #[serde(default)]
-    inputs: Vec<WidgetLinkPort>,
-    #[serde(default)]
-    outputs: Vec<WidgetLinkPort>,
-}
-
-#[derive(Debug, Deserialize)]
-struct VariantFile {
-    id: String,
-    name: String,
-    width: u32,
-    height: u32,
-    frontend: PathBuf,
-    #[serde(default)]
-    focus: bool,
-}
-
 impl WidgetsManager {
     pub fn discover(root: &Path) -> io::Result<Self> {
         let mut directories = fs::read_dir(root)?.collect::<Result<Vec<_>, _>>()?;
@@ -248,220 +221,92 @@ impl WidgetsManager {
 }
 
 fn read_config(widget_directory: &Path) -> io::Result<WidgetConfig> {
-    let manifest_path = widget_directory.join("widget.json");
-    let source = fs::read_to_string(&manifest_path)?;
-    let manifest: ManifestFile = serde_json::from_str(&source).map_err(|error| {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!(
-                "invalid widget manifest {}: {error}",
-                manifest_path.display()
-            ),
-        )
-    })?;
-
-    if manifest.schema_version != 2 {
-        return Err(invalid_manifest(
-            &manifest_path,
-            "unsupported schema_version",
-        ));
-    }
-    if !valid_kebab_id(&manifest.id)
-        || manifest.name.trim().is_empty()
-        || manifest.description.trim().is_empty()
-        || manifest.variants.is_empty()
-    {
-        return Err(invalid_manifest(
-            &manifest_path,
-            "id must use kebab case; name, description, and variants must not be empty",
-        ));
-    }
-    validate_path(&manifest_path, "backend", &manifest.backend)?;
-    let backend = widget_directory.join(&manifest.backend);
-    if !backend.is_file() {
-        return Err(invalid_manifest(
-            &manifest_path,
-            "declared backend must exist",
-        ));
-    }
-
-    let mut ids = HashSet::new();
-    let mut variants = Vec::new();
-    let mut frontends = Vec::new();
-    for variant in manifest.variants {
-        validate_path(&manifest_path, "frontend", &variant.frontend)?;
-        if !valid_kebab_id(&variant.id)
-            || variant.name.trim().is_empty()
-            || variant.width == 0
-            || variant.height == 0
-            || !ids.insert(variant.id.clone())
-        {
-            return Err(invalid_manifest(
-                &manifest_path,
-                "variants require unique IDs, names, and positive sizes",
-            ));
-        }
-        let frontend = widget_directory.join(&variant.frontend);
-        if !frontend.is_file() {
-            return Err(invalid_manifest(
-                &manifest_path,
-                "declared frontend must exist",
-            ));
-        }
-        variants.push(WidgetVariant {
-            frontend_url: format!(
-                "/widgets/{}/variants/{}/frontend.js",
-                manifest.id, variant.id
-            ),
-            id: variant.id,
-            name: variant.name,
-            width: variant.width,
-            height: variant.height,
-            focus: variant.focus,
-        });
-        frontends.push(frontend);
-    }
-
-    validate_options(&manifest_path, &manifest.options, &ids)?;
-    validate_ports(&manifest_path, &manifest.inputs, &manifest.outputs, &ids)?;
+    let checked = dashboardd_widget::check_bundle(widget_directory)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    let manifest = checked.manifest;
+    let widget_id = manifest.id.clone();
     Ok(WidgetConfig {
         descriptor: WidgetDescriptor {
             id: manifest.id,
             name: manifest.name,
             description: manifest.description,
-            variants,
-            options: manifest.options,
-            inputs: manifest.inputs,
-            outputs: manifest.outputs,
+            variants: manifest
+                .variants
+                .into_iter()
+                .map(|variant| WidgetVariant {
+                    frontend_url: format!(
+                        "/widgets/{widget_id}/variants/{}/frontend.js",
+                        variant.id
+                    ),
+                    id: variant.id,
+                    name: variant.name,
+                    width: variant.width,
+                    height: variant.height,
+                    focus: variant.focus,
+                })
+                .collect(),
+            options: manifest.options.into_iter().map(Into::into).collect(),
+            inputs: manifest.inputs.into_iter().map(Into::into).collect(),
+            outputs: manifest.outputs.into_iter().map(Into::into).collect(),
         },
-        backend,
-        frontends,
+        backend: checked.backend,
+        frontends: checked.frontends,
     })
 }
 
-fn validate_options(
-    manifest: &Path,
-    options: &[WidgetOption],
-    variant_ids: &HashSet<String>,
-) -> io::Result<()> {
-    let mut option_ids = HashSet::new();
-    for option in options {
-        if !valid_snake_id(&option.id)
-            || option.name.trim().is_empty()
-            || option.description.trim().is_empty()
-            || !option_ids.insert(&option.id)
-            || option
-                .variants
-                .iter()
-                .any(|variant| !variant_ids.contains(variant))
-            || option.validate_value(&option.default).is_err()
-        {
-            return Err(invalid_manifest(
-                manifest,
-                "options require unique IDs, names, descriptions, known variants, and valid defaults",
-            ));
+impl From<dashboardd_widget::WidgetLinkPort> for WidgetLinkPort {
+    fn from(port: dashboardd_widget::WidgetLinkPort) -> Self {
+        Self {
+            id: port.id,
+            name: port.name,
+            link_type: port.link_type,
+            variants: port.variants,
+            required: port.required,
         }
-        match &option.kind {
-            WidgetOptionKind::Integer {
+    }
+}
+
+impl From<dashboardd_widget::WidgetOption> for WidgetOption {
+    fn from(option: dashboardd_widget::WidgetOption) -> Self {
+        Self {
+            id: option.id,
+            name: option.name,
+            description: option.description,
+            variants: option.variants,
+            default: option.default,
+            kind: option.kind.into(),
+        }
+    }
+}
+
+impl From<dashboardd_widget::WidgetOptionKind> for WidgetOptionKind {
+    fn from(kind: dashboardd_widget::WidgetOptionKind) -> Self {
+        match kind {
+            dashboardd_widget::WidgetOptionKind::Boolean => Self::Boolean,
+            dashboardd_widget::WidgetOptionKind::Text { multiline } => Self::Text { multiline },
+            dashboardd_widget::WidgetOptionKind::Integer {
                 minimum,
                 maximum,
                 step,
-            } if minimum > maximum || *step == 0 => {
-                return Err(invalid_manifest(
-                    manifest,
-                    "invalid integer option constraints",
-                ));
-            }
-            WidgetOptionKind::Select { choices } => {
-                let mut values = HashSet::new();
-                if choices.is_empty()
-                    || choices.iter().any(|choice| {
-                        choice.value.is_empty()
-                            || choice.name.trim().is_empty()
-                            || !values.insert(&choice.value)
-                    })
-                {
-                    return Err(invalid_manifest(manifest, "invalid select option choices"));
-                }
-            }
-            _ => {}
+            } => Self::Integer {
+                minimum,
+                maximum,
+                step,
+            },
+            dashboardd_widget::WidgetOptionKind::Select { choices } => Self::Select {
+                choices: choices.into_iter().map(Into::into).collect(),
+            },
         }
     }
-    Ok(())
 }
 
-fn validate_ports(
-    manifest: &Path,
-    inputs: &[WidgetLinkPort],
-    outputs: &[WidgetLinkPort],
-    variant_ids: &HashSet<String>,
-) -> io::Result<()> {
-    let mut ids = HashSet::new();
-    for port in inputs.iter().chain(outputs) {
-        if !valid_snake_id(&port.id)
-            || port.name.trim().is_empty()
-            || port.link_type.trim().is_empty()
-            || !ids.insert(&port.id)
-            || port
-                .variants
-                .iter()
-                .any(|variant| !variant_ids.contains(variant))
-        {
-            return Err(invalid_manifest(
-                manifest,
-                "link ports require unique IDs, names, types, and known variants",
-            ));
+impl From<dashboardd_widget::WidgetOptionChoice> for WidgetOptionChoice {
+    fn from(choice: dashboardd_widget::WidgetOptionChoice) -> Self {
+        Self {
+            value: choice.value,
+            name: choice.name,
         }
     }
-    if outputs.iter().any(|port| port.required) {
-        return Err(invalid_manifest(
-            manifest,
-            "output link ports cannot be required",
-        ));
-    }
-    Ok(())
-}
-
-fn valid_kebab_id(value: &str) -> bool {
-    valid_id(value, b'-')
-}
-
-fn valid_snake_id(value: &str) -> bool {
-    valid_id(value, b'_')
-}
-
-fn valid_id(value: &str, separator: u8) -> bool {
-    !value.is_empty()
-        && !value.starts_with(char::from(separator))
-        && !value.ends_with(char::from(separator))
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == separator)
-        && !value
-            .as_bytes()
-            .windows(2)
-            .any(|pair| pair == [separator; 2])
-}
-
-fn validate_path(manifest: &Path, label: &str, path: &Path) -> io::Result<()> {
-    if path.is_absolute()
-        || path
-            .components()
-            .any(|component| !matches!(component, Component::Normal(_)))
-    {
-        return Err(invalid_manifest(
-            manifest,
-            &format!("{label} must be a relative path inside the widget directory"),
-        ));
-    }
-    Ok(())
-}
-
-fn invalid_manifest(path: &Path, message: &str) -> io::Error {
-    io::Error::new(
-        io::ErrorKind::InvalidData,
-        format!("invalid widget manifest {}: {message}", path.display()),
-    )
 }
 
 #[cfg(test)]
@@ -475,10 +320,15 @@ mod tests {
         fs::create_dir_all(&cpu).unwrap();
         fs::write(
             cpu.join("widget.json"),
-            r#"{"schema_version":2,"id":"cpu","name":"CPU","description":"Processor usage","backend":"backend","variants":[{"id":"full","name":"Full","width":3,"height":3,"frontend":"full.js","focus":true}],"options":[{"id":"root","name":"Root","description":"Project root","variants":["full"],"default":"~/personal","type":"text"},{"id":"history_points","name":"History length","description":"Retained samples","variants":["full"],"default":40,"type":"integer","minimum":20,"maximum":120,"step":10}],"inputs":[{"id":"task","name":"Task","type":"task/v1","variants":["full"],"required":true}],"outputs":[{"id":"selection","name":"Selection","type":"task/v1","variants":["full"],"required":false}]}"#,
+            r#"{"schema_version":2,"id":"cpu","name":"CPU","description":"Processor usage","backend":"backend","variants":[{"id":"full","name":"Full","width":3,"height":3,"frontend":"full.js","focus":true}],"options":[{"id":"root","name":"Root","description":"Project root","variants":["full"],"default":"~/personal","type":"text","multiline":false},{"id":"history_points","name":"History length","description":"Retained samples","variants":["full"],"default":40,"type":"integer","minimum":20,"maximum":120,"step":10}],"inputs":[{"id":"task","name":"Task","type":"task/v1","variants":["full"],"required":true}],"outputs":[{"id":"selection","name":"Selection","type":"task/v1","variants":["full"],"required":false}]}"#,
         )
         .unwrap();
         fs::write(cpu.join("backend"), "executable").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(cpu.join("backend"), fs::Permissions::from_mode(0o755)).unwrap();
+        }
         fs::write(cpu.join("full.js"), "export function mount() {}").unwrap();
 
         let widgets = WidgetsManager::discover(&root).unwrap();
@@ -531,16 +381,6 @@ mod tests {
     }
 
     #[test]
-    fn public_manifest_ids_use_stable_case() {
-        assert!(valid_kebab_id("external-fixture"));
-        assert!(!valid_kebab_id("External-Fixture"));
-        assert!(!valid_kebab_id("external--fixture"));
-        assert!(valid_snake_id("selected_task"));
-        assert!(!valid_snake_id("selected__task"));
-        assert!(!valid_snake_id("selected-task"));
-    }
-
-    #[test]
     fn rejects_invalid_option_manifests() {
         let root =
             std::env::temp_dir().join(format!("dashboardd-invalid-options-{}", std::process::id()));
@@ -548,7 +388,7 @@ mod tests {
         fs::create_dir_all(&cpu).unwrap();
         fs::write(
             cpu.join("widget.json"),
-            r#"{"schema_version":2,"id":"cpu","name":"CPU","description":"Processor usage","backend":"backend","variants":[{"id":"full","name":"Full","width":3,"height":3,"frontend":"full.js"}],"options":[{"id":"history_points","name":"History","description":"Samples","variants":["full"],"default":40,"type":"integer","minimum":20,"maximum":120,"step":0}]}"#,
+            r#"{"schema_version":2,"id":"cpu","name":"CPU","description":"Processor usage","backend":"backend","variants":[{"id":"full","name":"Full","width":3,"height":3,"frontend":"full.js","focus":false}],"options":[{"id":"history_points","name":"History","description":"Samples","variants":["full"],"default":40,"type":"integer","minimum":20,"maximum":120,"step":0}],"inputs":[],"outputs":[]}"#,
         )
         .unwrap();
         fs::write(cpu.join("backend"), "executable").unwrap();

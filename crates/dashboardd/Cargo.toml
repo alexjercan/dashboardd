@@ -7,6 +7,7 @@ license.workspace = true
 [dependencies]
 axum = "0.8.8"
 dashboard-protocol = { path = "../dashboard-protocol" }
+dashboardd-widget = { path = "../dashboardd-widget" }
 futures-util = "0.3.31"
 notify = "8.2.0"
 rand = "0.10.2"

@@ -1,25 +1,23 @@
-schema_version = 1
+schema_version = 2
 id = "memory"
 name = "RAM"
 description = "RAM and swap usage"
 
-[backend]
-package = "memory"
+backend = "dist/bin/memory"
 
-[frontend]
-workspace = "@dashboardd/memory-widget"
-
-[[frontend.variants]]
+[[variants]]
 id = "full"
 name = "Full"
-size = [3, 2]
-entry = "src/full.ts"
+width = 3
+height = 2
+frontend = "frontend/dist/full.js"
 
-[[frontend.variants]]
+[[variants]]
 id = "compact"
 name = "Compact"
-size = [1, 1]
-entry = "src/compact.ts"
+width = 1
+height = 1
+frontend = "frontend/dist/compact.js"
 
 [[options]]
 id = "show_swap"
@@ -27,5 +25,4 @@ name = "Show swap"
 description = "Show swap usage in the detailed view"
 variants = ["full"]
 default = true
-
-[options.boolean]
+type = "boolean"

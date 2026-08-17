@@ -7,6 +7,7 @@
   - [Configuration](user-guide/configuration.md)
   - [Bundled widgets](user-guide/widgets.md)
 - [Widget authoring](widget-authoring/index.md)
+  - [Packaging and checks](widget-authoring/packaging.md)
   - [Runtime bundle](widget-authoring/runtime-bundle.md)
   - [Backend protocol](widget-authoring/backend-protocol.md)
   - [Frontend contract](widget-authoring/frontend.md)

@@ -38,7 +38,7 @@ sequenceDiagram
     W-->>D: Exit 0
 ```
 
-dashboardd writes `initialize` immediately after process start. The backend announces `ready` as soon as its protocol loop is available. It must announce the manifest widget ID and must not send updates before `ready`.
+dashboardd writes `initialize` immediately after process start. The backend announces `ready` as soon as its protocol loop is available. It can write `ready` before or after it reads `initialize`; dashboardd accepts both orderings. It must announce the manifest widget ID and must not send updates before `ready`.
 
 dashboardd currently probes every 10 seconds and marks an instance stale after 30 seconds without valid protocol activity. On shutdown, a backend must stop accepting work, complete necessary cleanup, close normally, and exit zero within three seconds.
 
