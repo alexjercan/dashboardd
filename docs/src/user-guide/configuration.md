@@ -29,9 +29,10 @@ Widget options and Dashboard documents are public browser data. Do not place cre
 ## Environment variables
 
 - `DASHBOARDD_CONFIG_FILE` - configuration file override.
-- `DASHBOARDD_STATE_FILE` - durable package-wide widget state file override. Runtime instances and Dashboard composition are not stored in this file.
+- `DASHBOARDD_STATE_FILE` - browser server package-wide widget state file override. Runtime instances and Dashboard composition are not stored in this file.
+- `DASHBOARDD_DESKTOP_STATE_FILE` - desktop runtime package-wide widget state file override. Defaults to `$XDG_STATE_HOME/dashboardd-desktop/runtime.json` or `$HOME/.local/state/dashboardd-desktop/runtime.json`.
 - `DASHBOARDD_WIDGET_PATH` - platform-separated installed widget roots. An explicit value replaces the packaged default. Empty means no widgets. Missing roots, empty path entries, invalid bundles, and duplicate widget IDs stop startup.
-- `DASHBOARDD_WEB_DIR` - dashboard frontend asset directory. Defaults to `web/dist` for source development.
+- `DASHBOARDD_WEB_DIR` - dashboard frontend asset directory. Defaults to `crates/dashboardd-server/frontend/dist` for source development.
 - `DASHBOARDD_PORT` - listen port.
 - `RUST_LOG` - Rust tracing filter.
 

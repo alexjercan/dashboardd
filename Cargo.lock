@@ -773,6 +773,7 @@ name = "dashboardd-desktop"
 version = "0.1.0"
 dependencies = [
  "dashboardd-desktop-control",
+ "dashboardd-runtime",
  "libc",
  "serde",
  "serde_json",
@@ -780,6 +781,7 @@ dependencies = [
  "tauri-build",
  "thiserror 2.0.20",
  "time",
+ "tokio",
 ]
 
 [[package]]

@@ -56,7 +56,7 @@
             pname = "dashboardd-assets";
             version = "0.1.0";
             src = ./.;
-            npmDepsHash = "sha256-3LPlqDfDZs53EHeWxxSvZSk7NGuO0Xaqh6h/Cyg3bIs=";
+            npmDepsHash = "sha256-pYB0K1m65f6wnMIGM9mTG7bGhClgCUyGDKeiJdoCKco=";
             nativeBuildInputs = [ widgetTool ];
             postBuild = ''
               mkdir packed
@@ -65,7 +65,7 @@
             installPhase = ''
               runHook preInstall
               mkdir -p "$out/share/dashboardd/web" "$out/share/dashboardd/widgets"
-              cp -R web/dist/. "$out/share/dashboardd/web/"
+              cp -R crates/dashboardd-server/frontend/dist/. "$out/share/dashboardd/web/"
               cp -R packed/. "$out/share/dashboardd/widgets/"
               runHook postInstall
             '';

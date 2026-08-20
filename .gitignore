@@ -1,7 +1,8 @@
 /target
 /node_modules
 /packages/widget-sdk/dist
-/web/dist
+/crates/dashboardd-server/frontend/dist
+/crates/dashboardd-desktop/frontend/dist
 /widgets/*/frontend/dist
 /widgets/*/dist
 /.build

@@ -1,5 +1,5 @@
 {
-  "name": "@dashboardd/dashboard",
+  "name": "@dashboardd/server-frontend",
   "version": "0.1.0",
   "private": true,
   "scripts": {

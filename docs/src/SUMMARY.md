@@ -5,6 +5,7 @@
 - [User guide](user-guide/index.md)
   - [Navigation](user-guide/navigation.md)
   - [Configuration](user-guide/configuration.md)
+  - [Desktop widget windows](user-guide/desktop.md)
   - [Bundled widgets](user-guide/widgets.md)
 - [Widget authoring](widget-authoring/index.md)
   - [Packaging and checks](widget-authoring/packaging.md)

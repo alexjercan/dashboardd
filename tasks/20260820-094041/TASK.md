@@ -104,13 +104,23 @@ Step status: SUPERSEDED by the architecture correction and native desktop surfac
 
 ### 6. Connect desktop windows to real widgets
 
-- Embed and own `dashboardd-runtime` in `dashboardd-desktop`; do not provide an external-runtime mode or internal HTTP listener.
-- Replace static demo windows with desktop-owned standalone surface webviews using narrow typed Tauri transport.
-- Implement typed discover, open, update, focus, list, close, and quit control commands.
-- Make every open create a new surface, runtime instance, and native window with a generated surface ID.
-- Delete the runtime instance when its window closes.
+Accepted contract:
 
-Completion gate: `dashboardctl open cpu --variant full` opens a live native CPU widget and later commands control it by surface ID.
+- Embed and own `dashboardd-runtime` in `dashboardd-desktop`; do not provide an external-runtime mode or internal HTTP listener.
+- Replace protocol version 1's demo command with protocol version 2 typed `discover`, `open`, `update`, `focus`, `list`, `close`, and `quit` commands. Do not retain `open-demo` compatibility.
+- `discover` returns installed widget, variant, option, and input metadata without backend paths, frontend paths, or runtime data.
+- `open` requires explicit widget and variant IDs. Options and direct typed inputs default to empty maps; presentation defaults to `focus`. Validate all required inputs before creating resources. Every open creates a generated surface ID, runtime instance, and native window.
+- `update` requires an explicit surface ID. It can replace the complete direct-input map and change presentation. Omitted fields remain unchanged; reject an update with neither field. Options remain immutable.
+- Use narrow Tauri commands scoped to the invoking webview for initialization, backend messages, restart, and shared-state mutation. Derive the surface from the invoking window label. Do not accept instance IDs, URLs, or paths from JavaScript. Send filtered runtime updates through one tagged, invoking-webview-scoped IPC channel.
+- Serve each surface's exact runtime-validated frontend module through a read-only custom Tauri protocol. The protocol accepts a surface ID, not a path. Do not start an HTTP listener or grant broad filesystem access.
+- Move the Dashboard frontend from top-level `web/` to `crates/dashboardd-server/frontend/`. Put the standalone TypeScript, HTML, and CSS under `crates/dashboardd-desktop/frontend/`. Keep shared widget APIs under `packages/widget-sdk`.
+- Size initial windows from the manifest aspect ratio at 240 logical pixels per unit: `3x3 -> 720x720`, `3x2 -> 720x480`, and `3x1 -> 720x240`. Scale both dimensions proportionally when needed to fit a 1200x960 maximum. Keep windows ordinary, decorated, and resizable.
+- Title windows `<widget name> - dashboardd`. Roll back the runtime instance if window creation fails. Native close deletes the instance. Quit deletes all instances, shuts down the embedded runtime, removes the socket, and exits.
+- Use existing widget-path and theme-configuration environment inputs. Store desktop shared state separately through `DASHBOARDD_DESKTOP_STATE_FILE`, defaulting to `$XDG_STATE_HOME/dashboardd-desktop/runtime.json`.
+
+Completion gate: `dashboardctl open cpu --variant full` opens a live 720x720 native CPU widget and later commands control it by surface ID.
+
+Step status: COMPLETE.
 
 ### 7. Add direct Tatr Task Artifact surfaces
 
@@ -263,6 +273,34 @@ Completion gate: the packaged desktop service starts from rofi, accepts control 
 - All workspace Rust tests pass: 17 runtime tests and 9 server tests cover the corrected split. Workspace Clippy passes for all targets with warnings denied.
 - The runtime dependency tree contains no Axum, tower-http, utoipa, Hyper, or HTTP body crates.
 - Rust and Prettier formatting, contract tests, external SDK tests, production Dashboard build, widget preparation, documentation build, and the complete Chromium HTTP and SSE integration suite pass.
+
+## Step 6 implementation notes
+
+- Replaced the demo control contract with protocol version 2 discovery, open, update, focus, list, close, and quit operations. The CLI accepts typed option and input JSON and returns the bounded JSON-line response unchanged.
+- Embedded one independent runtime in the resident Tauri process. Desktop runtime state uses `dashboardd-desktop/runtime.json`; widget roots and theme configuration remain shared environment inputs.
+- Added transaction-like open and close handling. Open validates required inputs, creates the runtime instance, registers its validated frontend path, creates the native window, and rolls back on failure. Native and controlled close remove the surface and instance.
+- Added invoking-window-scoped Tauri initialization, backend message, restart, and shared-state mutation commands. Runtime events are filtered by instance or widget before emission to each surface.
+- Restored the standalone surface TypeScript, HTML, and CSS under the desktop crate. It uses Tauri IPC for direct inputs, backend updates, health, restart, shared state, theme, and presentation.
+- Added a read-only custom protocol that returns only the validated frontend module assigned to the requesting surface. The requesting webview label must equal the requested surface ID.
+- Moved the Dashboard frontend from top-level `web/` to `crates/dashboardd-server/frontend/`. Added both server and desktop frontends as explicit root npm workspaces.
+- Initial native content dimensions use 240 logical pixels per manifest unit and proportional 1200x960 fitting. Windows remain ordinary, decorated, and resizable.
+
+## Step 6 bugs and fixes
+
+- The restored standalone module initially constructed its input and state buses before their class declarations. Moved initialization below both declarations.
+- The first desktop TypeScript configuration inherited `noEmit` behavior unsuitable for webpack's `ts-loader`. Enabled compiler output for the webpack pipeline.
+- Input replacement initially relied only on runtime port and type validation, which permits an absent required port by design. Added presentation-host required-input validation to both open and update.
+- Tauri's global event listener did not complete under the live WebKitGTK host, leaving the surface before initialization. Replaced the global event plugin with one invoking-webview-scoped Tauri IPC channel.
+- WebKitGTK mounted the complete widget DOM but rendered a gray surface while repeatedly failing GBM buffer allocation. Default `WEBKIT_DISABLE_DMABUF_RENDERER=1` before Tauri initialization unless the caller explicitly sets it.
+
+## Step 6 verification results
+
+- Both production frontend builds pass after the ownership move.
+- Desktop and control package tests pass. Focused Clippy passes for all targets with warnings denied.
+- The live X11/i3 playtest confirmed custom frontend delivery, CPU telemetry rendering, healthy backend updates, and exact 720x720 floating dimensions after disabling WebKitGTK DMA-BUF rendering.
+- Live update, focus, list, close, and Quit commands pass. Close removes the instance and surface; Quit exits the recorded PID and removes the control socket.
+- Full workspace tests and Clippy with warnings denied pass. Contract, SDK, production frontend, widget preparation, Chromium integration, and documentation builds pass.
+- Updated the root npm dependency hash for Nix. `nix flake check --no-build` remains blocked by the local Nix 2.34 evaluator producing an unrealized filtered Rust source store path; checking the archived flake fails at the same rust-flake source lookup.
 
 ## Step 2 implementation notes
 

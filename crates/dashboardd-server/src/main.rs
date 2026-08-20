@@ -20,7 +20,7 @@ use tracing_subscriber::EnvFilter;
 const DEFAULT_HOST: &str = "127.0.0.1";
 const PORT_RANGE: std::ops::Range<u16> = 7000..8000;
 const DEFAULT_WIDGET_PATH: &str = ".build/widgets";
-const DEFAULT_WEB_DIR: &str = "web/dist";
+const DEFAULT_WEB_DIR: &str = "crates/dashboardd-server/frontend/dist";
 
 #[derive(Debug)]
 struct Config {

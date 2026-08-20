@@ -4,7 +4,8 @@
   "private": true,
   "workspaces": [
     "packages/*",
-    "web",
+    "crates/dashboardd-server/frontend",
+    "crates/dashboardd-desktop/frontend",
     "widgets/*/frontend"
   ],
   "scripts": {
@@ -12,8 +13,8 @@
     "docs:assets": "mdbook-mermaid install docs",
     "docs:build": "npm run docs:assets && mdbook build docs",
     "docs:serve": "npm run docs:assets && mdbook serve docs --open",
-    "format": "prettier --write \"{packages,web,widgets,tests,schemas}/**/*.{ts,js,mjs,html,css,json}\" \"{docs,.github}/**/*.{md,yml}\" \"*.{json,md}\"",
-    "format:check": "prettier --check \"{packages,web,widgets,tests,schemas}/**/*.{ts,js,mjs,html,css,json}\" \"{docs,.github}/**/*.{md,yml}\" \"*.{json,md}\"",
+    "format": "prettier --write \"{packages,crates/*/frontend,widgets,tests,schemas}/**/*.{ts,js,mjs,html,css,json}\" \"{docs,.github}/**/*.{md,yml}\" \"*.{json,md}\"",
+    "format:check": "prettier --check \"{packages,crates/*/frontend,widgets,tests,schemas}/**/*.{ts,js,mjs,html,css,json}\" \"{docs,.github}/**/*.{md,yml}\" \"*.{json,md}\"",
     "test:contracts": "node tests/contracts.mjs",
     "test:sdk": "node tests/sdk-package.mjs",
     "test": "npm run test:contracts && npm run test:sdk && node tests/browser.mjs"

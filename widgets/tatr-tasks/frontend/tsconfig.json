@@ -1,5 +1,5 @@
 {
-  "extends": "../../../web/tsconfig.json",
+  "extends": "../../../crates/dashboardd-server/frontend/tsconfig.json",
   "compilerOptions": {
     "rootDir": "src"
   },

@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     env,
     io::{self, BufRead, Write},
     path::PathBuf,
@@ -9,11 +10,9 @@ use serde_json::Value;
 use thiserror::Error;
 
 /// Wire protocol version accepted by the desktop service.
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 /// Maximum encoded request or response size, including its LF terminator.
 pub const MAX_MESSAGE_BYTES: usize = 64 * 1024;
-/// Maximum UTF-8 byte length accepted for a native window title.
-pub const MAX_TITLE_BYTES: usize = 256;
 /// Socket name below the caller's `XDG_RUNTIME_DIR`.
 pub const SOCKET_FILE_NAME: &str = "dashboardd-desktop.sock";
 
@@ -44,40 +43,94 @@ pub struct Request {
     pub command: Command,
 }
 
-/// Supported desktop lifecycle commands for protocol version 1.
+/// Standalone widget presentation selected by a control client.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Presentation {
+    /// Full standalone widget presentation.
+    #[default]
+    Focus,
+    /// Compact Dashboard-style presentation.
+    Tile,
+}
+
+/// One opaque value paired with its declared manifest type.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DirectInput {
+    /// Exact versioned manifest type.
+    #[serde(rename = "type")]
+    pub input_type: String,
+    /// Widget-owned JSON value.
+    pub value: Value,
+}
+
+/// Supported desktop commands for protocol version 2.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case")]
 pub enum Command {
-    /// Creates a new static lifecycle demo surface.
-    OpenDemo {
-        /// Optional native window title.
+    /// Lists installed widgets and their public opening contract.
+    Discover,
+    /// Creates a new runtime instance and native widget surface.
+    Open {
+        /// Installed widget identifier.
+        widget_id: String,
+        /// Explicit widget variant identifier.
+        variant_id: String,
+        /// Supplied option values. Manifest defaults fill omitted options.
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        options: BTreeMap<String, Value>,
+        /// Complete direct typed-input map.
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        inputs: BTreeMap<String, DirectInput>,
+        /// Initial frontend presentation.
+        #[serde(default, skip_serializing_if = "is_focus")]
+        presentation: Presentation,
+    },
+    /// Changes mutable fields on one explicit surface.
+    Update {
+        /// Surface identifier returned by `Open`.
+        surface_id: String,
+        /// Replacement direct-input map. Omission retains current inputs.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        title: Option<String>,
+        inputs: Option<BTreeMap<String, DirectInput>>,
+        /// Replacement presentation. Omission retains the current value.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        presentation: Option<Presentation>,
     },
     /// Returns every currently open surface.
     List,
     /// Requests native focus for one surface.
     Focus {
-        /// Surface identifier returned by `OpenDemo`.
+        /// Surface identifier returned by `Open`.
         surface_id: String,
     },
-    /// Closes and removes one surface.
+    /// Closes one surface and deletes its runtime instance.
     Close {
-        /// Surface identifier returned by `OpenDemo`.
+        /// Surface identifier returned by `Open`.
         surface_id: String,
     },
+    /// Shuts down the resident desktop service.
+    Quit,
 }
 
 impl Command {
     /// Returns the stable wire name used in metadata-only audit records.
     pub fn name(&self) -> &'static str {
         match self {
-            Self::OpenDemo { .. } => "open_demo",
+            Self::Discover => "discover",
+            Self::Open { .. } => "open",
+            Self::Update { .. } => "update",
             Self::List => "list",
             Self::Focus { .. } => "focus",
             Self::Close { .. } => "close",
+            Self::Quit => "quit",
         }
     }
+}
+
+fn is_focus(presentation: &Presentation) -> bool {
+    *presentation == Presentation::Focus
 }
 
 /// One versioned response returned after command completion.
@@ -223,15 +276,19 @@ mod tests {
     fn request_round_trips_as_one_json_line() {
         let request = Request {
             version: PROTOCOL_VERSION,
-            command: Command::OpenDemo {
-                title: Some("CPU".into()),
+            command: Command::Open {
+                widget_id: "cpu".into(),
+                variant_id: "full".into(),
+                options: BTreeMap::new(),
+                inputs: BTreeMap::new(),
+                presentation: Presentation::Focus,
             },
         };
         let mut bytes = Vec::new();
         write_message(&mut bytes, &request).unwrap();
         assert_eq!(
             String::from_utf8(bytes.clone()).unwrap(),
-            "{\"version\":1,\"command\":\"open_demo\",\"title\":\"CPU\"}\n"
+            "{\"version\":2,\"command\":\"open\",\"widget_id\":\"cpu\",\"variant_id\":\"full\"}\n"
         );
         assert_eq!(
             read_message::<Request>(&mut Cursor::new(bytes)).unwrap(),
@@ -244,7 +301,7 @@ mod tests {
         assert_eq!(
             serde_json::to_value(Response::ok(json!({ "surface_id": "surface-1" }))).unwrap(),
             json!({
-                "version": 1,
+                "version": 2,
                 "status": "ok",
                 "result": { "surface_id": "surface-1" }
             })
@@ -252,7 +309,7 @@ mod tests {
         assert_eq!(
             serde_json::to_value(Response::failed("surface_not_found", "missing")).unwrap(),
             json!({
-                "version": 1,
+                "version": 2,
                 "status": "failed",
                 "error": { "code": "surface_not_found", "message": "missing" }
             })
