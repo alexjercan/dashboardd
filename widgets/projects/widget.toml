@@ -18,6 +18,7 @@ name = "Project Brief"
 width = 3
 height = 2
 frontend = "frontend/dist/brief.js"
+launch_frontend = "frontend/dist/brief-launcher.js"
 focus = true
 
 [[outputs]]

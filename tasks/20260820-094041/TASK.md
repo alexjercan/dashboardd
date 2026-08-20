@@ -202,6 +202,30 @@ Step status: COMPLETE.
 - Workspace Rust tests and Clippy with warnings denied pass. Formatting, all production frontend builds, contract and SDK tests, Chromium integration, widget preparation, and documentation builds pass.
 - The focused Nix desktop package builds successfully with all eight schema version 3 built-in widget bundles and the packaged Tatr launch frontend.
 
+### 11. Add the Project Brief launch form
+
+Accepted contract:
+
+- Add a Projects-owned launch frontend to Project Brief, the only remaining built-in variant with a required input. Variants without required inputs and the generic JSON fallback remain unchanged.
+- Use the draft Project Brief backend to discover bounded project and worktree choices from its existing `roots` option. Return display labels and opaque identities only; return no filesystem paths.
+- Show a searchable Project selector and a Worktree selector. Preserve backend project order, prefer Primary, and auto-select sole choices.
+- Complete the existing `dashboardd.project-selection/v1` input with the selected project and worktree IDs and display labels. Keep direct `dashboardctl open` unchanged.
+
+Completion gate: `Open Widget -> Projects -> Project Brief` resolves the required project input from readable choices and opens Project Brief without JSON entry.
+
+Step status: COMPLETE.
+
+## Step 11 implementation notes
+
+- Added a Project Brief launch frontend and a bounded `launch_catalog` backend command. The draft brief backend discovers projects from its normal roots and emits only project labels, worktree labels, primary markers, and opaque identities.
+- Added searchable project selection, backend-order preservation, Primary preference, sole-choice selection, and completion through the existing typed project input.
+- Corrected both launch forms so an empty HTML select value does not resolve to numeric option index zero and implicitly choose the first item.
+
+## Step 11 verification results
+
+- Projects backend tests and Clippy with warnings denied pass. The production Projects frontend build and widget preparation pass.
+- User playtest confirmed the Project Brief launch form and resulting widget flow.
+
 ## Excluded
 
 - Pi assistant extension and delegated-agent orchestration.

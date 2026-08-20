@@ -1,0 +1,98 @@
+:host {
+  display: block;
+  height: 100%;
+  color: var(--dashboardd-color-text);
+}
+
+form {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px;
+  background: var(--dashboardd-color-canvas);
+}
+
+label {
+  display: grid;
+  gap: 6px;
+  color: var(--dashboardd-color-text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+input,
+select {
+  width: 100%;
+  border: 1px solid var(--dashboardd-color-border);
+  border-radius: 7px;
+  outline: none;
+  background: var(--dashboardd-color-surface);
+  color: var(--dashboardd-color-text-bright);
+  font: inherit;
+}
+
+input {
+  height: 38px;
+  padding: 0 10px;
+}
+
+select {
+  min-height: 38px;
+  padding: 8px;
+}
+
+.projects {
+  min-height: 220px;
+}
+
+:is(input, select):focus {
+  border-color: var(--dashboardd-color-accent);
+}
+
+:is(input, select):disabled {
+  opacity: 0.55;
+}
+
+.hint,
+.error {
+  margin: 0;
+  font-size: 12px;
+}
+
+.hint {
+  color: var(--dashboardd-color-text-dim);
+}
+
+.error {
+  color: var(--dashboardd-color-danger);
+}
+
+footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: auto;
+}
+
+button {
+  min-width: 84px;
+  height: 36px;
+  border: 1px solid var(--dashboardd-color-border);
+  border-radius: 7px;
+  background: var(--dashboardd-color-surface);
+  color: var(--dashboardd-color-text);
+  cursor: pointer;
+  font: inherit;
+}
+
+button.primary {
+  border-color: var(--dashboardd-color-accent);
+  background: var(--dashboardd-color-accent);
+  color: var(--dashboardd-color-canvas);
+}
+
+button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}

@@ -210,6 +210,7 @@ export function mount(
   }
 
   function selectedTask(): Task | undefined {
+    if (!task.value) return undefined;
     const index = Number(task.value);
     return Number.isInteger(index) ? visibleTasks[index] : undefined;
   }

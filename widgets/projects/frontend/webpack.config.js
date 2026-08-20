@@ -4,6 +4,7 @@ module.exports = (_env, argv) => ({
   entry: {
     pulse: "./src/pulse.ts",
     brief: "./src/brief.ts",
+    "brief-launcher": "./src/brief-launcher.ts",
   },
   output: {
     path: path.resolve(__dirname, "dist"),

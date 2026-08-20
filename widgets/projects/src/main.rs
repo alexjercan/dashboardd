@@ -95,6 +95,13 @@ struct ProjectListItem {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+struct ProjectLaunchItem {
+    project_id: String,
+    project: String,
+    worktrees: Vec<WorktreeDescriptor>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 struct Change {
     path: String,
     kind: String,
@@ -166,6 +173,7 @@ enum Runtime {
         instance_id: String,
         settings: Settings,
         discovery: DiscoveryCache,
+        launch_requested: bool,
         views: HashMap<String, ProjectView>,
     },
 }
@@ -211,6 +219,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 instance_id,
                                 settings,
                                 discovery: DiscoveryCache::default(),
+                                launch_requested: false,
                                 views: HashMap::new(),
                             }),
                             (Ok(_), _) => write_error(&mut stdout, Some(instance_id), "invalid_variant", "unsupported Projects variant".into()).await?,
@@ -333,7 +342,15 @@ fn handle_command(runtime: &mut Runtime, payload: &Value) -> bool {
                 _ => false,
             }
         }
-        Runtime::Project { views, .. } => {
+        Runtime::Project {
+            launch_requested,
+            views,
+            ..
+        } => {
+            if command == "launch_catalog" {
+                *launch_requested = true;
+                return true;
+            }
             let Some(view_id) = valid_identifier(payload.get("view_id")) else {
                 return false;
             };
@@ -480,9 +497,21 @@ async fn publish_runtime<W: AsyncWrite + Unpin>(
             instance_id,
             settings,
             discovery,
+            launch_requested,
             views,
         } => {
             refresh_discovery(settings, discovery, false).await;
+            if std::mem::take(launch_requested) {
+                let projects = launch_catalog(&discovery.projects);
+                write_message(
+                    stdout,
+                    WidgetToServer::Update {
+                        instance_id: instance_id.clone(),
+                        payload: json!({ "kind": "launch_catalog", "projects": projects }),
+                    },
+                )
+                .await?;
+            }
             let due = views
                 .iter()
                 .filter(|(_, view)| Instant::now() >= view.next_refresh)
@@ -532,6 +561,25 @@ async fn publish_runtime<W: AsyncWrite + Unpin>(
         }
     }
     Ok(())
+}
+
+fn launch_catalog(projects: &[ProjectGroup]) -> Vec<ProjectLaunchItem> {
+    projects
+        .iter()
+        .map(|project| ProjectLaunchItem {
+            project_id: project.id.clone(),
+            project: project.name.clone(),
+            worktrees: project
+                .worktrees
+                .iter()
+                .map(|worktree| WorktreeDescriptor {
+                    worktree_id: worktree.worktree_id.clone(),
+                    worktree: worktree.worktree.clone(),
+                    primary: worktree.primary,
+                })
+                .collect(),
+        })
+        .collect()
 }
 
 async fn refresh_discovery(settings: &Settings, cache: &mut DiscoveryCache, force: bool) {
@@ -1613,12 +1661,10 @@ mod tests {
         assert_eq!(groups[0].worktrees.len(), 2);
         assert_eq!(groups[0].worktrees[0].worktree, "Primary");
         assert_eq!(groups[0].worktrees[1].worktree, "feature/worktree");
-        let descriptor = serde_json::to_string(&WorktreeDescriptor {
-            worktree_id: groups[0].worktrees[1].worktree_id.clone(),
-            worktree: groups[0].worktrees[1].worktree.clone(),
-            primary: false,
-        })
-        .unwrap();
+        let catalog = launch_catalog(&groups);
+        assert_eq!(catalog[0].project, "sample");
+        assert_eq!(catalog[0].worktrees.len(), 2);
+        let descriptor = serde_json::to_string(&catalog).unwrap();
         assert!(!descriptor.contains(root.to_string_lossy().as_ref()));
         fs::remove_dir_all(root).unwrap();
     }
@@ -1643,8 +1689,13 @@ mod tests {
             instance_id: "projects-1".into(),
             settings,
             discovery: DiscoveryCache::default(),
+            launch_requested: false,
             views: HashMap::new(),
         };
+        assert!(handle_command(
+            &mut runtime,
+            &json!({"command": "launch_catalog"})
+        ));
         assert!(handle_command(
             &mut runtime,
             &json!({
