@@ -16,7 +16,6 @@ use tokio::{
     sync::{Mutex, broadcast, mpsc},
     task::JoinHandle,
 };
-use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::{
@@ -26,7 +25,7 @@ use crate::{
     widget::WidgetConfig,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Instance {
     pub id: InstanceId,
     pub widget_id: WidgetId,
@@ -35,7 +34,7 @@ pub struct Instance {
     pub inputs: BTreeMap<String, TypedInput>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TypedInput {
     #[serde(rename = "type")]
@@ -78,6 +77,8 @@ struct WidgetBackend {
 
 #[derive(Debug, Error)]
 pub enum InstanceError {
+    #[error("widget was not found")]
+    UnknownWidget,
     #[error("instance was not found")]
     UnknownInstance,
     #[error("widget variant was not found")]

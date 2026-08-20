@@ -1,5 +1,7 @@
 //! The dashboard daemon entry point.
 
+mod api;
+
 use std::{
     env,
     error::Error,
@@ -73,7 +75,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let config = Config::from_environment()?;
     let runtime = Runtime::start(RuntimeConfig {
         widget_roots: config.widget_roots.clone(),
-        web_dir: config.web_dir.clone(),
         state_file: config.state_file.clone(),
         config_file: config.config_file.clone(),
     })
@@ -86,8 +87,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let listener = bind_listener(&config)?;
     let address = listener.local_addr()?;
-    let app = runtime.router();
     let shutdown = runtime.shutdown_handle();
+    let app = api::build_router(runtime.handle(), config.web_dir.clone(), shutdown.clone());
 
     info!(%address, docs = %format!("http://{address}/docs"), "dashboardd listening");
     axum::serve(TokioTcpListener::from_std(listener)?, app)

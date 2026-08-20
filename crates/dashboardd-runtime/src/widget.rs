@@ -10,9 +10,8 @@ use std::{
 use dashboardd_widget_protocol::WidgetId;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use utoipa::ToSchema;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WidgetVariant {
     pub id: String,
     pub name: String,
@@ -22,7 +21,7 @@ pub struct WidgetVariant {
     pub focus: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WidgetDescriptor {
     pub id: WidgetId,
     pub name: String,
@@ -33,7 +32,7 @@ pub struct WidgetDescriptor {
     pub outputs: Vec<WidgetLinkPort>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WidgetLinkPort {
     pub id: String,
     pub name: String,
@@ -44,7 +43,7 @@ pub struct WidgetLinkPort {
     pub required: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WidgetOption {
     pub id: String,
     pub name: String,
@@ -55,7 +54,7 @@ pub struct WidgetOption {
     pub kind: WidgetOptionKind,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum WidgetOptionKind {
     Boolean,
@@ -73,7 +72,7 @@ pub enum WidgetOptionKind {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WidgetOptionChoice {
     pub value: String,
     pub name: String,

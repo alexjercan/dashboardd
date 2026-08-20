@@ -131,6 +131,10 @@
             '';
           };
         in {
+          rust-project.src = lib.cleanSourceWith {
+            src = ./.;
+            filter = config.rust-project.crane-lib.filterCargoSources;
+          };
           rust-project.crates.projects.crane.args.nativeBuildInputs = [ pkgs.git ];
           rust-project.crates.tatr-tasks.crane.args.nativeBuildInputs = [ pkgs.git ];
 
@@ -153,9 +157,6 @@
             nativeBuildInputs = [ dashboardd pkgs.curl pkgs.jq widgetTool ];
           } ''
             test -f ${dashboardd}/share/dashboardd/web/index.html
-            test -f ${dashboardd}/share/dashboardd/web/surface.html
-            test -f ${dashboardd}/share/dashboardd/web/surface.js
-            test -f ${dashboardd}/share/dashboardd/web/surface.css
             for bundle in ${dashboardd}/share/dashboardd/widgets/*; do
               dashboardd-widget check "$bundle"
             done

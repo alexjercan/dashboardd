@@ -7,7 +7,6 @@ use dashboardd_widget_protocol::InstanceId;
 use serde::{Deserialize, Serialize};
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use tokio::sync::broadcast;
-use utoipa::ToSchema;
 
 use crate::event::RuntimeEvent;
 
@@ -16,7 +15,7 @@ pub const STALE_AFTER: Duration = Duration::from_secs(30);
 const MAX_ERROR_CODE_BYTES: usize = 64;
 const MAX_ERROR_MESSAGE_BYTES: usize = 512;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HealthStatus {
     Starting,
@@ -26,14 +25,14 @@ pub enum HealthStatus {
     Failed,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HealthError {
     pub code: String,
     pub message: String,
     pub at: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InstanceHealth {
     pub instance_id: InstanceId,
     pub status: HealthStatus,

@@ -1,6 +1,5 @@
-//! Reusable widget discovery, instance lifecycle, state, and HTTP runtime.
+//! Reusable transport-free widget runtime.
 
-mod api;
 mod configuration;
 mod event;
 mod health;
@@ -8,24 +7,31 @@ mod instance;
 mod state;
 mod widget;
 
-use std::{path::PathBuf, sync::Arc};
+use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
 
-use axum::Router;
+use serde_json::Value;
 use thiserror::Error;
 use tokio::{sync::broadcast, task::JoinHandle};
 
 use configuration::ThemeManager;
-use instance::{InstanceError, InstanceManager};
+use instance::InstanceManager;
 use state::StateStore;
 use widget::WidgetsManager;
+
+pub use configuration::{Theme, ThemeFonts};
+pub use event::{RuntimeErrorData, RuntimeEvent};
+pub use health::{HealthError, HealthStatus, InstanceHealth};
+pub use instance::{CreateInstanceSpec, Instance, InstanceError, TypedInput};
+pub use widget::{
+    WidgetDescriptor, WidgetLinkPort, WidgetOption, WidgetOptionChoice, WidgetOptionKind,
+    WidgetVariant,
+};
 
 /// Filesystem inputs required to start a runtime.
 #[derive(Debug, Clone)]
 pub struct RuntimeConfig {
     /// Directories containing prepared widget bundles.
     pub widget_roots: Vec<PathBuf>,
-    /// Directory containing the built dashboard web application.
-    pub web_dir: PathBuf,
     /// Durable package-wide widget state file.
     pub state_file: PathBuf,
     /// User configuration file watched for updates.
@@ -41,8 +47,8 @@ pub enum RuntimeError {
     /// User configuration loading or validation failed.
     #[error("{0}")]
     Configuration(String),
-    /// Persisted dashboard state restoration failed.
-    #[error("failed to load dashboard state {}: {source}", path.display())]
+    /// Persisted runtime state restoration failed.
+    #[error("failed to load runtime state {}: {source}", path.display())]
     StateRestore {
         /// State file that could not be restored.
         path: PathBuf,
@@ -52,13 +58,12 @@ pub enum RuntimeError {
     },
 }
 
+/// A cloneable handle for direct runtime operations.
 #[derive(Clone)]
-struct AppState {
+pub struct RuntimeHandle {
     widgets: WidgetsManager,
     instances: InstanceManager,
     themes: ThemeManager,
-    web_dir: PathBuf,
-    shutdown: broadcast::Sender<()>,
 }
 
 /// A cloneable request handle for graceful runtime shutdown.
@@ -68,15 +73,21 @@ pub struct ShutdownHandle {
 }
 
 impl ShutdownHandle {
-    /// Notifies HTTP streams and background tasks to stop.
+    /// Notifies transport hosts and background tasks to stop.
     pub fn request(&self) {
         let _ = self.sender.send(());
     }
+
+    /// Subscribes a transport host to runtime shutdown requests.
+    pub fn subscribe(&self) -> broadcast::Receiver<()> {
+        self.sender.subscribe()
+    }
 }
 
-/// A running in-process widget runtime.
+/// An owned in-process widget runtime.
 pub struct Runtime {
-    state: AppState,
+    handle: RuntimeHandle,
+    shutdown: broadcast::Sender<()>,
     configuration_task: JoinHandle<()>,
 }
 
@@ -99,47 +110,178 @@ impl Runtime {
                 path: config.state_file,
                 source,
             })?;
-        let state = AppState {
+        let handle = RuntimeHandle {
             widgets,
             instances,
             themes,
-            web_dir: config.web_dir,
-            shutdown,
         };
         let configuration_task = configuration::watch(
             config.config_file,
-            state.themes.clone(),
-            state.instances.clone(),
-            state.shutdown.subscribe(),
+            handle.themes.clone(),
+            handle.instances.clone(),
+            shutdown.subscribe(),
         );
         Ok(Self {
-            state,
+            handle,
+            shutdown,
             configuration_task,
         })
     }
 
-    /// Returns the number of discovered widget bundles.
-    pub fn widget_count(&self) -> usize {
-        self.state.widgets.len()
+    /// Returns a cloneable direct-operation handle.
+    pub fn handle(&self) -> RuntimeHandle {
+        self.handle.clone()
     }
 
-    /// Builds the global runtime HTTP API and static-file router.
-    pub fn router(&self) -> Router {
-        api::build_router(self.state.clone())
+    /// Returns the number of discovered widget bundles.
+    pub fn widget_count(&self) -> usize {
+        self.handle.widget_count()
     }
 
     /// Returns a handle used to request graceful runtime shutdown.
     pub fn shutdown_handle(&self) -> ShutdownHandle {
         ShutdownHandle {
-            sender: self.state.shutdown.clone(),
+            sender: self.shutdown.clone(),
         }
     }
 
     /// Stops widget backends and configuration watching.
     pub async fn shutdown(self) {
-        let _ = self.state.shutdown.send(());
-        self.state.instances.shutdown_all().await;
+        let _ = self.shutdown.send(());
+        self.handle.instances.shutdown_all().await;
         let _ = self.configuration_task.await;
+    }
+}
+
+impl RuntimeHandle {
+    /// Returns the number of installed widgets.
+    pub fn widget_count(&self) -> usize {
+        self.widgets.len()
+    }
+
+    /// Lists installed widget descriptors.
+    pub fn widgets(&self) -> Vec<WidgetDescriptor> {
+        self.widgets.list()
+    }
+
+    /// Returns one installed widget descriptor.
+    pub fn widget(&self, widget_id: &str) -> Option<WidgetDescriptor> {
+        self.widgets
+            .get(widget_id)
+            .map(|config| config.descriptor.clone())
+    }
+
+    /// Returns the validated frontend path for one widget variant.
+    pub fn widget_frontend(
+        &self,
+        widget_id: &str,
+        variant_id: &str,
+    ) -> Result<PathBuf, InstanceError> {
+        let config = self
+            .widgets
+            .get(widget_id)
+            .ok_or(InstanceError::UnknownWidget)?;
+        config
+            .frontend(variant_id)
+            .map(PathBuf::from)
+            .ok_or(InstanceError::UnknownVariant)
+    }
+
+    /// Returns the current effective theme.
+    pub fn theme(&self) -> Theme {
+        self.themes.current()
+    }
+
+    /// Subscribes to runtime domain events.
+    pub fn subscribe(&self) -> broadcast::Receiver<RuntimeEvent> {
+        self.instances.subscribe()
+    }
+
+    /// Lists all memory-only runtime instances.
+    pub async fn instances(&self) -> Vec<Instance> {
+        self.instances.list().await
+    }
+
+    /// Creates one memory-only runtime instance.
+    pub async fn create_instance(
+        &self,
+        widget_id: &str,
+        spec: CreateInstanceSpec,
+    ) -> Result<Instance, InstanceError> {
+        let config = self
+            .widgets
+            .get(widget_id)
+            .ok_or(InstanceError::UnknownWidget)?;
+        self.instances.create(config, spec).await
+    }
+
+    /// Returns one runtime instance.
+    pub async fn instance(&self, instance_id: &str) -> Result<Instance, InstanceError> {
+        self.instances.get(instance_id).await
+    }
+
+    /// Deletes one runtime instance and stops its backend.
+    pub async fn delete_instance(&self, instance_id: &str) -> Result<(), InstanceError> {
+        self.instances.destroy(instance_id).await
+    }
+
+    /// Replaces the complete direct-input map for one instance.
+    pub async fn set_instance_inputs(
+        &self,
+        instance_id: &str,
+        inputs: BTreeMap<String, TypedInput>,
+    ) -> Result<Instance, InstanceError> {
+        self.instances.set_inputs(instance_id, inputs).await
+    }
+
+    /// Lists health for all runtime instances.
+    pub async fn instance_health(&self) -> Vec<InstanceHealth> {
+        self.instances.list_health().await
+    }
+
+    /// Returns health for one runtime instance.
+    pub async fn health(&self, instance_id: &str) -> Result<InstanceHealth, InstanceError> {
+        self.instances.health(instance_id).await
+    }
+
+    /// Restarts one runtime instance backend.
+    pub async fn restart_instance(
+        &self,
+        instance_id: &str,
+    ) -> Result<InstanceHealth, InstanceError> {
+        self.instances.restart(instance_id).await
+    }
+
+    /// Sends one opaque command to a widget backend.
+    pub async fn send_message(
+        &self,
+        instance_id: &str,
+        payload: Value,
+    ) -> Result<(), InstanceError> {
+        self.instances.send(instance_id, payload).await
+    }
+
+    /// Returns package-wide shared state for one installed widget.
+    pub fn widget_state(&self, widget_id: &str) -> Result<(u64, Value), InstanceError> {
+        if self.widgets.get(widget_id).is_none() {
+            return Err(InstanceError::UnknownWidget);
+        }
+        Ok(self.instances.get_widget_state(widget_id))
+    }
+
+    /// Applies one revision-checked package-wide shared-state update.
+    pub async fn set_widget_state(
+        &self,
+        widget_id: &str,
+        revision: u64,
+        value: Value,
+    ) -> Result<(u64, Value), InstanceError> {
+        if self.widgets.get(widget_id).is_none() {
+            return Err(InstanceError::UnknownWidget);
+        }
+        self.instances
+            .set_widget_state(widget_id, revision, value)
+            .await
     }
 }
 
@@ -147,47 +289,32 @@ impl Runtime {
 mod tests {
     use std::{fs, process};
 
-    use axum::{body::Body, http::Request};
-    use tower::ServiceExt;
-
     use super::*;
 
     #[tokio::test]
-    async fn facade_starts_serves_and_stops_an_empty_runtime() {
+    async fn facade_starts_exposes_direct_operations_and_stops() {
         let root = std::env::temp_dir().join(format!(
             "dashboardd-runtime-facade-{}-{}",
             process::id(),
             std::thread::current().name().unwrap_or("test")
         ));
         fs::create_dir_all(&root).unwrap();
-        fs::write(root.join("index.html"), "runtime test").unwrap();
-        fs::write(root.join("surface.html"), "surface test").unwrap();
         let runtime = Runtime::start(RuntimeConfig {
             widget_roots: Vec::new(),
-            web_dir: root.clone(),
             state_file: root.join("state.json"),
             config_file: root.join("config.toml"),
         })
         .await
         .unwrap();
 
-        assert_eq!(runtime.widget_count(), 0);
-        let response = runtime
-            .router()
-            .oneshot(Request::get("/health").body(Body::empty()).unwrap())
-            .await
-            .unwrap();
-        assert_eq!(response.status(), 200);
-        let response = runtime
-            .router()
-            .oneshot(
-                Request::get("/surface/instance-test")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.status(), 200);
+        let handle = runtime.handle();
+        assert_eq!(handle.widget_count(), 0);
+        assert!(handle.widgets().is_empty());
+        assert!(handle.instances().await.is_empty());
+        assert!(matches!(
+            handle.instance("missing").await,
+            Err(InstanceError::UnknownInstance)
+        ));
 
         runtime.shutdown().await;
         fs::remove_dir_all(root).unwrap();

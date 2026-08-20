@@ -23,14 +23,14 @@ nix flake check
 
 ## Rust workspace map
 
-- `dashboardd-runtime` - reusable widget runtime, instance lifecycle, state, events, health, and HTTP router.
+- `dashboardd-runtime` - transport-free widget discovery, instance lifecycle, state, events, health, and direct Rust operations.
 - `dashboardd-server` - default HTTP host. Installs the `dashboardd` binary.
 - `dashboardd-desktop` - Tauri tray service and native window host.
 - `dashboardd-desktop-control` - desktop control protocol library and `dashboardctl` binary.
 - `dashboardd-widget-protocol` - JSON-line contract shared by the runtime and widget backends.
 - `dashboardd-widget-bundle` - widget bundle packing and validation library. Installs the `dashboardd-widget` binary.
 
-`dashboardd-server` and `dashboardd-desktop` host `dashboardd-runtime`. Widget backends depend only on `dashboardd-widget-protocol`. The Tauri host and `dashboardctl` share only `dashboardd-desktop-control`.
+`dashboardd-server` owns the HTTP API and browser assets. `dashboardd-server` and `dashboardd-desktop` host `dashboardd-runtime` through direct Rust operations. Widget backends depend only on `dashboardd-widget-protocol`. The Tauri host and `dashboardctl` share only `dashboardd-desktop-control`.
 
 ## Common commands
 

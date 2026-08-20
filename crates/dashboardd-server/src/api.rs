@@ -1,6 +1,6 @@
 //! Global runtime HTTP resources, SSE stream, and OpenAPI documentation.
 
-use std::{collections::BTreeMap, convert::Infallible, time::Duration};
+use std::{collections::BTreeMap, convert::Infallible, path::PathBuf, time::Duration};
 
 use axum::{
     Json, Router,
@@ -11,6 +11,10 @@ use axum::{
     },
     response::{IntoResponse, Response, Sse, sse::Event, sse::KeepAlive},
     routing::{get, post, put},
+};
+use dashboardd_runtime::{
+    CreateInstanceSpec, Instance, InstanceError, InstanceHealth, RuntimeEvent, RuntimeHandle,
+    ShutdownHandle, Theme, TypedInput, WidgetDescriptor,
 };
 use dashboardd_widget_protocol::{InstanceId, WidgetId};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -23,26 +27,39 @@ use tower_http::{
 use utoipa::{OpenApi, ToSchema};
 use utoipa_swagger_ui::SwaggerUi;
 
-use crate::{
-    AppState,
-    configuration::Theme,
-    event::{self, RuntimeErrorData, RuntimeEvent},
-    health::InstanceHealth,
-    instance::{CreateInstanceSpec, Instance, InstanceError, TypedInput},
-    widget::{WidgetDescriptor, WidgetLinkPort, WidgetVariant},
-};
+const EVENT_VERSION: u16 = 3;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Serialize)]
+struct EventEnvelope<T> {
+    version: u16,
+    #[serde(flatten)]
+    event: T,
+}
+
+fn serialize_event(event: RuntimeEvent) -> Result<String, serde_json::Error> {
+    serde_json::to_string(&EventEnvelope {
+        version: EVENT_VERSION,
+        event,
+    })
+}
+
+#[derive(Clone)]
+pub struct AppState {
+    runtime: RuntimeHandle,
+    shutdown: ShutdownHandle,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WidgetList {
     pub widgets: Vec<WidgetDescriptor>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InstanceList {
     pub instances: Vec<Instance>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InstanceHealthList {
     pub instances: Vec<InstanceHealth>,
 }
@@ -55,18 +72,147 @@ pub struct CreateInstance {
     #[serde(default)]
     pub options: BTreeMap<String, Value>,
     #[serde(default)]
-    pub inputs: BTreeMap<String, TypedInput>,
+    pub inputs: BTreeMap<String, InputValue>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct InputValue {
+    #[serde(rename = "type")]
+    pub input_type: String,
+    pub value: Value,
+}
+
+impl From<InputValue> for TypedInput {
+    fn from(input: InputValue) -> Self {
+        Self {
+            input_type: input.input_type,
+            value: input.value,
+        }
+    }
+}
+
+#[allow(dead_code)]
+#[derive(ToSchema)]
+pub struct ThemeFontsSchema {
+    pub sans: String,
+    pub mono: String,
+}
+
+#[allow(dead_code)]
+#[derive(ToSchema)]
+pub struct ThemeSchema {
+    pub fonts: ThemeFontsSchema,
+    pub canvas: String,
+    pub surface: String,
+    pub selection: String,
+    pub text: String,
+    pub text_bright: String,
+    pub text_muted: String,
+    pub text_dim: String,
+    pub accent: String,
+    pub border: String,
+    pub success: String,
+    pub danger: String,
+    pub secondary: String,
+}
+
+#[allow(dead_code)]
+#[derive(ToSchema)]
+pub struct WidgetVariantSchema {
+    pub id: String,
+    pub name: String,
+    pub width: u32,
+    pub height: u32,
+    pub frontend_url: String,
+    pub focus: bool,
+}
+
+#[allow(dead_code)]
+#[derive(ToSchema)]
+pub struct WidgetPortSchema {
+    pub id: String,
+    pub name: String,
+    #[schema(rename = "type")]
+    pub port_type: String,
+    pub variants: Vec<String>,
+    pub required: bool,
+}
+
+#[allow(dead_code)]
+#[derive(ToSchema)]
+pub struct WidgetDescriptorSchema {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub variants: Vec<WidgetVariantSchema>,
+    pub options: Vec<Value>,
+    pub inputs: Vec<WidgetPortSchema>,
+    pub outputs: Vec<WidgetPortSchema>,
+}
+
+#[allow(dead_code)]
+#[derive(ToSchema)]
+pub struct WidgetListSchema {
+    pub widgets: Vec<WidgetDescriptorSchema>,
+}
+
+#[allow(dead_code)]
+#[derive(ToSchema)]
+pub struct InstanceSchema {
+    pub id: String,
+    pub widget_id: String,
+    pub variant_id: String,
+    pub options: BTreeMap<String, Value>,
+    pub inputs: BTreeMap<String, InputValue>,
+}
+
+#[allow(dead_code)]
+#[derive(ToSchema)]
+pub struct InstanceListSchema {
+    pub instances: Vec<InstanceSchema>,
+}
+
+#[allow(dead_code)]
+#[derive(ToSchema)]
+pub struct HealthErrorSchema {
+    pub code: String,
+    pub message: String,
+    pub at: String,
+}
+
+#[allow(dead_code)]
+#[derive(ToSchema)]
+pub struct InstanceHealthSchema {
+    pub instance_id: String,
+    pub status: String,
+    pub started_at: String,
+    pub last_update_at: Option<String>,
+    pub last_error: Option<HealthErrorSchema>,
+    pub restart_count: u64,
+}
+
+#[allow(dead_code)]
+#[derive(ToSchema)]
+pub struct InstanceHealthListSchema {
+    pub instances: Vec<InstanceHealthSchema>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SetInstanceInputs {
-    pub inputs: BTreeMap<String, TypedInput>,
+    pub inputs: BTreeMap<String, InputValue>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct ErrorResponse {
-    pub error: RuntimeErrorData,
+    pub error: ErrorData,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ErrorData {
+    pub code: String,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -105,22 +251,23 @@ pub struct SetWidgetState {
     ),
     components(schemas(
         CreateInstance,
+        InputValue,
         ErrorResponse,
-        RuntimeErrorData,
-        RuntimeEvent,
-        Theme,
-        Instance,
-        InstanceList,
-        InstanceHealth,
-        InstanceHealthList,
-        WidgetDescriptor,
-        WidgetLinkPort,
+        ErrorData,
         WidgetStateResource,
         SetWidgetState,
         SetInstanceInputs,
-        TypedInput,
-        WidgetList,
-        WidgetVariant,
+        ThemeFontsSchema,
+        ThemeSchema,
+        WidgetVariantSchema,
+        WidgetPortSchema,
+        WidgetDescriptorSchema,
+        WidgetListSchema,
+        InstanceSchema,
+        InstanceListSchema,
+        HealthErrorSchema,
+        InstanceHealthSchema,
+        InstanceHealthListSchema,
     )),
     tags(
         (name = "widgets", description = "Read-only installed widget definitions"),
@@ -130,10 +277,9 @@ pub struct SetWidgetState {
 )]
 struct ApiDoc;
 
-pub fn build_router(state: AppState) -> Router {
-    let index = state.web_dir.join("index.html");
-    let surface = state.web_dir.join("surface.html");
-    let web_dir = state.web_dir.clone();
+pub fn build_router(runtime: RuntimeHandle, web_dir: PathBuf, shutdown: ShutdownHandle) -> Router {
+    let index = web_dir.join("index.html");
+    let state = AppState { runtime, shutdown };
     Router::new()
         .route("/health", get(health))
         .route("/api/v1/theme", get(get_theme))
@@ -169,7 +315,6 @@ pub fn build_router(state: AppState) -> Router {
             post(send_widget_message),
         )
         .route("/api/v1/events", get(runtime_events))
-        .route_service("/surface/{instance_id}", ServeFile::new(surface))
         .route_service("/d/{dashboard_id}", ServeFile::new(index.clone()))
         .route_service("/d/{dashboard_id}/edit", ServeFile::new(index.clone()))
         .route_service(
@@ -191,54 +336,54 @@ async fn health() -> StatusCode {
     StatusCode::OK
 }
 
-#[utoipa::path(get, path = "/api/v1/theme", responses((status = 200, body = Theme)))]
+#[utoipa::path(get, path = "/api/v1/theme", responses((status = 200, body = ThemeSchema)))]
 async fn get_theme(State(state): State<AppState>) -> Json<Theme> {
-    Json(state.themes.current())
+    Json(state.runtime.theme())
 }
 
-#[utoipa::path(get, path = "/api/v1/widgets", tag = "widgets", responses((status = 200, body = WidgetList)))]
+#[utoipa::path(get, path = "/api/v1/widgets", tag = "widgets", responses((status = 200, body = WidgetListSchema)))]
 async fn list_widgets(State(state): State<AppState>) -> Json<WidgetList> {
     Json(WidgetList {
-        widgets: state.widgets.list(),
+        widgets: state.runtime.widgets(),
     })
 }
 
-#[utoipa::path(get, path = "/api/v1/widgets/{widget_id}", tag = "widgets", responses((status = 200, body = WidgetDescriptor), (status = 404, body = ErrorResponse)))]
+#[utoipa::path(get, path = "/api/v1/widgets/{widget_id}", tag = "widgets", responses((status = 200, body = WidgetDescriptorSchema), (status = 404, body = ErrorResponse)))]
 async fn get_widget(
     AxumPath(widget_id): AxumPath<WidgetId>,
     State(state): State<AppState>,
 ) -> Result<Json<WidgetDescriptor>, ApiError> {
     state
-        .widgets
-        .get(&widget_id)
-        .map(|config| Json(config.descriptor.clone()))
+        .runtime
+        .widget(&widget_id)
+        .map(Json)
         .ok_or_else(ApiError::unknown_widget)
 }
 
-#[utoipa::path(get, path = "/api/v1/instances", tag = "instances", responses((status = 200, body = InstanceList)))]
+#[utoipa::path(get, path = "/api/v1/instances", tag = "instances", responses((status = 200, body = InstanceListSchema)))]
 async fn list_instances(State(state): State<AppState>) -> Json<InstanceList> {
     Json(InstanceList {
-        instances: state.instances.list().await,
+        instances: state.runtime.instances().await,
     })
 }
 
-#[utoipa::path(post, path = "/api/v1/instances", tag = "instances", request_body = CreateInstance, responses((status = 201, body = Instance), (status = 400, body = ErrorResponse), (status = 404, body = ErrorResponse), (status = 500, body = ErrorResponse)))]
+#[utoipa::path(post, path = "/api/v1/instances", tag = "instances", request_body = CreateInstance, responses((status = 201, body = InstanceSchema), (status = 400, body = ErrorResponse), (status = 404, body = ErrorResponse), (status = 500, body = ErrorResponse)))]
 async fn create_instance(
     State(state): State<AppState>,
     ApiJson(request): ApiJson<CreateInstance>,
 ) -> Result<Response, ApiError> {
-    let config = state
-        .widgets
-        .get(&request.widget_id)
-        .ok_or_else(ApiError::unknown_widget)?;
     let instance = state
-        .instances
-        .create(
-            config,
+        .runtime
+        .create_instance(
+            &request.widget_id,
             CreateInstanceSpec {
                 variant_id: request.variant_id,
                 options: request.options,
-                inputs: request.inputs,
+                inputs: request
+                    .inputs
+                    .into_iter()
+                    .map(|(id, input)| (id, input.into()))
+                    .collect(),
             },
         )
         .await?;
@@ -253,12 +398,12 @@ async fn create_instance(
         .into_response())
 }
 
-#[utoipa::path(get, path = "/api/v1/instances/{instance_id}", tag = "instances", responses((status = 200, body = Instance), (status = 404, body = ErrorResponse)))]
+#[utoipa::path(get, path = "/api/v1/instances/{instance_id}", tag = "instances", responses((status = 200, body = InstanceSchema), (status = 404, body = ErrorResponse)))]
 async fn get_instance(
     AxumPath(instance_id): AxumPath<InstanceId>,
     State(state): State<AppState>,
 ) -> Result<Json<Instance>, ApiError> {
-    Ok(Json(state.instances.get(&instance_id).await?))
+    Ok(Json(state.runtime.instance(&instance_id).await?))
 }
 
 #[utoipa::path(delete, path = "/api/v1/instances/{instance_id}", tag = "instances", responses((status = 204), (status = 404, body = ErrorResponse)))]
@@ -266,34 +411,34 @@ async fn delete_instance(
     AxumPath(instance_id): AxumPath<InstanceId>,
     State(state): State<AppState>,
 ) -> Result<StatusCode, ApiError> {
-    state.instances.destroy(&instance_id).await?;
+    state.runtime.delete_instance(&instance_id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[utoipa::path(get, path = "/api/v1/instance-health", tag = "instances", responses((status = 200, body = InstanceHealthList)))]
+#[utoipa::path(get, path = "/api/v1/instance-health", tag = "instances", responses((status = 200, body = InstanceHealthListSchema)))]
 async fn list_instance_health(State(state): State<AppState>) -> Json<InstanceHealthList> {
     Json(InstanceHealthList {
-        instances: state.instances.list_health().await,
+        instances: state.runtime.instance_health().await,
     })
 }
 
-#[utoipa::path(get, path = "/api/v1/instances/{instance_id}/health", tag = "instances", responses((status = 200, body = InstanceHealth), (status = 404, body = ErrorResponse)))]
+#[utoipa::path(get, path = "/api/v1/instances/{instance_id}/health", tag = "instances", responses((status = 200, body = InstanceHealthSchema), (status = 404, body = ErrorResponse)))]
 async fn get_instance_health(
     AxumPath(instance_id): AxumPath<InstanceId>,
     State(state): State<AppState>,
 ) -> Result<Json<InstanceHealth>, ApiError> {
-    Ok(Json(state.instances.health(&instance_id).await?))
+    Ok(Json(state.runtime.health(&instance_id).await?))
 }
 
-#[utoipa::path(post, path = "/api/v1/instances/{instance_id}/restart", tag = "instances", responses((status = 200, body = InstanceHealth), (status = 404, body = ErrorResponse)))]
+#[utoipa::path(post, path = "/api/v1/instances/{instance_id}/restart", tag = "instances", responses((status = 200, body = InstanceHealthSchema), (status = 404, body = ErrorResponse)))]
 async fn restart_instance(
     AxumPath(instance_id): AxumPath<InstanceId>,
     State(state): State<AppState>,
 ) -> Result<Json<InstanceHealth>, ApiError> {
-    Ok(Json(state.instances.restart(&instance_id).await?))
+    Ok(Json(state.runtime.restart_instance(&instance_id).await?))
 }
 
-#[utoipa::path(put, path = "/api/v1/instances/{instance_id}/inputs", tag = "instances", request_body = SetInstanceInputs, responses((status = 200, body = Instance), (status = 400, body = ErrorResponse), (status = 404, body = ErrorResponse)))]
+#[utoipa::path(put, path = "/api/v1/instances/{instance_id}/inputs", tag = "instances", request_body = SetInstanceInputs, responses((status = 200, body = InstanceSchema), (status = 400, body = ErrorResponse), (status = 404, body = ErrorResponse)))]
 async fn set_instance_inputs(
     AxumPath(instance_id): AxumPath<InstanceId>,
     State(state): State<AppState>,
@@ -301,8 +446,15 @@ async fn set_instance_inputs(
 ) -> Result<Json<Instance>, ApiError> {
     Ok(Json(
         state
-            .instances
-            .set_inputs(&instance_id, request.inputs)
+            .runtime
+            .set_instance_inputs(
+                &instance_id,
+                request
+                    .inputs
+                    .into_iter()
+                    .map(|(id, input)| (id, input.into()))
+                    .collect(),
+            )
             .await?,
     ))
 }
@@ -313,7 +465,7 @@ async fn send_widget_message(
     State(state): State<AppState>,
     ApiJson(payload): ApiJson<Value>,
 ) -> Result<StatusCode, ApiError> {
-    state.instances.send(&instance_id, payload).await?;
+    state.runtime.send_message(&instance_id, payload).await?;
     Ok(StatusCode::ACCEPTED)
 }
 
@@ -322,10 +474,7 @@ async fn get_widget_state(
     AxumPath(widget_id): AxumPath<WidgetId>,
     State(state): State<AppState>,
 ) -> Result<Json<WidgetStateResource>, ApiError> {
-    if state.widgets.get(&widget_id).is_none() {
-        return Err(ApiError::unknown_widget());
-    }
-    let (revision, value) = state.instances.get_widget_state(&widget_id);
+    let (revision, value) = state.runtime.widget_state(&widget_id)?;
     Ok(Json(WidgetStateResource {
         widget_id,
         revision,
@@ -339,11 +488,8 @@ async fn set_widget_state(
     State(state): State<AppState>,
     ApiJson(request): ApiJson<SetWidgetState>,
 ) -> Result<Json<WidgetStateResource>, ApiError> {
-    if state.widgets.get(&widget_id).is_none() {
-        return Err(ApiError::unknown_widget());
-    }
     let (revision, value) = state
-        .instances
+        .runtime
         .set_widget_state(&widget_id, request.revision, request.value)
         .await?;
     Ok(Json(WidgetStateResource {
@@ -359,9 +505,9 @@ async fn runtime_events(
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     tracing::info!("runtime event stream connected");
     let mut shutdown = state.shutdown.subscribe();
-    let updates = BroadcastStream::new(state.instances.subscribe()).filter_map(|result| {
+    let updates = BroadcastStream::new(state.runtime.subscribe()).filter_map(|result| {
         result.ok().and_then(|event| {
-            event::serialize(event)
+            serialize_event(event)
                 .ok()
                 .map(|data| Ok(Event::default().data(data)))
         })
@@ -383,11 +529,12 @@ async fn widget_frontend(
     AxumPath((widget_id, variant_id)): AxumPath<(WidgetId, String)>,
     State(state): State<AppState>,
 ) -> Response {
-    let Some(config) = state.widgets.get(&widget_id) else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
-    let Some(frontend) = config.frontend(&variant_id) else {
-        return StatusCode::NOT_FOUND.into_response();
+    let frontend = match state.runtime.widget_frontend(&widget_id, &variant_id) {
+        Ok(frontend) => frontend,
+        Err(InstanceError::UnknownWidget | InstanceError::UnknownVariant) => {
+            return StatusCode::NOT_FOUND.into_response();
+        }
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
     match tokio::fs::read_to_string(frontend).await {
         Ok(source) => (
@@ -446,6 +593,7 @@ impl ApiError {
 impl From<InstanceError> for ApiError {
     fn from(error: InstanceError) -> Self {
         let (status, code) = match error {
+            InstanceError::UnknownWidget => (StatusCode::NOT_FOUND, "unknown_widget"),
             InstanceError::UnknownInstance => (StatusCode::NOT_FOUND, "unknown_instance"),
             InstanceError::UnknownVariant => (StatusCode::NOT_FOUND, "unknown_variant"),
             InstanceError::InvalidOptions(_) => (StatusCode::BAD_REQUEST, "invalid_options"),
@@ -478,7 +626,7 @@ impl IntoResponse for ApiError {
         (
             self.status,
             Json(ErrorResponse {
-                error: RuntimeErrorData {
+                error: ErrorData {
                     code: self.code.into(),
                     message: self.message,
                 },
@@ -490,79 +638,71 @@ impl IntoResponse for ApiError {
 
 #[cfg(test)]
 mod tests {
-    use std::{path::PathBuf, sync::Arc};
+    use std::{fs, process};
 
     use axum::{
         body::{Body, to_bytes},
         http::Request,
     };
-    use tokio::sync::broadcast;
+    use dashboardd_runtime::{Runtime, RuntimeConfig};
     use tower::ServiceExt;
 
     use super::*;
-    use crate::{
-        configuration::{Theme, ThemeManager},
-        instance::InstanceManager,
-        state::StateStore,
-        widget::WidgetsManager,
-    };
 
-    fn test_app() -> Router {
-        let store = Arc::new(StateStore::new(std::env::temp_dir().join(format!(
-            "dashboardd-api-state-{}-{}.json",
-            std::process::id(),
+    async fn request(request: Request<Body>) -> Response {
+        let root = std::env::temp_dir().join(format!(
+            "dashboardd-server-api-{}-{}",
+            process::id(),
             std::thread::current().name().unwrap_or("test")
-        ))));
-        build_router(AppState {
-            widgets: WidgetsManager::default(),
-            instances: InstanceManager::empty(store),
-            themes: ThemeManager::new(Theme::default()),
-            web_dir: PathBuf::from("web/dist"),
-            shutdown: broadcast::channel(1).0,
+        ));
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("index.html"), "server test").unwrap();
+        let runtime = Runtime::start(RuntimeConfig {
+            widget_roots: Vec::new(),
+            state_file: root.join("runtime.json"),
+            config_file: root.join("config.toml"),
         })
+        .await
+        .unwrap();
+        let router = build_router(runtime.handle(), root.clone(), runtime.shutdown_handle());
+        let response = router.oneshot(request).await.unwrap();
+        runtime.shutdown().await;
+        fs::remove_dir_all(root).unwrap();
+        response
     }
 
     #[tokio::test]
     async fn global_instance_collection_starts_empty() {
-        let response = test_app()
-            .oneshot(
-                Request::get("/api/v1/instances")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
+        let response = request(
+            Request::get("/api/v1/instances")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
         assert_eq!(response.status(), StatusCode::OK);
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         assert_eq!(body.as_ref(), br#"{"instances":[]}"#);
     }
 
     #[tokio::test]
-    async fn old_dashboard_routes_are_not_resources() {
-        let response = test_app()
-            .oneshot(
-                Request::get("/api/v1/dashboards")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    async fn old_dashboard_and_surface_routes_are_not_resources() {
+        for path in ["/api/v1/dashboards", "/surface/instance-test"] {
+            let response = request(Request::get(path).body(Body::empty()).unwrap()).await;
+            assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
+        }
     }
 
     #[tokio::test]
     async fn rejects_dashboard_composition_fields_on_global_creation() {
-        let response = test_app()
-            .oneshot(
-                Request::post("/api/v1/instances")
-                    .header(CONTENT_TYPE, "application/json")
-                    .body(Body::from(
-                        r#"{"widget_id":"cpu","variant_id":"compact","position":{"column":0,"row":0}}"#,
-                    ))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
+        let response = request(
+            Request::post("/api/v1/instances")
+                .header(CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    r#"{"widget_id":"cpu","variant_id":"compact","position":{"column":0,"row":0}}"#,
+                ))
+                .unwrap(),
+        )
+        .await;
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let error: ErrorResponse = serde_json::from_slice(&body).unwrap();
@@ -571,14 +711,12 @@ mod tests {
 
     #[tokio::test]
     async fn missing_instances_return_consistent_errors() {
-        let response = test_app()
-            .oneshot(
-                Request::get("/api/v1/instances/missing")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
+        let response = request(
+            Request::get("/api/v1/instances/missing")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         assert_eq!(
@@ -589,19 +727,35 @@ mod tests {
 
     #[tokio::test]
     async fn openapi_exposes_global_instances_only() {
-        let response = test_app()
-            .oneshot(
-                Request::get("/api-docs/openapi.json")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
+        let response = request(
+            Request::get("/api-docs/openapi.json")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let document: Value = serde_json::from_slice(&body).unwrap();
         assert!(document["paths"]["/api/v1/instances"].is_object());
         assert!(document["paths"]["/api/v1/instances/{instance_id}/inputs"].is_object());
         assert!(document["paths"]["/api/v1/dashboards"].is_null());
         assert!(document["paths"]["/api/v1/events"].is_object());
+        assert!(document["components"]["schemas"]["InstanceSchema"].is_object());
+        assert!(document["components"]["schemas"]["WidgetDescriptorSchema"].is_object());
+    }
+
+    #[test]
+    fn server_owns_versioned_event_serialization() {
+        let encoded = serialize_event(RuntimeEvent::InstanceDestroyed {
+            instance_id: "instance-1".into(),
+        })
+        .unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&encoded).unwrap(),
+            serde_json::json!({
+                "version": 3,
+                "kind": "instance_destroyed",
+                "data": {"instance_id": "instance-1"}
+            })
+        );
     }
 }

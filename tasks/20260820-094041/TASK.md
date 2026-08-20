@@ -14,6 +14,16 @@ Build the dashboardd-side runtime, standalone surface, and resident Tauri deskto
 - Follow its accepted runtime, input, desktop lifecycle, Unix socket, logging, and window semantics.
 - This task implements dashboardd components only. The Pi assistant and delegated-agent orchestrator belong in a separate repository.
 
+## Architecture correction after Step 5
+
+Accepted correction:
+
+- `dashboardd-runtime` is a transport-free Rust library. It owns widget discovery, instance lifecycle, inputs, health, events, theme configuration, and shared state through direct typed methods. Remove Axum, OpenAPI, static web assets, and `web_dir` from it.
+- `dashboardd-server` exclusively owns the Axum HTTP API, HTTP DTO and error mapping, SSE versioning and serialization, OpenAPI, and Dashboard browser assets.
+- Remove the browser `/surface/{instance_id}` route and its HTTP standalone host. The Dashboard web application does not use it.
+- `dashboardd-desktop` will own the standalone surface HTML, CSS, and JavaScript. Its webviews use narrow typed Tauri commands and events to call the embedded runtime directly. It does not start an HTTP listener or depend on `dashboardd-server`.
+- The previous Step 5 HTTP surface implementation is superseded. Preserve only behavior that moves into the later native desktop surface host.
+
 ## Steps
 
 ### 1. Build the resident desktop lifecycle slice
@@ -32,7 +42,7 @@ Step status: COMPLETE.
 
 ### 2. Extract `dashboardd-runtime`
 
-- Move widget discovery, instance lifecycle, backend supervision, events, health, shared state, and the runtime HTTP API into a reusable Rust library.
+- Move widget discovery, instance lifecycle, backend supervision, events, health, and shared state into a reusable transport-free Rust library. The later architecture correction moves the preserved HTTP API to `dashboardd-server`.
 - Keep `dashboardd` as the browser service binary.
 - Preserve existing browser behavior and checks during extraction.
 
@@ -90,12 +100,12 @@ Accepted contract:
 
 Completion gate: a browser-hosted standalone route displays one live CPU widget without a Dashboard document.
 
-Step status: COMPLETE.
+Step status: SUPERSEDED by the architecture correction and native desktop surface host.
 
 ### 6. Connect desktop windows to real widgets
 
-- Embed `dashboardd-runtime` in `dashboardd-desktop` by default and retain an explicit external-runtime mode.
-- Replace static demo windows with `web/surface` webviews.
+- Embed and own `dashboardd-runtime` in `dashboardd-desktop`; do not provide an external-runtime mode or internal HTTP listener.
+- Replace static demo windows with desktop-owned standalone surface webviews using narrow typed Tauri transport.
 - Implement typed discover, open, update, focus, list, close, and quit control commands.
 - Make every open create a new surface, runtime instance, and native window with a generated surface ID.
 - Delete the runtime instance when its window closes.
@@ -232,6 +242,27 @@ Completion gate: the packaged desktop service starts from rofi, accepts control 
 - All workspace Rust tests pass, including 25 runtime tests. Workspace Clippy passes for all targets with warnings denied.
 - Rust formatting, Prettier formatting, contract tests, external SDK tests, production multi-entry builds, widget preparation, documentation build, and the complete Chromium integration suite pass.
 - Chromium proves live standalone CPU rendering, default Focus and explicit tile presentation, direct input updates, degraded health and Restart, deletion handling, invalid-route rejection, unchanged Dashboard storage, and caller-owned instance lifetime after page close.
+
+## Architecture correction implementation notes
+
+- Removed Axum, tower-http, utoipa, Swagger UI, HTTP event serialization, static web paths, and all HTTP-specific dependencies from `dashboardd-runtime`.
+- Added cloneable `RuntimeHandle` direct operations for widget discovery, frontend resolution, instance CRUD, inputs, health, restart, backend messages, shared state, theme, and domain-event subscriptions.
+- Moved the complete Axum router, request DTOs, error mapping, SSE version 3 envelope, OpenAPI, static Dashboard assets, and browser widget frontend delivery into `dashboardd-server`.
+- Kept the existing browser HTTP wire contract unchanged. Added server-owned schema-only OpenAPI models so transport documentation does not require OpenAPI derives on runtime domain types.
+- Removed the `/surface/{instance_id}` server route, standalone HTTP frontend entry, browser surface tests, package assertions, and documentation. The Dashboard build is single-entry again.
+- Replaced the runtime HTTP facade test with direct-operation coverage. Server tests now own HTTP routing, OpenAPI, SSE serialization, and rejection of Dashboard and surface routes.
+
+## Architecture correction bugs and fixes
+
+- Moving domain structs out of OpenAPI derives initially removed response schemas from generated documentation. Added server-owned schema models that describe the unchanged serialized domain resources.
+- The former runtime error mapping had no domain-level unknown-widget variant because HTTP resolved widgets before calling the manager. Added `InstanceError::UnknownWidget` so direct hosts receive the same typed failure.
+- Rust-flake's filtered `self` default retained invalid store-path context after the crate boundary move. Set `rust-project.src` to an explicit locally filtered source path.
+
+## Architecture correction verification results
+
+- All workspace Rust tests pass: 17 runtime tests and 9 server tests cover the corrected split. Workspace Clippy passes for all targets with warnings denied.
+- The runtime dependency tree contains no Axum, tower-http, utoipa, Hyper, or HTTP body crates.
+- Rust and Prettier formatting, contract tests, external SDK tests, production Dashboard build, widget preparation, documentation build, and the complete Chromium HTTP and SSE integration suite pass.
 
 ## Step 2 implementation notes
 

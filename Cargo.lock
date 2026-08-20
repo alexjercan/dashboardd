@@ -796,23 +796,16 @@ dependencies = [
 name = "dashboardd-runtime"
 version = "0.1.0"
 dependencies = [
- "axum",
  "dashboardd-widget-bundle",
  "dashboardd-widget-protocol",
- "futures-util",
  "notify",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
  "time",
  "tokio",
- "tokio-stream",
  "toml 0.9.12+spec-1.1.0",
- "tower",
- "tower-http 0.7.0",
  "tracing",
- "utoipa",
- "utoipa-swagger-ui",
  "uuid",
 ]
 
@@ -822,10 +815,19 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "dashboardd-runtime",
+ "dashboardd-widget-protocol",
+ "futures-util",
  "rand",
+ "serde",
+ "serde_json",
  "tokio",
+ "tokio-stream",
+ "tower",
+ "tower-http 0.7.0",
  "tracing",
  "tracing-subscriber",
+ "utoipa",
+ "utoipa-swagger-ui",
 ]
 
 [[package]]

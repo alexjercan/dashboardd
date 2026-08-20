@@ -10,7 +10,6 @@ use std::{
 use notify::{RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 use tokio::{sync::broadcast, task::JoinHandle};
-use utoipa::ToSchema;
 
 use crate::{
     event::{RuntimeErrorData, RuntimeEvent},
@@ -48,13 +47,13 @@ pub struct FontOverrides {
     pub mono: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ThemeFonts {
     pub sans: String,
     pub mono: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Theme {
     pub fonts: ThemeFonts,
     pub canvas: String,
