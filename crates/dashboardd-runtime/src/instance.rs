@@ -9,7 +9,7 @@ use std::{
     },
 };
 
-use dashboard_protocol::{InstanceId, ServerToWidget, WidgetId, WidgetToServer};
+use dashboardd_widget_protocol::{InstanceId, ServerToWidget, WidgetId, WidgetToServer};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
@@ -1963,7 +1963,7 @@ async fn write_backend_message(
     stdin: &mut ChildStdin,
     message: ServerToWidget,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let encoded = dashboard_protocol::serialize(message)?;
+    let encoded = dashboardd_widget_protocol::serialize(message)?;
     stdin.write_all(encoded.as_bytes()).await?;
     stdin.write_all(b"\n").await?;
     stdin.flush().await?;
@@ -1980,7 +1980,7 @@ fn handle_backend_message(
     pending_probe: &mut Option<u64>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (dashboard_id, expected_instance_id) = identity;
-    match dashboard_protocol::parse::<WidgetToServer>(line)? {
+    match dashboardd_widget_protocol::parse::<WidgetToServer>(line)? {
         WidgetToServer::Ready { widget_id } if widget_id == config.descriptor.id => {
             *ready = true;
             health.ready();

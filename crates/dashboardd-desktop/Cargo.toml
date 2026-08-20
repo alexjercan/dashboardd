@@ -1,5 +1,6 @@
 [package]
 name = "dashboardd-desktop"
+description = "Tauri tray service and native window host for dashboardd"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

@@ -18,7 +18,7 @@ Build the dashboardd-side runtime, standalone surface, and resident Tauri deskto
 
 ### 1. Build the resident desktop lifecycle slice
 
-- Add retained `dashboardd-desktop`, `dashboardd-desktop-control`, and `dashboardctl` crates. Keep all versioned wire types, size limits, and encoding rules in the small shared control crate; the Tauri service and CLI client depend on it.
+- Add retained `dashboardd-desktop` and `dashboardd-desktop-control` crates. Keep all versioned wire types, size limits, encoding rules, and the `dashboardctl` binary in the small shared control crate; the Tauri service depends on its library.
 - Start hidden with a system tray item and remain resident with no windows.
 - Implement the same-user Unix socket, bounded versioned JSON request protocol, metadata-only JSONL audit log, and static local demo windows.
 - Add `open-demo`, `list`, `focus`, and `close` commands.
@@ -111,7 +111,7 @@ Completion gate: the packaged desktop service starts from rofi, accepts control 
 
 ## Step 1 implementation notes
 
-- Added separate `dashboardd-desktop-control`, `dashboardctl`, and `dashboardd-desktop` packages. The shared crate owns protocol version 1, 64 KiB JSON-line framing, command and response types, and the session socket path.
+- Added `dashboardd-desktop` and `dashboardd-desktop-control` packages. The shared control package owns protocol version 1, 64 KiB JSON-line framing, command and response types, the session socket path, and the `dashboardctl` binary.
 - Added a Clap-based client, hidden Tauri process, generated tray icon, Quit menu, UI-thread window dispatch, memory-only surface registry, static CSP-restricted demo asset, safe same-user stale-socket replacement, and metadata-only rotating audit log.
 - Added Linux Tauri build and runtime libraries to the Nix development shell. `LD_LIBRARY_PATH` is required because the tray library loads AppIndicator dynamically.
 - Kept windows ordinary, decorated, resizable, and WM-owned. Tauri exposes `window_classname` only on Windows, so i3 can match the stable process-wide X11 class `Dashboardd-desktop`.
@@ -132,8 +132,9 @@ Completion gate: the packaged desktop service starts from rofi, accepts control 
 
 ## Step 2 implementation notes
 
-- Added the reusable `dashboardd-runtime` library with a small `RuntimeConfig`, `Runtime`, `RuntimeError`, and cloneable `ShutdownHandle` facade.
+- Added the reusable `dashboardd-runtime` library with a small `RuntimeConfig`, `Runtime`, `RuntimeError`, and cloneable `ShutdownHandle` facade. Renamed the default HTTP host package to `dashboardd-server`; its installed binary remains `dashboardd`.
 - Moved the HTTP API, configuration watching, events, health, instance supervision, persisted state, and widget discovery modules into the library. API, event, health, instance, state, and widget module contents are byte-identical to their pre-extraction versions.
+- Renamed shared packages by role: `dashboardd-widget-protocol` for runtime/backend wire types and `dashboardd-widget-bundle` for bundle packing and validation. The bundle package still installs the `dashboardd-widget` command.
 - Kept environment parsing, tracing, TCP listener selection, Ctrl-C handling, and server startup in the `dashboardd` binary. Configuration-path environment resolution also moved to the binary.
 - Added a facade integration test that starts an empty runtime, serves `/health` through its router, and shuts down configuration watching cleanly.
 
@@ -145,3 +146,11 @@ Completion gate: the packaged desktop service starts from rofi, accepts control 
 - Fixed the existing narrow Project Brief media query so it preserves the documented shell Focus-control clearance instead of replacing both inline paddings.
 - The complete contract, SDK, workspace build, frontend production build, widget preparation, backend health, browser integration, persistence, restart, and shutdown suite passes after the fix.
 - A process smoke test served `/health`, handled SIGINT through `ShutdownHandle`, exited with status 0, and logged complete shutdown.
+
+## Package structure refinement
+
+- Merged the former `dashboardctl` package into `dashboardd-desktop-control` as a second target. The package now provides the small protocol library and the `dashboardctl` binary without introducing Tauri dependencies.
+- Renamed packages by role: `dashboardd` -> `dashboardd-server`, `dashboard-protocol` -> `dashboardd-widget-protocol`, and `dashboardd-widget` -> `dashboardd-widget-bundle`. Installed commands remain `dashboardd` and `dashboardd-widget`.
+- Updated Rust imports, workspace dependencies, development commands, Nix crate references, and the workspace map. Nix outputs now expose `dashboardd-server` and `dashboardd-widget-bundle`; `dashboardd-unwrapped` remains the server-only alias.
+- Focused package tests, workspace Cargo check, workspace Clippy with warnings denied, Rust formatting, Prettier formatting, CLI help, documentation build, full browser integration, and Nix flake evaluation pass.
+- Built the renamed Nix outputs. `dashboardd-widget-bundle` contains `dashboardd-widget`, `dashboardd-unwrapped` contains `dashboardd`, and `dashboardd-desktop-control` contains `dashboardctl`.

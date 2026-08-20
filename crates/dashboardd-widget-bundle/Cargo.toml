@@ -1,9 +1,13 @@
 [package]
-name = "dashboardd-widget"
+name = "dashboardd-widget-bundle"
 description = "Pack and statically validate dashboardd widget bundles"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+
+[[bin]]
+name = "dashboardd-widget"
+path = "src/main.rs"
 
 [dependencies]
 serde = { version = "1.0.229", features = ["derive"] }

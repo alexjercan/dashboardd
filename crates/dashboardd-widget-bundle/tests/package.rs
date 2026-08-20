@@ -1,6 +1,6 @@
 use std::{fs, path::Path, process::Command};
 
-use dashboardd_widget::{check_bundle, pack, read_source_manifest};
+use dashboardd_widget_bundle::{check_bundle, pack, read_source_manifest};
 use tempfile::TempDir;
 
 #[test]

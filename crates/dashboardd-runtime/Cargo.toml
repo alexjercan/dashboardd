@@ -1,13 +1,14 @@
 [package]
 name = "dashboardd-runtime"
+description = "Reusable dashboardd widget runtime and HTTP API"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
 axum = "0.8.8"
-dashboard-protocol = { path = "../dashboard-protocol" }
-dashboardd-widget = { path = "../dashboardd-widget" }
+dashboardd-widget-protocol = { path = "../dashboardd-widget-protocol" }
+dashboardd-widget-bundle = { path = "../dashboardd-widget-bundle" }
 futures-util = "0.3.31"
 notify = "8.2.0"
 serde = { version = "1.0.229", features = ["derive"] }

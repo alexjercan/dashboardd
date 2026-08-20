@@ -12,7 +12,7 @@ use axum::{
     response::{IntoResponse, Response, Sse, sse::Event, sse::KeepAlive},
     routing::{get, post},
 };
-use dashboard_protocol::{InstanceId, WidgetId};
+use dashboardd_widget_protocol::{InstanceId, WidgetId};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use tokio_stream::{Stream, StreamExt, wrappers::BroadcastStream};

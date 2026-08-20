@@ -9,7 +9,7 @@ use std::{
     process::Stdio,
 };
 
-use dashboard_protocol::{ServerToWidget, WidgetToServer};
+use dashboardd_widget_protocol::{ServerToWidget, WidgetToServer};
 use serde::Serialize;
 use serde_json::{Value, json};
 use tokio::{
@@ -197,7 +197,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     loop {
         tokio::select! {
             line = lines.next_line() => match line? {
-                Some(line) => match dashboard_protocol::parse::<ServerToWidget>(&line) {
+                Some(line) => match dashboardd_widget_protocol::parse::<ServerToWidget>(&line) {
                     Ok(ServerToWidget::Initialize { instance_id, widget_id, variant_id, options }) if widget_id == WIDGET_ID => {
                         match (Settings::from_options(&options), variant_id.as_str()) {
                             (Ok(settings), "pulse") => runtime = Some(Runtime::List {
@@ -1433,7 +1433,7 @@ async fn write_error<W: AsyncWrite + Unpin>(
         stdout,
         WidgetToServer::Error {
             instance_id,
-            error: dashboard_protocol::ErrorData {
+            error: dashboardd_widget_protocol::ErrorData {
                 code: code.into(),
                 message,
             },
@@ -1447,7 +1447,7 @@ async fn write_message<W: AsyncWrite + Unpin>(
     message: WidgetToServer,
 ) -> Result<(), Box<dyn Error>> {
     stdout
-        .write_all(format!("{}\n", dashboard_protocol::serialize(message)?).as_bytes())
+        .write_all(format!("{}\n", dashboardd_widget_protocol::serialize(message)?).as_bytes())
         .await?;
     stdout.flush().await?;
     Ok(())

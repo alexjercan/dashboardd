@@ -33,8 +33,8 @@
             pkgs.librsvg
             pkgs.openssl
           ];
-          dashboarddUnwrapped = config.rust-project.crates.dashboardd.crane.outputs.drv.crate;
-          widgetTool = config.rust-project.crates.dashboardd-widget.crane.outputs.drv.crate;
+          dashboarddUnwrapped = config.rust-project.crates.dashboardd-server.crane.outputs.drv.crate;
+          widgetTool = config.rust-project.crates.dashboardd-widget-bundle.crane.outputs.drv.crate;
           widgetIds = [
             "claude-usage"
             "codex-usage"
@@ -141,7 +141,7 @@
           packages.widget-sdk = widgetSdk;
           checks.docs = docs;
           checks.widget-bundle = pkgs.runCommand "dashboardd-widget-bundle-check" {
-            nativeBuildInputs = [ config.packages.dashboardd-widget ];
+            nativeBuildInputs = [ widgetTool ];
           } ''
             cp -R ${./tests/fixtures/external-widget} source
             chmod -R u+w source

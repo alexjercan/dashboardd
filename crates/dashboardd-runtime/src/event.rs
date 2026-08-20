@@ -1,6 +1,6 @@
 //! Versioned events sent from dashboardd to browser event streams.
 
-use dashboard_protocol::{InstanceId, WidgetId};
+use dashboardd_widget_protocol::{InstanceId, WidgetId};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use utoipa::ToSchema;
@@ -20,8 +20,8 @@ pub struct DashboardError {
     pub message: String,
 }
 
-impl From<dashboard_protocol::ErrorData> for DashboardError {
-    fn from(error: dashboard_protocol::ErrorData) -> Self {
+impl From<dashboardd_widget_protocol::ErrorData> for DashboardError {
+    fn from(error: dashboardd_widget_protocol::ErrorData) -> Self {
         Self {
             code: error.code,
             message: error.message,

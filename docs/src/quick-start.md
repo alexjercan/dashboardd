@@ -22,7 +22,7 @@ nix develop
 npm install
 npm run build
 cargo xtask widget prepare --all
-DASHBOARDD_WIDGET_PATH=.build/widgets cargo run -p dashboardd
+DASHBOARDD_WIDGET_PATH=.build/widgets cargo run -p dashboardd-server --bin dashboardd
 ```
 
 Open the URL printed by dashboardd. `/` is the dashboard home. The logged `/docs` path is the OpenAPI interface.

@@ -8,7 +8,7 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use dashboard_protocol::{InstanceId, WidgetId};
+use dashboardd_widget_protocol::{InstanceId, WidgetId};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use utoipa::ToSchema;

@@ -2,7 +2,7 @@
 
 use std::{error::Error, net::IpAddr, time::Duration as StdDuration};
 
-use dashboard_protocol::{ServerToWidget, WidgetToServer};
+use dashboardd_widget_protocol::{ServerToWidget, WidgetToServer};
 use serde::Serialize;
 use sysinfo::{InterfaceOperationalState, NetworkData, Networks};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -54,7 +54,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     loop {
         tokio::select! {
             line = lines.next_line() => match line? {
-                Some(line) => match dashboard_protocol::parse::<ServerToWidget>(&line) {
+                Some(line) => match dashboardd_widget_protocol::parse::<ServerToWidget>(&line) {
                     Ok(ServerToWidget::Initialize { instance_id: id, widget_id, variant_id: _, options: _ }) if widget_id == WIDGET_ID => instance_id = Some(id),
                     Ok(ServerToWidget::Ping { nonce }) => write_message(&mut stdout, WidgetToServer::Pong { nonce }).await?,
                     Ok(ServerToWidget::Shutdown {}) => break,
@@ -184,7 +184,7 @@ async fn write_error(
         stdout,
         WidgetToServer::Error {
             instance_id,
-            error: dashboard_protocol::ErrorData {
+            error: dashboardd_widget_protocol::ErrorData {
                 code: code.into(),
                 message: message.into(),
             },
@@ -198,7 +198,7 @@ async fn write_message(
     message: WidgetToServer,
 ) -> Result<(), Box<dyn Error>> {
     stdout
-        .write_all(dashboard_protocol::serialize(message)?.as_bytes())
+        .write_all(dashboardd_widget_protocol::serialize(message)?.as_bytes())
         .await?;
     stdout.write_all(b"\n").await?;
     stdout.flush().await?;

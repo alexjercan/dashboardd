@@ -45,7 +45,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 fn prepare(root: &Path, widget_directory: &Path, release: bool) -> Result<(), Box<dyn Error>> {
     let manifest_path = widget_directory.join("widget.toml");
-    let manifest = dashboardd_widget::read_source_manifest(&manifest_path)?;
+    let manifest = dashboardd_widget_bundle::read_source_manifest(&manifest_path)?;
     if widget_directory.file_name().and_then(|name| name.to_str()) != Some(&manifest.id) {
         return Err("widget id must match its repository directory".into());
     }
@@ -84,7 +84,7 @@ fn prepare(root: &Path, widget_directory: &Path, release: bool) -> Result<(), Bo
     if output.exists() {
         fs::remove_dir_all(&output)?;
     }
-    let checked = dashboardd_widget::pack(&manifest_path, &output)?;
+    let checked = dashboardd_widget_bundle::pack(&manifest_path, &output)?;
     println!(
         "prepared {} in {}",
         checked.manifest.id,

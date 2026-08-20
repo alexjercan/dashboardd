@@ -4,7 +4,7 @@
 
 use std::{collections::HashMap, error::Error};
 
-use dashboard_protocol::{ServerToWidget, WidgetToServer};
+use dashboardd_widget_protocol::{ServerToWidget, WidgetToServer};
 use serde::Serialize;
 use sysinfo::{Components, System};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -58,7 +58,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     loop {
         tokio::select! {
             line = lines.next_line() => match line? {
-                Some(line) => match dashboard_protocol::parse::<ServerToWidget>(&line) {
+                Some(line) => match dashboardd_widget_protocol::parse::<ServerToWidget>(&line) {
                     Ok(ServerToWidget::Initialize { instance_id: id, widget_id, variant_id: _, options: _ }) if widget_id == WIDGET_ID => {
                         instance_id = Some(id);
                     }
@@ -72,7 +72,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         &mut stdout,
                         WidgetToServer::Error {
                             instance_id: instance_id.clone(),
-                            error: dashboard_protocol::ErrorData {
+                            error: dashboardd_widget_protocol::ErrorData {
                                 code: "invalid_message".into(),
                                 message: error.to_string(),
                             },
@@ -168,7 +168,7 @@ async fn write_message(
     message: WidgetToServer,
 ) -> Result<(), Box<dyn Error>> {
     stdout
-        .write_all(dashboard_protocol::serialize(message)?.as_bytes())
+        .write_all(dashboardd_widget_protocol::serialize(message)?.as_bytes())
         .await?;
     stdout.write_all(b"\n").await?;
     stdout.flush().await?;

@@ -7,7 +7,7 @@ use std::{
     sync::Arc,
 };
 
-use dashboard_protocol::WidgetId;
+use dashboardd_widget_protocol::WidgetId;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use utoipa::ToSchema;
@@ -247,7 +247,7 @@ fn root_error(root: &Path, error: io::Error) -> io::Error {
 }
 
 fn read_config(widget_directory: &Path) -> io::Result<WidgetConfig> {
-    let checked = dashboardd_widget::check_bundle(widget_directory)
+    let checked = dashboardd_widget_bundle::check_bundle(widget_directory)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
     let manifest = checked.manifest;
     let widget_id = manifest.id.clone();
@@ -280,8 +280,8 @@ fn read_config(widget_directory: &Path) -> io::Result<WidgetConfig> {
     })
 }
 
-impl From<dashboardd_widget::WidgetLinkPort> for WidgetLinkPort {
-    fn from(port: dashboardd_widget::WidgetLinkPort) -> Self {
+impl From<dashboardd_widget_bundle::WidgetLinkPort> for WidgetLinkPort {
+    fn from(port: dashboardd_widget_bundle::WidgetLinkPort) -> Self {
         Self {
             id: port.id,
             name: port.name,
@@ -292,8 +292,8 @@ impl From<dashboardd_widget::WidgetLinkPort> for WidgetLinkPort {
     }
 }
 
-impl From<dashboardd_widget::WidgetOption> for WidgetOption {
-    fn from(option: dashboardd_widget::WidgetOption) -> Self {
+impl From<dashboardd_widget_bundle::WidgetOption> for WidgetOption {
+    fn from(option: dashboardd_widget_bundle::WidgetOption) -> Self {
         Self {
             id: option.id,
             name: option.name,
@@ -305,12 +305,14 @@ impl From<dashboardd_widget::WidgetOption> for WidgetOption {
     }
 }
 
-impl From<dashboardd_widget::WidgetOptionKind> for WidgetOptionKind {
-    fn from(kind: dashboardd_widget::WidgetOptionKind) -> Self {
+impl From<dashboardd_widget_bundle::WidgetOptionKind> for WidgetOptionKind {
+    fn from(kind: dashboardd_widget_bundle::WidgetOptionKind) -> Self {
         match kind {
-            dashboardd_widget::WidgetOptionKind::Boolean => Self::Boolean,
-            dashboardd_widget::WidgetOptionKind::Text { multiline } => Self::Text { multiline },
-            dashboardd_widget::WidgetOptionKind::Integer {
+            dashboardd_widget_bundle::WidgetOptionKind::Boolean => Self::Boolean,
+            dashboardd_widget_bundle::WidgetOptionKind::Text { multiline } => {
+                Self::Text { multiline }
+            }
+            dashboardd_widget_bundle::WidgetOptionKind::Integer {
                 minimum,
                 maximum,
                 step,
@@ -319,15 +321,15 @@ impl From<dashboardd_widget::WidgetOptionKind> for WidgetOptionKind {
                 maximum,
                 step,
             },
-            dashboardd_widget::WidgetOptionKind::Select { choices } => Self::Select {
+            dashboardd_widget_bundle::WidgetOptionKind::Select { choices } => Self::Select {
                 choices: choices.into_iter().map(Into::into).collect(),
             },
         }
     }
 }
 
-impl From<dashboardd_widget::WidgetOptionChoice> for WidgetOptionChoice {
-    fn from(choice: dashboardd_widget::WidgetOptionChoice) -> Self {
+impl From<dashboardd_widget_bundle::WidgetOptionChoice> for WidgetOptionChoice {
+    fn from(choice: dashboardd_widget_bundle::WidgetOptionChoice) -> Self {
         Self {
             value: choice.value,
             name: choice.name,

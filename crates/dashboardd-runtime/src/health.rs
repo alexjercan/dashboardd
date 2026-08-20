@@ -3,7 +3,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use dashboard_protocol::InstanceId;
+use dashboardd_widget_protocol::InstanceId;
 use serde::{Deserialize, Serialize};
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use tokio::sync::broadcast;

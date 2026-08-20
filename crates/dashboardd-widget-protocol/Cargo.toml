@@ -1,10 +1,10 @@
 [package]
-name = "dashboard-protocol"
+name = "dashboardd-widget-protocol"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
-description = "Wire types shared by the dashboardd dashboard server and widgets"
+description = "Wire types shared by the dashboardd runtime and widget backends"
 
 [dependencies]
 serde = { version = "1.0.229", features = ["derive"] }

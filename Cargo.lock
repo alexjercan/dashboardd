@@ -528,7 +528,7 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 name = "claude-usage"
 version = "0.1.0"
 dependencies = [
- "dashboard-protocol",
+ "dashboardd-widget-protocol",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -539,7 +539,7 @@ dependencies = [
 name = "codex-usage"
 version = "0.1.0"
 dependencies = [
- "dashboard-protocol",
+ "dashboardd-widget-protocol",
  "serde",
  "serde_json",
  "tokio",
@@ -627,7 +627,7 @@ dependencies = [
 name = "cpu"
 version = "0.1.0"
 dependencies = [
- "dashboard-protocol",
+ "dashboardd-widget-protocol",
  "serde",
  "serde_json",
  "sysinfo",
@@ -769,36 +769,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dashboard-protocol"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "thiserror 2.0.20",
-]
-
-[[package]]
-name = "dashboardctl"
-version = "0.1.0"
-dependencies = [
- "clap",
- "dashboardd-desktop-control",
- "serde_json",
-]
-
-[[package]]
-name = "dashboardd"
-version = "0.1.0"
-dependencies = [
- "axum",
- "dashboardd-runtime",
- "rand",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "dashboardd-desktop"
 version = "0.1.0"
 dependencies = [
@@ -816,6 +786,7 @@ dependencies = [
 name = "dashboardd-desktop-control"
 version = "0.1.0"
 dependencies = [
+ "clap",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
@@ -826,8 +797,8 @@ name = "dashboardd-runtime"
 version = "0.1.0"
 dependencies = [
  "axum",
- "dashboard-protocol",
- "dashboardd-widget",
+ "dashboardd-widget-bundle",
+ "dashboardd-widget-protocol",
  "futures-util",
  "notify",
  "serde",
@@ -845,7 +816,19 @@ dependencies = [
 ]
 
 [[package]]
-name = "dashboardd-widget"
+name = "dashboardd-server"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "dashboardd-runtime",
+ "rand",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "dashboardd-widget-bundle"
 version = "0.1.0"
 dependencies = [
  "serde",
@@ -854,6 +837,15 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.20",
  "toml 0.9.12+spec-1.1.0",
+]
+
+[[package]]
+name = "dashboardd-widget-protocol"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -985,7 +977,7 @@ dependencies = [
 name = "disk"
 version = "0.1.0"
 dependencies = [
- "dashboard-protocol",
+ "dashboardd-widget-protocol",
  "serde",
  "serde_json",
  "sysinfo",
@@ -2316,7 +2308,7 @@ dependencies = [
 name = "memory"
 version = "0.1.0"
 dependencies = [
- "dashboard-protocol",
+ "dashboardd-widget-protocol",
  "serde",
  "serde_json",
  "sysinfo",
@@ -2410,7 +2402,7 @@ dependencies = [
 name = "network"
 version = "0.1.0"
 dependencies = [
- "dashboard-protocol",
+ "dashboardd-widget-protocol",
  "serde",
  "serde_json",
  "sysinfo",
@@ -3000,7 +2992,7 @@ name = "projects"
 version = "0.1.0"
 dependencies = [
  "blake3",
- "dashboard-protocol",
+ "dashboardd-widget-protocol",
  "serde",
  "serde_json",
  "tokio",
@@ -4001,7 +3993,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "blake3",
- "dashboard-protocol",
+ "dashboardd-widget-protocol",
  "serde",
  "serde_json",
  "tokio",
@@ -5725,7 +5717,7 @@ dependencies = [
 name = "xtask"
 version = "0.1.0"
 dependencies = [
- "dashboardd-widget",
+ "dashboardd-widget-bundle",
  "serde_json",
 ]
 

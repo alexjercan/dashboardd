@@ -5,7 +5,7 @@
 Install the tool from the dashboardd flake:
 
 ```bash
-nix build github:alexjercan/dashboardd#dashboardd-widget
+nix build github:alexjercan/dashboardd#dashboardd-widget-bundle
 ./result/bin/dashboardd-widget --help
 ```
 
@@ -88,7 +88,7 @@ The dashboardd flake exports:
 - `dashboardd` - runnable server with web assets and built-in widgets.
 - `dashboardd-unwrapped` - server binary only.
 - `bundled-widgets` - built-in runtime bundles under the standard path.
-- `dashboardd-widget` - standalone pack/check command.
+- `dashboardd-widget-bundle` - standalone pack/check package. Installs the `dashboardd-widget` command.
 - `widget-sdk` - packed frontend SDK tarball.
 - `docs` - rendered mdBook site.
 

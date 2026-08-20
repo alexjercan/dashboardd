@@ -1,12 +1,11 @@
 [workspace]
 members = [
-  "crates/dashboard-protocol",
-  "crates/dashboardctl",
-  "crates/dashboardd",
   "crates/dashboardd-runtime",
+  "crates/dashboardd-server",
   "crates/dashboardd-desktop",
   "crates/dashboardd-desktop-control",
-  "crates/dashboardd-widget",
+  "crates/dashboardd-widget-bundle",
+  "crates/dashboardd-widget-protocol",
   "widgets/claude-usage",
   "widgets/disk",
   "widgets/codex-usage",

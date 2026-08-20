@@ -15,7 +15,7 @@ fn run() -> Result<(), Box<dyn Error>> {
             Ok(())
         }
         [command, bundle] if command == "check" => {
-            let checked = dashboardd_widget::check_bundle(&PathBuf::from(bundle))?;
+            let checked = dashboardd_widget_bundle::check_bundle(&PathBuf::from(bundle))?;
             println!(
                 "checked {} in {}",
                 checked.manifest.id,
@@ -27,7 +27,7 @@ fn run() -> Result<(), Box<dyn Error>> {
             if command == "pack" && output_flag == "--output" =>
         {
             let checked =
-                dashboardd_widget::pack(&PathBuf::from(manifest), &PathBuf::from(output))?;
+                dashboardd_widget_bundle::pack(&PathBuf::from(manifest), &PathBuf::from(output))?;
             println!(
                 "packed {} in {}",
                 checked.manifest.id,
