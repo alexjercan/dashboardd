@@ -1,6 +1,6 @@
 # Support externally authored widget packages with Today
 
-- STATUS: IN_PROGRESS
+- STATUS: CLOSED
 - PRIORITY: 100
 - TAGS: widget, sdk, external, packaging, nix, python, today
 
