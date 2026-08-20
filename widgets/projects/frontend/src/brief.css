@@ -305,7 +305,8 @@ h2 {
 
 @media (max-width: 600px) {
   article > header {
-    padding-inline: 11px;
+    padding-inline-start: 11px;
+    padding-inline-end: calc(11px + var(--dashboardd-focus-control-clearance));
   }
 
   .tabs {

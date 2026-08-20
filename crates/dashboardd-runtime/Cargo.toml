@@ -1,0 +1,29 @@
+[package]
+name = "dashboardd-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+axum = "0.8.8"
+dashboard-protocol = { path = "../dashboard-protocol" }
+dashboardd-widget = { path = "../dashboardd-widget" }
+futures-util = "0.3.31"
+notify = "8.2.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+thiserror = "2.0.20"
+time = { version = "0.3.47", features = ["formatting"] }
+tokio = { version = "1.53.1", features = ["fs", "io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
+tokio-stream = { version = "0.1.18", features = ["sync"] }
+toml = "0.9.8"
+tower-http = { version = "0.7.0", features = ["fs", "trace"] }
+tracing = "0.1.44"
+utoipa = "5.4.0"
+utoipa-swagger-ui = { version = "9.0.2", features = ["axum", "vendored"] }
+
+[dev-dependencies]
+tower = { version = "0.5.3", features = ["util"] }
+
+[lints]
+workspace = true

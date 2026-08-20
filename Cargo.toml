@@ -3,6 +3,7 @@ members = [
   "crates/dashboard-protocol",
   "crates/dashboardctl",
   "crates/dashboardd",
+  "crates/dashboardd-runtime",
   "crates/dashboardd-desktop",
   "crates/dashboardd-desktop-control",
   "crates/dashboardd-widget",

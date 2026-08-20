@@ -2,7 +2,7 @@
 
 use std::{
     collections::BTreeMap,
-    env, fs,
+    fs,
     path::{Path, PathBuf},
     sync::{Arc, RwLock},
     time::Duration,
@@ -156,30 +156,6 @@ impl ThemeOverrides {
             secondary: color("secondary", self.secondary.as_ref(), defaults.secondary)?,
         })
     }
-}
-
-pub fn resolve_path() -> Result<PathBuf, String> {
-    resolve_path_from(
-        env::var_os("DASHBOARDD_CONFIG_FILE").map(PathBuf::from),
-        env::var_os("XDG_CONFIG_HOME").map(PathBuf::from),
-        env::var_os("HOME").map(PathBuf::from),
-    )
-}
-
-fn resolve_path_from(
-    configured: Option<PathBuf>,
-    xdg: Option<PathBuf>,
-    home: Option<PathBuf>,
-) -> Result<PathBuf, String> {
-    if let Some(path) = configured {
-        return Ok(path);
-    }
-    if let Some(path) = xdg {
-        return Ok(path.join("dashboardd/config.toml"));
-    }
-    let home =
-        home.ok_or("HOME must be set when DASHBOARDD_CONFIG_FILE and XDG_CONFIG_HOME are unset")?;
-    Ok(home.join(".config/dashboardd/config.toml"))
 }
 
 pub fn load(path: &Path) -> Result<UserConfiguration, String> {
@@ -339,28 +315,6 @@ fn color(name: &str, override_value: Option<&String>, default: String) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn configuration_path_uses_documented_precedence() {
-        assert_eq!(
-            resolve_path_from(
-                Some("/override.toml".into()),
-                Some("/xdg".into()),
-                Some("/home".into()),
-            )
-            .unwrap(),
-            PathBuf::from("/override.toml")
-        );
-        assert_eq!(
-            resolve_path_from(None, Some("/xdg".into()), Some("/home".into())).unwrap(),
-            PathBuf::from("/xdg/dashboardd/config.toml")
-        );
-        assert_eq!(
-            resolve_path_from(None, None, Some("/home".into())).unwrap(),
-            PathBuf::from("/home/.config/dashboardd/config.toml")
-        );
-        assert!(resolve_path_from(None, None, None).is_err());
-    }
 
     #[test]
     fn missing_file_uses_defaults() {

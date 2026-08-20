@@ -1,13 +1,5 @@
 //! The dashboard daemon entry point.
 
-mod api;
-mod configuration;
-mod event;
-mod health;
-mod instance;
-mod state;
-mod widget;
-
 use std::{
     env,
     error::Error,
@@ -15,34 +7,18 @@ use std::{
     io,
     net::{IpAddr, SocketAddr, TcpListener},
     path::PathBuf,
-    sync::Arc,
 };
 
+use dashboardd_runtime::{Runtime, RuntimeConfig, ShutdownHandle};
 use rand::seq::SliceRandom;
-use tokio::{net::TcpListener as TokioTcpListener, sync::broadcast};
+use tokio::net::TcpListener as TokioTcpListener;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
-
-use crate::{
-    configuration::ThemeManager,
-    instance::{DashboardLayout, InstanceManager},
-    state::StateStore,
-    widget::WidgetsManager,
-};
 
 const DEFAULT_HOST: &str = "127.0.0.1";
 const PORT_RANGE: std::ops::Range<u16> = 7000..8000;
 const DEFAULT_WIDGET_PATH: &str = ".build/widgets";
 const DEFAULT_WEB_DIR: &str = "web/dist";
-
-#[derive(Clone)]
-struct AppState {
-    widgets: WidgetsManager,
-    instances: InstanceManager,
-    themes: ThemeManager,
-    web_dir: PathBuf,
-    shutdown: broadcast::Sender<()>,
-}
 
 #[derive(Debug)]
 struct Config {
@@ -71,7 +47,7 @@ impl Config {
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from(DEFAULT_WEB_DIR));
         let state_file = resolve_state_file()?;
-        let config_file = configuration::resolve_path()?;
+        let config_file = resolve_config_file()?;
         let config_file = if config_file.is_absolute() {
             config_file
         } else {
@@ -95,55 +71,29 @@ async fn main() -> Result<(), Box<dyn Error>> {
     tracing_subscriber::fmt().with_env_filter(filter).init();
 
     let config = Config::from_environment()?;
-    let (shutdown, _) = broadcast::channel(1);
-    let widgets = WidgetsManager::discover(&config.widget_roots)?;
-    let user_configuration = configuration::load(&config.config_file)?;
-    let layout = DashboardLayout::default();
-    let themes = ThemeManager::new(user_configuration.theme.effective()?);
-    let store = Arc::new(StateStore::new(config.state_file.clone()));
-    let instances = InstanceManager::restore(
-        layout,
-        widgets.clone(),
-        store.clone(),
-        &user_configuration.dashboard.initial_widgets,
-    )
-    .await
-    .map_err(|error| {
-        format!(
-            "failed to load dashboard state {}: {error}",
-            store.path().display()
-        )
-    })?;
-    let state = AppState {
-        widgets,
-        instances,
-        themes,
+    let runtime = Runtime::start(RuntimeConfig {
+        widget_roots: config.widget_roots.clone(),
         web_dir: config.web_dir.clone(),
-        shutdown,
-    };
+        state_file: config.state_file.clone(),
+        config_file: config.config_file.clone(),
+    })
+    .await?;
     info!(
-        count = state.widgets.len(),
+        count = runtime.widget_count(),
         roots = ?config.widget_roots,
         "discovered widgets"
     );
 
     let listener = bind_listener(&config)?;
     let address = listener.local_addr()?;
-    let app = api::build_router(state.clone());
-    let configuration_task = configuration::watch(
-        config.config_file,
-        state.themes.clone(),
-        state.instances.clone(),
-        state.shutdown.subscribe(),
-    );
+    let app = runtime.router();
+    let shutdown = runtime.shutdown_handle();
 
     info!(%address, docs = %format!("http://{address}/docs"), "dashboardd listening");
     axum::serve(TokioTcpListener::from_std(listener)?, app)
-        .with_graceful_shutdown(shutdown_signal(state.shutdown.clone()))
+        .with_graceful_shutdown(shutdown_signal(shutdown))
         .await?;
-    state.instances.shutdown_all().await;
-    let _ = configuration_task.await;
-
+    runtime.shutdown().await;
     info!("dashboardd stopped");
     Ok(())
 }
@@ -160,6 +110,31 @@ fn resolve_widget_roots(value: Option<OsString>) -> Result<Vec<PathBuf>, Box<dyn
         return Err("DASHBOARDD_WIDGET_PATH must not contain empty entries".into());
     }
     Ok(roots)
+}
+
+fn resolve_config_file() -> Result<PathBuf, Box<dyn Error>> {
+    resolve_config_file_from(
+        env::var_os("DASHBOARDD_CONFIG_FILE").map(PathBuf::from),
+        env::var_os("XDG_CONFIG_HOME").map(PathBuf::from),
+        env::var_os("HOME").map(PathBuf::from),
+    )
+    .map_err(Into::into)
+}
+
+fn resolve_config_file_from(
+    configured: Option<PathBuf>,
+    xdg: Option<PathBuf>,
+    home: Option<PathBuf>,
+) -> Result<PathBuf, &'static str> {
+    if let Some(path) = configured {
+        return Ok(path);
+    }
+    if let Some(path) = xdg {
+        return Ok(path.join("dashboardd/config.toml"));
+    }
+    let home =
+        home.ok_or("HOME must be set when DASHBOARDD_CONFIG_FILE and XDG_CONFIG_HOME are unset")?;
+    Ok(home.join(".config/dashboardd/config.toml"))
 }
 
 fn resolve_state_file() -> Result<PathBuf, Box<dyn Error>> {
@@ -199,11 +174,11 @@ fn bind_socket(host: IpAddr, port: u16) -> io::Result<TcpListener> {
     Ok(listener)
 }
 
-async fn shutdown_signal(shutdown: broadcast::Sender<()>) {
+async fn shutdown_signal(shutdown: ShutdownHandle) {
     match tokio::signal::ctrl_c().await {
         Ok(()) => {
             info!("shutdown signal received");
-            let _ = shutdown.send(());
+            shutdown.request();
         }
         Err(error) => tracing::error!(%error, "failed to listen for Ctrl-C"),
     }
@@ -212,6 +187,28 @@ async fn shutdown_signal(shutdown: broadcast::Sender<()>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn config_path_uses_documented_precedence() {
+        assert_eq!(
+            resolve_config_file_from(
+                Some("/override.toml".into()),
+                Some("/xdg".into()),
+                Some("/home".into()),
+            )
+            .unwrap(),
+            PathBuf::from("/override.toml")
+        );
+        assert_eq!(
+            resolve_config_file_from(None, Some("/xdg".into()), Some("/home".into())).unwrap(),
+            PathBuf::from("/xdg/dashboardd/config.toml")
+        );
+        assert_eq!(
+            resolve_config_file_from(None, None, Some("/home".into())).unwrap(),
+            PathBuf::from("/home/.config/dashboardd/config.toml")
+        );
+        assert!(resolve_config_file_from(None, None, None).is_err());
+    }
 
     #[test]
     fn widget_path_uses_platform_list_semantics() {

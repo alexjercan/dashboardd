@@ -38,6 +38,8 @@ Step status: COMPLETE.
 
 Completion gate: the current browser dashboard and integration tests pass against the extracted runtime.
 
+Step status: COMPLETE.
+
 ### 3. Decouple runtime instances from Dashboard composition
 
 - Provide global memory-only instance CRUD.
@@ -127,3 +129,19 @@ Completion gate: the packaged desktop service starts from rofi, accepts control 
 - X11 reports the live demo as `WM_CLASS(STRING) = "dashboardd-desktop", "Dashboardd-desktop"`.
 - A second service process exits with status 1 and `dashboardd desktop is already running` rather than panicking.
 - User playtest confirmed tray visibility, visual rendering, focus, and close behavior. Tray Quit stopped PID 1591776 and removed the control socket.
+
+## Step 2 implementation notes
+
+- Added the reusable `dashboardd-runtime` library with a small `RuntimeConfig`, `Runtime`, `RuntimeError`, and cloneable `ShutdownHandle` facade.
+- Moved the HTTP API, configuration watching, events, health, instance supervision, persisted state, and widget discovery modules into the library. API, event, health, instance, state, and widget module contents are byte-identical to their pre-extraction versions.
+- Kept environment parsing, tracing, TCP listener selection, Ctrl-C handling, and server startup in the `dashboardd` binary. Configuration-path environment resolution also moved to the binary.
+- Added a facade integration test that starts an empty runtime, serves `/health` through its router, and shuts down configuration watching cleanly.
+
+## Step 2 verification results
+
+- All 35 runtime tests and 3 binary tests pass. Affected-package formatting and Clippy with warnings denied pass.
+- Contract and external SDK tests pass.
+- The initial headless browser runs reached all runtime behavior but failed at the Project Brief narrow-layout Focus-clearance assertion. Two runs against the clean pre-extraction commit reproduced the failure, including the exact assertion.
+- Fixed the existing narrow Project Brief media query so it preserves the documented shell Focus-control clearance instead of replacing both inline paddings.
+- The complete contract, SDK, workspace build, frontend production build, widget preparation, backend health, browser integration, persistence, restart, and shutdown suite passes after the fix.
+- A process smoke test served `/health`, handled SIGINT through `ShutdownHandle`, exited with status 0, and logged complete shutdown.
