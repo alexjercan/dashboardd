@@ -2,10 +2,13 @@ const path = require("path");
 const HtmlWebpackPlugin = require("html-webpack-plugin");
 
 module.exports = {
-  entry: "./src/surface.ts",
+  entry: {
+    surface: "./src/surface.ts",
+    launcher: "./src/launcher.ts",
+  },
   output: {
     path: path.resolve(__dirname, "dist"),
-    filename: "surface.js",
+    filename: "[name].js",
     publicPath: "/",
     clean: true,
   },
@@ -22,7 +25,18 @@ module.exports = {
       },
     ],
   },
-  plugins: [new HtmlWebpackPlugin({ template: "./src/surface.html" })],
+  plugins: [
+    new HtmlWebpackPlugin({
+      template: "./src/surface.html",
+      filename: "index.html",
+      chunks: ["surface"],
+    }),
+    new HtmlWebpackPlugin({
+      template: "./src/launcher.html",
+      filename: "launcher.html",
+      chunks: ["launcher"],
+    }),
+  ],
   resolve: {
     extensions: [".ts", ".js"],
   },

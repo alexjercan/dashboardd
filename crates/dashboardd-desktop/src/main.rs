@@ -1,4 +1,5 @@
 mod audit;
+mod launcher;
 mod service;
 
 use std::{
@@ -12,16 +13,12 @@ use std::{
 };
 
 use dashboardd_runtime::{Runtime, RuntimeConfig};
+use launcher::{LauncherService, launcher_cancel, launcher_initialize, launcher_submit};
 use service::{
     DesktopService, PreparedService, surface_initialize, surface_mutate_state, surface_restart,
     surface_send, surface_subscribe,
 };
-use tauri::{
-    AppHandle, Manager, RunEvent,
-    image::Image,
-    menu::{Menu, MenuItem},
-    tray::TrayIconBuilder,
-};
+use tauri::{Manager, RunEvent};
 
 const DEFAULT_WIDGET_PATH: &str = ".build/widgets";
 
@@ -42,8 +39,11 @@ fn run() -> Result<(), Box<dyn Error>> {
     let prepared = PreparedService::prepare()?;
     let runtime = tauri::async_runtime::block_on(Runtime::start(runtime_config()?))?;
     let service = DesktopService::new(&prepared, runtime.handle());
+    let widgets = service.widgets();
+    let launchers = LauncherService::new(&widgets);
     let protocol_service = service.clone();
     let setup_service = service.clone();
+    let setup_launchers = launchers.clone();
     let app = tauri::Builder::default()
         .register_uri_scheme_protocol("dashboardd-widget", move |context, request| {
             protocol_service.widget_protocol(context.webview_label(), request)
@@ -53,14 +53,18 @@ fn run() -> Result<(), Box<dyn Error>> {
             surface_initialize,
             surface_send,
             surface_restart,
-            surface_mutate_state
+            surface_mutate_state,
+            launcher_initialize,
+            launcher_submit,
+            launcher_cancel
         ])
         .setup(move |app| {
             app.manage(setup_service.clone());
+            app.manage(setup_launchers.clone());
             app.manage(RuntimeOwner(Mutex::new(Some(runtime))));
             setup_service.start(prepared, app.handle().clone())?;
             setup_service.forward_runtime_events();
-            install_tray(app.handle())?;
+            setup_launchers.install_tray(app.handle(), setup_service.clone(), &widgets)?;
             Ok(())
         })
         .build(tauri::generate_context!())?;
@@ -153,41 +157,6 @@ fn resolve_state_file_from(
     }
     home.map(|path| path.join(".local/state/dashboardd-desktop/runtime.json"))
         .ok_or("HOME must be set when DASHBOARDD_DESKTOP_STATE_FILE and XDG_STATE_HOME are unset")
-}
-
-fn install_tray(app: &AppHandle) -> tauri::Result<()> {
-    let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&quit])?;
-    TrayIconBuilder::with_id("dashboardd-desktop")
-        .tooltip("dashboardd desktop")
-        .icon(tray_icon())
-        .menu(&menu)
-        .show_menu_on_left_click(true)
-        .on_menu_event(|app, event| {
-            if event.id.as_ref() == "quit" {
-                app.state::<DesktopService>().shutdown(app);
-                app.exit(0);
-            }
-        })
-        .build(app)?;
-    Ok(())
-}
-
-fn tray_icon() -> Image<'static> {
-    const SIZE: u32 = 16;
-    let mut pixels = Vec::with_capacity((SIZE * SIZE * 4) as usize);
-    for y in 0..SIZE {
-        for x in 0..SIZE {
-            let active = (3..=12).contains(&x) && (3..=12).contains(&y);
-            let color = if active {
-                [0x66, 0xb7, 0xf0, 0xff]
-            } else {
-                [0x00, 0x00, 0x00, 0x00]
-            };
-            pixels.extend_from_slice(&color);
-        }
-    }
-    Image::new_owned(pixels, SIZE, SIZE)
 }
 
 #[cfg(test)]

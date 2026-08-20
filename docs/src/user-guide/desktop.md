@@ -33,4 +33,32 @@ dashboardctl open tatr-tasks --variant details \
   --inputs '{"artifact":{"type":"tatr.task-artifact-reference/v1","value":{"project_id":"project-...","worktree_id":"worktree-...","task_id":"20260820-094041","artifact":"TASK.md"}}}'
 ```
 
+## Tray menu
+
+The tray's Open Widget menu is generated from installed widgets. A variant with no required input opens immediately. A variant with required input opens a launch dialog. Enter one JSON value for each displayed immutable input type. Values are validated for that launch and are not saved.
+
+## Home Manager
+
+The flake exports one Home Manager module for both hosts:
+
+```nix
+imports = [ inputs.dashboardd.homeManagerModules.default ];
+
+programs.dashboardd = {
+  enable = true;
+  port = 8000;
+  autoStart = true;
+  widgetPackages = [ inputs.today.packages.${pkgs.system}.dashboardd-widget ];
+};
+
+programs.dashboardd-desktop = {
+  enable = true;
+  autoStart = true;
+};
+```
+
+Both hosts start by default. Set either `autoStart` option to `false` to install an on-demand service. Launch an on-demand native host from rofi or run `dashboardd-desktop-start`; both start `dashboardd-desktop.service`.
+
+Both services use `Restart=on-failure`. Tray Quit is a successful exit and does not restart the native host. The package installs `dashboardctl` on `PATH`.
+
 Windows are ordinary, decorated, and resizable. Their initial aspect ratio follows the selected manifest variant. Native close deletes the associated runtime instance. Tray Quit and `dashboardctl quit` close all surfaces, stop all widget backends, and exit the service.

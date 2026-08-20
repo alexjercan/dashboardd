@@ -13,6 +13,7 @@ const LOG_FILE_NAME: &str = "control.jsonl";
 const MAX_LOG_BYTES: u64 = 10 * 1024 * 1024;
 const RETAINED_LOG_FILES: usize = 3;
 
+#[derive(Clone)]
 pub struct AuditLog {
     path: PathBuf,
 }

@@ -1,0 +1,140 @@
+:root {
+  color-scheme: dark;
+  --canvas: #181818;
+  --surface: #282828;
+  --selection: #453d41;
+  --text: #e4e4ef;
+  --bright: #f4f4ff;
+  --muted: #96a6c8;
+  --accent: #ffdd33;
+  --danger: #f43841;
+  font-family: "Iosevka", ui-sans-serif, system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-height: 100%;
+  margin: 0;
+  background: var(--canvas);
+  color: var(--text);
+}
+
+.launcher-shell {
+  width: min(100%, 720px);
+  margin: 0 auto;
+  padding: 24px;
+}
+
+header {
+  margin-bottom: 22px;
+}
+
+.eyebrow {
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+h1 {
+  margin: 5px 0 4px;
+  color: var(--bright);
+  font-size: 22px;
+}
+
+header p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.inputs {
+  display: grid;
+  gap: 18px;
+}
+
+.input-field {
+  display: grid;
+  gap: 6px;
+}
+
+.input-field strong {
+  color: var(--bright);
+  font-size: 13px;
+}
+
+.input-field code {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+textarea {
+  width: 100%;
+  min-height: 110px;
+  resize: vertical;
+  border: 1px solid var(--muted);
+  border-radius: 5px;
+  padding: 10px;
+  background: var(--surface);
+  color: var(--bright);
+  font:
+    12px/1.45 "Iosevka",
+    ui-monospace,
+    monospace;
+}
+
+textarea:focus {
+  border-color: var(--accent);
+  outline: 1px solid var(--accent);
+}
+
+textarea[aria-invalid="true"] {
+  border-color: var(--danger);
+  outline-color: var(--danger);
+}
+
+.error {
+  margin: 16px 0 0;
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.error[hidden] {
+  display: none;
+}
+
+footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 22px;
+}
+
+button {
+  min-width: 84px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  padding: 8px 13px;
+  background: var(--accent);
+  color: var(--canvas);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+button.secondary {
+  border-color: var(--muted);
+  background: transparent;
+  color: var(--text);
+}
+
+button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}

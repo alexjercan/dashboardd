@@ -58,6 +58,7 @@ struct ServiceState {
     next_request_id: AtomicU64,
     surfaces: Mutex<BTreeMap<String, SurfaceInfo>>,
     socket_path: PathBuf,
+    audit: Mutex<AuditLog>,
     runtime: RuntimeHandle,
 }
 
@@ -140,6 +141,7 @@ impl DesktopService {
                 next_request_id: AtomicU64::new(1),
                 surfaces: Mutex::new(BTreeMap::new()),
                 socket_path: prepared.socket_path.clone(),
+                audit: Mutex::new(prepared.audit.clone()),
                 runtime,
             }),
         }
@@ -150,16 +152,23 @@ impl DesktopService {
         thread::Builder::new()
             .name("dashboardd-desktop-control".into())
             .spawn(move || {
-                serve(
-                    prepared.listener,
-                    prepared.socket_guard,
-                    prepared.audit,
-                    app,
-                    state,
-                );
+                serve(prepared.listener, prepared.socket_guard, app, state);
             })
             .map_err(StartError::Socket)?;
         Ok(())
+    }
+
+    pub fn widgets(&self) -> Vec<dashboardd_runtime::WidgetDescriptor> {
+        self.inner.runtime.widgets()
+    }
+
+    pub fn execute(&self, app: &AppHandle, command: Command) -> Response {
+        let result = execute_audited(app, &self.inner, command);
+        if result.quit {
+            self.shutdown(app);
+            app.exit(0);
+        }
+        result.response
     }
 
     pub fn forward_runtime_events(&self) {
@@ -378,13 +387,12 @@ impl DesktopService {
 fn serve(
     listener: UnixListener,
     _socket_guard: SocketGuard,
-    audit: AuditLog,
     app: AppHandle,
     state: Arc<ServiceState>,
 ) {
     while !state.shutdown.load(Ordering::Acquire) {
         match listener.accept() {
-            Ok((stream, _)) => handle_connection(stream, &audit, &app, &state),
+            Ok((stream, _)) => handle_connection(stream, &app, &state),
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
                 thread::sleep(ACCEPT_POLL_INTERVAL);
             }
@@ -396,43 +404,30 @@ fn serve(
     }
 }
 
-fn handle_connection(
-    stream: UnixStream,
-    audit: &AuditLog,
-    app: &AppHandle,
-    state: &Arc<ServiceState>,
-) {
-    let request_id = state.next_request_id.fetch_add(1, Ordering::Relaxed);
-    let started = Instant::now();
+fn handle_connection(stream: UnixStream, app: &AppHandle, state: &Arc<ServiceState>) {
     let _ = stream.set_read_timeout(Some(UI_OPERATION_TIMEOUT));
     let _ = stream.set_write_timeout(Some(UI_OPERATION_TIMEOUT));
     let request = read_message::<Request>(&mut BufReader::new(&stream));
-    let (command_name, result) = match request {
+    let result = match request {
         Ok(request) if request.version == PROTOCOL_VERSION => {
-            let command_name = request.command.name();
-            (command_name, execute_command(app, state, request.command))
+            execute_audited(app, state, request.command)
         }
-        Ok(request) => (
+        Ok(request) => audited_result(
+            state,
             request.command.name(),
+            Instant::now(),
             failed(
                 "unsupported_version",
                 format!("protocol version {} is not supported", request.version),
             ),
         ),
-        Err(error) => ("invalid", failed("invalid_request", error.to_string())),
+        Err(error) => audited_result(
+            state,
+            "invalid",
+            Instant::now(),
+            failed("invalid_request", error.to_string()),
+        ),
     };
-
-    let duration_ms = started.elapsed().as_millis();
-    if let Err(error) = audit.write(
-        request_id,
-        command_name,
-        result.response.status(),
-        duration_ms,
-        result.surface_id.as_deref(),
-        result.response.error_code(),
-    ) {
-        eprintln!("dashboardd-desktop: cannot write control audit log: {error}");
-    }
     if let Err(error) = write_message(&mut BufWriter::new(&stream), &result.response) {
         eprintln!("dashboardd-desktop: cannot return control response: {error}");
     }
@@ -443,6 +438,39 @@ fn handle_connection(
         .shutdown(app);
         app.exit(0);
     }
+}
+
+fn execute_audited(app: &AppHandle, state: &Arc<ServiceState>, command: Command) -> CommandResult {
+    let command_name = command.name();
+    let started = Instant::now();
+    let result = execute_command(app, state, command);
+    audited_result(state, command_name, started, result)
+}
+
+fn audited_result(
+    state: &Arc<ServiceState>,
+    command_name: &str,
+    started: Instant,
+    result: CommandResult,
+) -> CommandResult {
+    let request_id = state.next_request_id.fetch_add(1, Ordering::Relaxed);
+    let duration_ms = started.elapsed().as_millis();
+    let audit = state
+        .audit
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Err(error) = audit.write(
+        request_id,
+        command_name,
+        result.response.status(),
+        duration_ms,
+        result.surface_id.as_deref(),
+        result.response.error_code(),
+    ) {
+        eprintln!("dashboardd-desktop: cannot write control audit log: {error}");
+    }
+    drop(audit);
+    result
 }
 
 fn execute_command(app: &AppHandle, state: &Arc<ServiceState>, command: Command) -> CommandResult {

@@ -15,6 +15,10 @@
   },
   "bundle": {
     "active": false,
-    "icon": []
+    "icon": [
+      "icons/dashboardd-32.png",
+      "icons/dashboardd-128.png",
+      "icons/dashboardd-256.png"
+    ]
   }
 }

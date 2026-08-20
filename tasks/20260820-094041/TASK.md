@@ -140,12 +140,33 @@ Step status: COMPLETE.
 
 ### 8. Package the desktop service
 
-- Add required Tauri Linux dependencies, tray assets, and Nix packages.
-- Add optional `systemd --user` deployment through Nix for later actual use.
-- Support explicit rofi-triggered startup and clean tray Quit without automatic restart.
-- Keep automatic login startup disabled by default.
+Accepted contract:
 
-Completion gate: the packaged desktop service starts from rofi, accepts control requests, and exits completely from the tray.
+- Add required Tauri Linux dependencies, tray and application assets, and Nix packages. Use one transparent four-tile dashboard glyph with a yellow active tile, slate inactive tiles, and a dark keyline at tray and application sizes.
+- Generate the tray's Open Widget submenus from runtime discovery. A variant without required inputs opens immediately. A variant with required inputs opens a narrow launch dialog first. Every successful action creates a new surface.
+- Add named launchers through a desktop-only TOML file. A launcher fixes its widget, variant, presentation, and options. Its input declarations contain an ID, exact type, and prompt label, but never a value.
+- The version 1 launch dialog accepts one raw JSON value per prompted input. It shows the immutable input type, validates and formats JSON, preserves runtime errors, persists no value, and creates no instance when canceled. Structured type-specific forms require a future machine-readable input-schema contract.
+- Tray and dialog actions use the same internal command execution path as `dashboardctl`; do not spawn the CLI or add shell-command launchers. Scope dialog IPC to the invoking launch window and its validated launcher context.
+- Package `dashboardd-desktop`, `dashboardctl`, prepared built-in widgets, icons, a desktop entry, and a `dashboardd-desktop-start` helper. Keep `dashboardctl` directly available on `PATH`.
+- Export one Home Manager module with `programs.dashboardd` and `programs.dashboardd-desktop`. Both default to packages from this flake and compose built-in plus additional widget packages. The browser host defaults to port 8000 and `autoStart = true`; the native host defaults to `autoStart = false`. Both expose an `autoStart` knob and use `Restart=on-failure`. Start the on-demand native host explicitly from rofi through the desktop entry; clean tray Quit exits without restart.
+
+Completion gate: the packaged desktop service starts from rofi, opens default and prompted widgets from the tray, accepts control requests, and exits completely from the tray.
+
+Step status: COMPLETE.
+
+### 9. Simplify tray launch and deployment defaults
+
+Accepted contract:
+
+- Remove the Configured submenu and named launcher configuration. It duplicates the generated Open Widget menu without adding a distinct workflow.
+- Keep every discovered widget variant in Open Widget. Open variants without required inputs immediately. Use the generic raw JSON launch dialog for required manifest inputs.
+- Remove desktop launcher TOML parsing, persisted launcher metadata, and Home Manager launcher options. Input values remain invocation-only and are never persisted.
+- Keep both reusable Home Manager programs. `programs.dashboardd` remains available for browser and phone access and keeps browser auto-start on port 8000. `programs.dashboardd-desktop` defaults to `autoStart = true` for the normal local deployment.
+- Keep `Restart=on-failure`; clean tray Quit must not restart either service.
+
+Completion gate: one generated tray menu opens both direct and prompted variants, the deployed native service starts with the user session, and no Configured surface remains.
+
+Step status: COMPLETE.
 
 ## Excluded
 
@@ -309,6 +330,30 @@ Completion gate: the packaged desktop service starts from rofi, accepts control 
 - Live update, focus, list, close, and Quit commands pass. Close removes the instance and surface; Quit exits the recorded PID and removes the control socket.
 - Full workspace tests and Clippy with warnings denied pass. Contract, SDK, production frontend, widget preparation, Chromium integration, and documentation builds pass.
 - Updated the root npm dependency hash for Nix. `nix flake check --no-build` remains blocked by the local Nix 2.34 evaluator producing an unrealized filtered Rust source store path; checking the archived flake fails at the same rust-flake source lookup.
+
+## Step 8 implementation notes
+
+- Added a packaged Linux desktop output containing the wrapped Tauri host, `dashboardctl`, built-in widget bundles, a rofi-visible desktop entry, and an explicit systemd start helper. Added the desktop frontend build to the shared Nix asset derivation and supplied those generated assets to the filtered Rust build.
+- Replaced the generated blue square with a transparent four-tile dashboard glyph at application and tray sizes. The runtime embeds its 32-pixel PNG; the package installs the scalable SVG in the hicolor icon theme.
+- Generated nested tray menus from runtime widget discovery. Variants without required inputs execute the same audited open command path as socket clients. Required inputs create a scoped launcher window before any runtime instance exists.
+- Added a narrow launcher frontend with one raw JSON editor per required typed input. It formats valid JSON, keeps parse and runtime errors visible, and destroys its transient context on cancel, close, or successful surface creation.
+- Exported a reusable Home Manager module with independent `programs.dashboardd` and `programs.dashboardd-desktop` options. Both compose built-in and additional widget packages, expose environment and auto-start settings, and use `Restart=on-failure`. The browser defaults to port 8000.
+
+## Step 8 and Phase 9 bugs and fixes
+
+- The first flake package assignment collided with rust-flake's automatically exported desktop crate. Forced the composed package output, as already done for the browser package.
+- The first Home Manager module wrapper hid its required `pkgs` argument from the module system. Declared the argument in the wrapper signature while injecting flake-owned package defaults.
+- A named Configured tray section duplicated the generated widget menu. Phase 9 removed its TOML parser, values, Home Manager options, validation, submenu, tests, and documentation. Required manifest inputs continue to use the generic invocation-only prompt.
+- The first packaged playtest command ran the package-check result after that build replaced the `result` symlink. Rebuilt the desktop package explicitly before starting the graphical playtest.
+
+## Step 8 and Phase 9 verification results
+
+- Focused desktop tests and Clippy with warnings denied pass. The production desktop frontend build passes.
+- The Nix desktop package and package check build successfully with prepared widgets, Tauri Linux libraries, embedded frontend assets, both commands, desktop entry, start helper, and icon.
+- Isolated Home Manager evaluation confirms both enabled programs default to `default.target`, desktop auto-start is true, and the browser port is 8000.
+- The packaged process discovered all eight built-in widgets. User playtest confirmed the four-tile icon, simplified generated tray menu, direct Claude Minimal launch, prompted Tatr Artifact launch, and clean tray Quit. Quit removed the process and control socket.
+- Full workspace tests and Clippy with warnings denied pass. Contract, SDK, production frontend, widget preparation, Chromium integration, documentation, focused Nix package, and Home Manager evaluation checks pass.
+- Full flake enumeration still reaches the known Nix 2.34 rust-flake filtered-source failure after evaluating the new outputs. Focused package evaluation and builds succeed.
 
 ## Step 7 implementation notes
 
