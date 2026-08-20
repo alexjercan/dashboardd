@@ -15,6 +15,14 @@
     }
   ],
   "options": [],
-  "inputs": [],
+  "inputs": [
+    {
+      "id": "message",
+      "name": "Message",
+      "type": "dashboardd.fixture-message/v1",
+      "variants": ["summary"],
+      "required": false
+    }
+  ],
   "outputs": []
 }

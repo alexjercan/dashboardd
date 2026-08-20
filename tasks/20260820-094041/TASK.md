@@ -53,6 +53,16 @@ Step status: COMPLETE.
 
 ### 4. Add typed direct widget inputs
 
+Accepted contract:
+
+- Represent each direct input as `{ "type": "<manifest-type>", "value": <opaque-json> }`, keyed by input port ID on runtime instances and creation requests.
+- Replace the complete direct-input map atomically with `PUT /api/v1/instances/{instance_id}/inputs`. Advance runtime events to version 3 and publish the complete map through `instance_inputs_updated` events.
+- Runtime validates port existence, variant applicability, and exact manifest type. Keep values opaque and enforce the existing request size bound.
+- Hosts validate required bindings because only a host knows both direct values and dynamic links.
+- Persist direct inputs on browser-local Dashboard placements. Each applicable port has exactly one direct binding, dynamic Dashboard link, or no binding when optional. Reconcile changed direct inputs without recreating the runtime instance.
+- Replace SDK `links` with `inputs.get`, `inputs.subscribe`, and `outputs.publish`. Missing or removed effective values are `undefined`. Keep inputs as frontend capabilities; do not change the widget backend protocol.
+- Dashboard input controls provide Unbound, Direct JSON, and compatible widget-output choices.
+
 - Add versioned typed input envelopes to instance creation and update.
 - Validate port existence, variant applicability, required bindings, and exact manifest type while leaving opaque JSON value validation to the widget.
 - Publish input updates through instance events.
@@ -60,6 +70,8 @@ Step status: COMPLETE.
 - Adapt Dashboard-local links to the new SDK contract with exactly one direct or dynamic binding per input.
 
 Completion gate: a widget receives and updates a direct typed input without a source widget.
+
+Step status: COMPLETE.
 
 ### 5. Add the standalone surface host
 
@@ -166,6 +178,29 @@ Completion gate: the packaged desktop service starts from rofi, accepts control 
 - All workspace Rust tests pass, including 23 runtime tests. Workspace Clippy passes for all targets with warnings denied.
 - Rust formatting, Prettier formatting, contract tests, external SDK tests, production frontend builds, widget preparation, backend probes, documentation build, and the complete Chromium integration suite pass.
 - Chromium verifies local Dashboard CRUD and layout, cross-tab synchronization, browser-local links, global runtime CRUD, memory-only restart behavior, independent browser compositions, shared widget state schema 4 persistence, and graceful shutdown.
+
+## Step 4 implementation notes
+
+- Added typed direct-input maps to runtime instances and creation requests. `PUT /api/v1/instances/{instance_id}/inputs` replaces the complete map, validates active manifest ports and exact type strings, returns the updated instance, and publishes a version 3 `instance_inputs_updated` event.
+- Kept required-binding validation in presentation hosts. Browser-local Dashboard documents now persist direct inputs and reject unknown, inapplicable, mistyped, duplicate, or missing required bindings during reconciliation.
+- Reconciliation updates direct inputs on an existing matching runtime instance. It recreates an instance only when widget, variant, or options differ.
+- Replaced SDK `context.links` with `context.inputs.get`, `context.inputs.subscribe`, and `context.outputs.publish`. The browser input bus combines direct values and dynamic links and publishes `undefined` when an effective value is missing or removed.
+- Added Dashboard controls for Unbound, Direct JSON value, and compatible widget outputs. Input editing updates local composition before the runtime resource. A source widget cannot be removed while it supplies a required dynamic input.
+- Adapted bundled widgets to the split SDK capabilities and to clear selection when an input becomes `undefined`.
+- Extended the external fixture widget and Chromium suite to create, display, update, unbind, reconcile, and reject mistyped direct inputs.
+
+## Step 4 bugs and fixes
+
+- Existing linked widgets treated `undefined` as an invalid payload and retained stale selections after unlinking. Treat missing effective values as explicit selection removal.
+- Removing an output source could leave a required target input unbound and make the Dashboard document invalid. Block source removal until required targets are rebound.
+- Adding an event kind under protocol version 2 would change a strict event union without changing its version. Advanced the runtime event protocol to version 3.
+- The local Cargo cache contained generated Swagger UI paths from another worktree. Cleaned only the affected package build cache before continuing checks.
+
+## Step 4 verification results
+
+- All workspace Rust tests pass, including 25 runtime tests. Workspace Clippy passes for all targets with warnings denied.
+- Rust formatting, Prettier formatting, contract tests, external SDK tests, production builds, widget preparation, documentation build, and the complete Chromium integration suite pass.
+- Chromium proves direct input creation, frontend `get` and subscription delivery, atomic update without instance recreation, unbinding to `undefined`, required dynamic rebinding, runtime type rejection, restart reconciliation, and existing dynamic links.
 
 ## Step 2 implementation notes
 

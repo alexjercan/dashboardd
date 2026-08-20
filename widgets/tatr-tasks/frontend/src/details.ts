@@ -69,8 +69,8 @@ export function mount(
       });
   };
 
-  const unsubscribe = context.links.subscribe("task", (payload) => {
-    if (payload === null) {
+  const unsubscribe = context.inputs.subscribe("task", (payload) => {
+    if (payload === null || payload === undefined) {
       selection = null;
       hasDetails = false;
       requestedArtifact = "TASK.md";

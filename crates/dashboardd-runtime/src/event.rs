@@ -5,9 +5,15 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use utoipa::ToSchema;
 
-use crate::{configuration::Theme, health::InstanceHealth, instance::Instance};
+use std::collections::BTreeMap;
 
-pub const EVENT_VERSION: u16 = 2;
+use crate::{
+    configuration::Theme,
+    health::InstanceHealth,
+    instance::{Instance, TypedInput},
+};
+
+pub const EVENT_VERSION: u16 = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct RuntimeErrorData {
@@ -32,6 +38,10 @@ pub enum RuntimeEvent {
     },
     InstanceDestroyed {
         instance_id: InstanceId,
+    },
+    InstanceInputsUpdated {
+        instance_id: InstanceId,
+        inputs: BTreeMap<String, TypedInput>,
     },
     InstanceError {
         instance_id: Option<InstanceId>,
@@ -86,9 +96,40 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<Value>(&encoded).unwrap(),
             json!({
-                "version": 2,
+                "version": 3,
                 "kind": "instance_destroyed",
                 "data": {"instance_id": "instance-1"}
+            })
+        );
+    }
+
+    #[test]
+    fn direct_input_update_carries_the_complete_typed_map() {
+        let encoded = serialize(RuntimeEvent::InstanceInputsUpdated {
+            instance_id: "instance-1".into(),
+            inputs: BTreeMap::from([(
+                "message".into(),
+                TypedInput {
+                    input_type: "fixture.message/v1".into(),
+                    value: json!({"text": "hello"}),
+                },
+            )]),
+        })
+        .unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&encoded).unwrap(),
+            json!({
+                "version": 3,
+                "kind": "instance_inputs_updated",
+                "data": {
+                    "instance_id": "instance-1",
+                    "inputs": {
+                        "message": {
+                            "type": "fixture.message/v1",
+                            "value": {"text": "hello"}
+                        }
+                    }
+                }
             })
         );
     }
@@ -103,7 +144,7 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<Value>(&encoded).unwrap(),
             json!({
-                "version": 2,
+                "version": 3,
                 "kind": "widget_update",
                 "data": {
                     "instance_id": "instance-1",

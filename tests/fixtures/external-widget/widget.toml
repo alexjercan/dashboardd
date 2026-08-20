@@ -11,3 +11,10 @@ width = 3
 height = 2
 frontend = "frontend/summary.js"
 focus = false
+
+[[inputs]]
+id = "message"
+name = "Message"
+type = "dashboardd.fixture-message/v1"
+variants = ["summary"]
+required = false

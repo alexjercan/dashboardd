@@ -2,6 +2,7 @@ import {
   parseInstanceList,
   parseRuntimeInstance,
   type RuntimeInstance,
+  type TypedInput,
   type WidgetDescriptor,
 } from "./protocol";
 
@@ -26,6 +27,7 @@ export type DashboardPlacement = {
   variant_id: string;
   position: Position;
   options: Record<string, boolean | number | string>;
+  inputs: Record<string, TypedInput>;
 };
 
 export type DashboardDocument = {
@@ -43,6 +45,7 @@ export type Instance = {
   variant_id: string;
   layout: InstanceLayout;
   options: Record<string, boolean | number | string>;
+  inputs: Record<string, TypedInput>;
 };
 
 export type RuntimeSnapshot = {
@@ -195,6 +198,7 @@ export async function addPlacement(
 export async function removePlacement(
   dashboardId: string,
   placementId: string,
+  descriptors: Map<string, WidgetDescriptor>,
 ): Promise<void> {
   const runtimeId = await withStoreLock(async () => {
     const store = loadDashboardStore();
@@ -204,6 +208,28 @@ export async function removePlacement(
     if (!dashboard) throw new Error("dashboard was not found");
     if (!dashboard.placements.some(({ id }) => id === placementId))
       throw new Error("widget placement was not found");
+    const requiredTarget = dashboard.links.find((link) => {
+      if (
+        link.source_instance_id !== placementId ||
+        link.target_instance_id === placementId
+      )
+        return false;
+      const target = dashboard.placements.find(
+        ({ id }) => id === link.target_instance_id,
+      );
+      if (!target) return false;
+      const descriptor = descriptors.get(target.widget_id);
+      return descriptor?.inputs.some(
+        (port) =>
+          port.id === link.target_port &&
+          port.required &&
+          appliesTo(port.variants, target.variant_id),
+      );
+    });
+    if (requiredTarget)
+      throw new Error(
+        "rebind required widget inputs before removing this widget",
+      );
     dashboard.placements = dashboard.placements.filter(
       ({ id }) => id !== placementId,
     );
@@ -222,9 +248,12 @@ export async function removePlacement(
   if (runtimeId) await deleteRuntimeInstance(runtimeId);
 }
 
-export async function reconcileRuntime(): Promise<RuntimeSnapshot> {
+export async function reconcileRuntime(
+  descriptors: Map<string, WidgetDescriptor>,
+): Promise<RuntimeSnapshot> {
   return withStoreLock(async () => {
     const store = loadDashboardStore();
+    validateDashboardBindings(store.dashboards, descriptors);
     let bindingStore = loadBindingStore();
     const response = await fetch("/api/v1/instances");
     if (!response.ok) throw await responseError(response);
@@ -285,6 +314,7 @@ export function materializeDashboard(
         widget_id: runtime.widget_id,
         variant_id: runtime.variant_id,
         options: runtime.options,
+        inputs: runtime.inputs,
         layout: {
           ...placement.position,
           width: variant.width,
@@ -343,7 +373,13 @@ async function ensureRuntimeBinding(
       runtime = (await getRuntimeInstance(runtimeId)) ?? undefined;
       if (runtime) runtimeInstances.set(runtime.id, runtime);
     }
-    if (runtime && matches(placement, runtime)) return;
+    if (runtime && matchesIdentity(placement, runtime)) {
+      if (!sameInputs(placement.inputs, runtime.inputs)) {
+        runtime = await updateRuntimeInputs(runtime.id, placement.inputs);
+        runtimeInstances.set(runtime.id, runtime);
+      }
+      return;
+    }
 
     const claim = `pending:${localId("binding")}`;
     bindings.bindings[placement.id] = claim;
@@ -385,6 +421,7 @@ async function createRuntimeInstance(
       widget_id: placement.widget_id,
       variant_id: placement.variant_id,
       options: placement.options,
+      inputs: placement.inputs,
     }),
   });
   if (!response.ok) throw await responseError(response);
@@ -400,7 +437,23 @@ async function deleteRuntimeInstance(runtimeId: string): Promise<void> {
     throw await responseError(response);
 }
 
-function matches(
+async function updateRuntimeInputs(
+  runtimeId: string,
+  inputs: Record<string, TypedInput>,
+): Promise<RuntimeInstance> {
+  const response = await fetch(
+    `/api/v1/instances/${encodeURIComponent(runtimeId)}/inputs`,
+    {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ inputs }),
+    },
+  );
+  if (!response.ok) throw await responseError(response);
+  return parseRuntimeInstance(await response.json());
+}
+
+function matchesIdentity(
   placement: DashboardPlacement,
   runtime: RuntimeInstance,
 ): boolean {
@@ -511,7 +564,8 @@ function parsePlacement(value: unknown): DashboardPlacement {
     !isRecord(value.position) ||
     !isNonNegativeInteger(value.position.column) ||
     !isNonNegativeInteger(value.position.row) ||
-    !isOptions(value.options)
+    !isOptions(value.options) ||
+    !isTypedInputs(value.inputs)
   )
     throw new Error("invalid dashboard placement");
   return value as DashboardPlacement;
@@ -527,6 +581,79 @@ function parseLink(value: unknown): DashboardLink {
   )
     throw new Error("invalid dashboard link");
   return value as DashboardLink;
+}
+
+function validateDashboardBindings(
+  dashboards: DashboardDocument[],
+  descriptors: Map<string, WidgetDescriptor>,
+): void {
+  for (const dashboard of dashboards) {
+    const placements = new Map(
+      dashboard.placements.map((placement) => [placement.id, placement]),
+    );
+    const targets = new Set<string>();
+    for (const link of dashboard.links) {
+      const target = placements.get(link.target_instance_id);
+      const source = placements.get(link.source_instance_id);
+      const targetDescriptor = target && descriptors.get(target.widget_id);
+      const sourceDescriptor = source && descriptors.get(source.widget_id);
+      if (!target || !source || !targetDescriptor || !sourceDescriptor)
+        continue;
+      const input = activePort(
+        targetDescriptor.inputs,
+        target.variant_id,
+        link.target_port,
+      );
+      const output = activePort(
+        sourceDescriptor.outputs,
+        source.variant_id,
+        link.source_port,
+      );
+      const targetKey = `${target.id}\u0000${link.target_port}`;
+      if (
+        !input ||
+        !output ||
+        input.type !== output.type ||
+        target.inputs[link.target_port] ||
+        targets.has(targetKey)
+      )
+        throw new Error("invalid Dashboard input binding");
+      targets.add(targetKey);
+    }
+    for (const placement of dashboard.placements) {
+      const descriptor = descriptors.get(placement.widget_id);
+      if (!descriptor) continue;
+      const activeInputs = descriptor.inputs.filter((port) =>
+        appliesTo(port.variants, placement.variant_id),
+      );
+      for (const [portId, input] of Object.entries(placement.inputs)) {
+        const port = activeInputs.find(({ id }) => id === portId);
+        if (!port || port.type !== input.type)
+          throw new Error("invalid Dashboard direct input");
+      }
+      for (const port of activeInputs)
+        if (
+          port.required &&
+          !placement.inputs[port.id] &&
+          !targets.has(`${placement.id}\u0000${port.id}`)
+        )
+          throw new Error(`required input ${port.name} is unbound`);
+    }
+  }
+}
+
+function activePort(
+  ports: WidgetDescriptor["inputs"],
+  variantId: string,
+  portId: string,
+): WidgetDescriptor["inputs"][number] | undefined {
+  return ports.find(
+    (port) => port.id === portId && appliesTo(port.variants, variantId),
+  );
+}
+
+function appliesTo(variants: string[], variantId: string): boolean {
+  return variants.length === 0 || variants.includes(variantId);
 }
 
 function normalizeName(name: string): string {
@@ -599,6 +726,29 @@ function isOptions(
         typeof option === "string" ||
         (typeof option === "number" && Number.isFinite(option)),
     )
+  );
+}
+
+function isTypedInputs(value: unknown): value is Record<string, TypedInput> {
+  return (
+    isRecord(value) &&
+    Object.values(value).every(
+      (input) =>
+        isRecord(input) &&
+        typeof input.type === "string" &&
+        "value" in input &&
+        Object.keys(input).every((key) => key === "type" || key === "value"),
+    )
+  );
+}
+
+function sameInputs(
+  left: Record<string, TypedInput>,
+  right: Record<string, TypedInput>,
+): boolean {
+  return (
+    JSON.stringify(Object.entries(left).sort()) ===
+    JSON.stringify(Object.entries(right).sort())
   );
 }
 

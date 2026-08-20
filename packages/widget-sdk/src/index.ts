@@ -3,12 +3,21 @@ export type WidgetOptionValue = boolean | number | string;
 /** Effective options validated for one widget variant. */
 export type WidgetOptions = Readonly<Record<string, WidgetOptionValue>>;
 
-/** Page-local typed links between placed widget instances. */
-export interface WidgetLinks {
+/** Effective typed input values supplied by the current host. */
+export interface WidgetInputs {
+  /** Returns the current value, or undefined when the input is unbound. */
+  get(input: string): unknown | undefined;
+  /** Subscribes to value changes and returns its cleanup function. */
+  subscribe(
+    input: string,
+    handler: (payload: unknown | undefined) => void,
+  ): () => void;
+}
+
+/** Typed output values published to the current host. */
+export interface WidgetOutputs {
   /** Publishes the current value of a declared output port. */
   publish(output: string, payload: unknown): void;
-  /** Subscribes to a declared input port and returns its cleanup function. */
-  subscribe(input: string, handler: (payload: unknown) => void): () => void;
 }
 
 /** Persisted package-wide public JSON state. */
@@ -27,7 +36,8 @@ export interface WidgetContext {
   variantId: string;
   instanceId: string;
   options: WidgetOptions;
-  links: WidgetLinks;
+  inputs: WidgetInputs;
+  outputs: WidgetOutputs;
   sharedState: WidgetSharedState;
   /** Sends widget-owned JSON to the backend without waiting for backend work. */
   send(payload: unknown): Promise<void>;

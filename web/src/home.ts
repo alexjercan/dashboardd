@@ -306,7 +306,7 @@ async function loadDashboards(): Promise<void> {
       );
     const widgets = parseWidgetList(await widgetsResponse.json()).widgets;
     const descriptors = new Map(widgets.map((widget) => [widget.id, widget]));
-    const snapshot = await reconcileRuntime();
+    const snapshot = await reconcileRuntime(descriptors);
     const healthResponse = await fetch("/api/v1/instance-health");
     if (!healthResponse.ok)
       throw new Error(`${healthResponse.status} ${healthResponse.statusText}`);

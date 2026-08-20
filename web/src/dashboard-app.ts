@@ -19,7 +19,7 @@ import {
   type DashboardLink,
   type Instance,
 } from "./dashboard-store";
-import { WidgetLinkBus } from "./links";
+import { WidgetInputBus } from "./links";
 import { WidgetStateBus } from "./state";
 import {
   parseInstanceHealthList,
@@ -27,6 +27,7 @@ import {
   parseWidgetList,
   type InstanceHealth,
   type Theme,
+  type TypedInput,
   type WidgetDescriptor,
   type WidgetOption,
   type WidgetVariant,
@@ -91,7 +92,7 @@ app.innerHTML = `
   <dialog id="link-widget" class="modal confirm-modal">
     <form method="dialog">
       <header><h2>Link widget</h2><button class="icon-button" value="cancel" aria-label="Close">x</button></header>
-      <label class="relink-control"><span id="link-input-name">Widget source</span><select id="link-source"></select></label>
+      <label class="relink-control"><span id="link-input-name">Widget input</span><select id="link-source"></select><textarea id="link-direct-value" rows="4" hidden></textarea></label>
       <footer><button class="button" value="cancel">Cancel</button><button id="confirm-link" class="button primary" type="button">Save link</button></footer>
     </form>
   </dialog>
@@ -186,6 +187,7 @@ const optionsElement = required<HTMLElement>("#widget-options");
 const linksFieldset = required<HTMLElement>("#widget-links-fieldset");
 const linksElement = required<HTMLElement>("#widget-links");
 const linkSourceElement = required<HTMLSelectElement>("#link-source");
+const linkDirectValue = required<HTMLTextAreaElement>("#link-direct-value");
 const linkInputName = required<HTMLElement>("#link-input-name");
 const confirmLinkButton = required<HTMLButtonElement>("#confirm-link");
 const backToWidgetsButton = required<HTMLButtonElement>("#back-to-widgets");
@@ -219,7 +221,7 @@ const frontends = new Map<string, WidgetFrontend>();
 const containers = new Map<string, HTMLElement>();
 const mounting = new Map<string, Promise<void>>();
 const pendingUpdates = new Map<string, unknown>();
-const linkBus = new WidgetLinkBus();
+const inputBus = new WidgetInputBus();
 const stateBus = new WidgetStateBus();
 let editing = route?.mode === "edit";
 let focusedInstanceId = route?.focusInstanceId ?? null;
@@ -231,6 +233,7 @@ let selectedWidget: {
   widgetId: string;
   variantId: string;
   options: Record<string, boolean | number | string>;
+  inputs: Record<string, TypedInput>;
   links: Array<{
     source_instance_id: string;
     source_port: string;
@@ -243,6 +246,7 @@ let relinkTarget: {
   instanceId: string;
   input: string;
   required: boolean;
+  type: string;
 } | null = null;
 let drag: DragState | null = null;
 let connection: RuntimeConnection;
@@ -321,6 +325,8 @@ restartWidgetButton.addEventListener(
   "click",
   () => void restartSelectedWidget(),
 );
+linkSourceElement.addEventListener("change", validateLinkDialog);
+linkDirectValue.addEventListener("input", validateLinkDialog);
 dashboardSwitcher.addEventListener("change", () => void switchDashboard());
 decreaseColumns.addEventListener(
   "click",
@@ -964,7 +970,7 @@ function applySnapshot(
   instanceHealth.clear();
   for (const record of health) instanceHealth.set(record.instance_id, record);
   for (const instance of instances) upsertInstance(instance);
-  linkBus.replace(links);
+  inputBus.replace(links);
   snapshotLoaded = true;
   renderCanvas();
 }
@@ -974,6 +980,7 @@ function upsertInstance(instance: Instance): void {
   if (previous && previous.runtime_id !== instance.runtime_id)
     removeInstance(instance.id);
   resources.set(instance.id, instance);
+  inputBus.setInputs(instance.id, instance.inputs);
   const frame = containers.get(instance.id);
   if (frame) applyLayout(frame, instance);
   if (!descriptors.has(instance.widget_id)) return;
@@ -1059,7 +1066,7 @@ async function mountWidget(instance: Instance): Promise<void> {
       variantId: instance.variant_id,
       instanceId: instance.runtime_id,
       options: instance.options,
-      links: linkBus.context(instance.id),
+      ...inputBus.context(instance.id),
       sharedState: stateBus.context(instance.widget_id),
       send: (payload) => connection.sendWidget(instance.runtime_id, payload),
     });
@@ -1403,7 +1410,7 @@ function renderLinkControls(instanceId: string, frame: HTMLElement): void {
     (port) =>
       port.variants.length === 0 || port.variants.includes(instance.variant_id),
   )) {
-    const outgoing = linkBus
+    const outgoing = inputBus
       .list()
       .filter(
         (link) =>
@@ -1425,7 +1432,7 @@ function renderLinkControls(instanceId: string, frame: HTMLElement): void {
     (port) =>
       port.variants.length === 0 || port.variants.includes(instance.variant_id),
   )) {
-    const link = linkBus
+    const link = inputBus
       .list()
       .find(
         (candidate) =>
@@ -1438,7 +1445,9 @@ function renderLinkControls(instanceId: string, frame: HTMLElement): void {
     const source = link && resources.get(link.source_instance_id);
     badge.textContent = source
       ? `${input.name}: ${instanceLabel(source)}`
-      : `${input.name}: Not linked`;
+      : instance.inputs[input.id]
+        ? `${input.name}: Direct value`
+        : `${input.name}: Unbound`;
     badge.addEventListener("click", () => openLinkDialog(instanceId, input.id));
     bindLinkHighlight(
       badge,
@@ -1474,20 +1483,22 @@ function openLinkDialog(instanceId: string, inputId: string): void {
     instanceId,
     input: inputId,
     required: input.required,
+    type: input.type,
   };
   linkInputName.textContent = input.name;
   linkSourceElement.replaceChildren();
-  const current = linkBus
+  const current = inputBus
     .list()
     .find(
       (link) =>
         link.target_instance_id === instanceId && link.target_port === inputId,
     );
+  const directInput = instance.inputs[inputId];
   if (!input.required) {
     const none = document.createElement("option");
     none.value = "";
-    none.textContent = "Not linked";
-    none.selected = !current;
+    none.textContent = "Unbound";
+    none.selected = !current && !directInput;
     linkSourceElement.append(none);
   }
   for (const source of compatibleOutputs(input.type).filter(
@@ -1501,39 +1512,63 @@ function openLinkDialog(instanceId: string, inputId: string): void {
       current.source_port === source.port;
     linkSourceElement.append(option);
   }
-  confirmLinkButton.disabled =
-    input.required && linkSourceElement.options.length === 0;
+  const direct = document.createElement("option");
+  direct.value = "direct";
+  direct.textContent = "Direct JSON value";
+  direct.selected = Boolean(directInput);
+  linkSourceElement.append(direct);
+  linkDirectValue.value = JSON.stringify(directInput?.value ?? null, null, 2);
+  validateLinkDialog();
   linkDialog.showModal();
+}
+
+function validateLinkDialog(): void {
+  linkDirectValue.hidden = linkSourceElement.value !== "direct";
+  let invalid = Boolean(relinkTarget?.required && !linkSourceElement.value);
+  if (linkSourceElement.value === "direct") {
+    try {
+      JSON.parse(linkDirectValue.value);
+    } catch {
+      invalid = true;
+    }
+  }
+  confirmLinkButton.disabled = invalid;
 }
 
 async function saveLink(): Promise<void> {
   const target = relinkTarget;
-  if (!target || (target.required && !linkSourceElement.value)) return;
+  if (!target || confirmLinkButton.disabled) return;
   confirmLinkButton.disabled = true;
   try {
-    let updated: DashboardLink | null = null;
     await updateDashboard(dashboardId, (dashboard) => {
+      const placement = dashboard.placements.find(
+        ({ id }) => id === target.instanceId,
+      );
+      if (!placement) throw new Error("widget placement was not found");
+      delete placement.inputs[target.input];
       dashboard.links = dashboard.links.filter(
         (link) =>
           link.target_instance_id !== target.instanceId ||
           link.target_port !== target.input,
       );
-      if (linkSourceElement.value) {
+      if (linkSourceElement.value === "direct") {
+        placement.inputs[target.input] = {
+          type: target.type,
+          value: JSON.parse(linkDirectValue.value),
+        };
+      } else if (linkSourceElement.value) {
         const [sourceInstanceId, sourcePort] =
           linkSourceElement.value.split("\u0000");
-        updated = {
+        dashboard.links.push({
           source_instance_id: sourceInstanceId,
           source_port: sourcePort,
           target_instance_id: target.instanceId,
           target_port: target.input,
-        };
-        dashboard.links.push(updated);
+        });
       }
     });
-    if (updated) linkBus.update(updated);
-    else linkBus.delete(target.instanceId, target.input);
     linkDialog.close();
-    renderCanvas();
+    await reconcileDashboard();
   } catch (error) {
     showError(errorMessage(error));
   } finally {
@@ -1963,6 +1998,7 @@ function renderVariants(
     widgetId: descriptor.id,
     variantId: selectedVariant.id,
     options: {},
+    inputs: {},
     links: [],
   };
   variantsElement.replaceChildren();
@@ -2025,55 +2061,77 @@ function renderLinks(descriptor: WidgetDescriptor, variantId: string): void {
     label.className = "widget-option select";
     const select = document.createElement("select");
     select.dataset.targetPort = input.id;
+    select.dataset.inputType = input.type;
     select.dataset.required = String(input.required);
-    const compatible = compatibleOutputs(input.type);
     if (!input.required) {
       const none = document.createElement("option");
       none.value = "";
-      none.textContent = "Not linked";
+      none.textContent = "Unbound";
       select.append(none);
     }
-    for (const source of compatible) {
+    for (const source of compatibleOutputs(input.type)) {
       const option = document.createElement("option");
       option.value = `${source.instance.id}\u0000${source.port}`;
       option.textContent = instanceLabel(source.instance);
       select.append(option);
     }
-    if (compatible.length === 0 && input.required) {
-      const unavailable = document.createElement("option");
-      unavailable.value = "";
-      unavailable.textContent = "Add a compatible widget first";
-      select.append(unavailable);
-      select.disabled = true;
-    }
+    const direct = document.createElement("option");
+    direct.value = "direct";
+    direct.textContent = "Direct JSON value";
+    select.append(direct);
+    const value = document.createElement("textarea");
+    value.dataset.directValue = input.id;
+    value.value = "null";
+    value.rows = 3;
+    value.hidden = select.value !== "direct";
     const text = document.createElement("span");
-    text.innerHTML = `<strong>${input.name}</strong><small>${input.required ? "Required" : "Optional"} compatible widget output</small>`;
-    label.append(select, text);
+    text.innerHTML = `<strong>${input.name}</strong><small>${input.required ? "Required" : "Optional"} ${input.type}</small>`;
+    label.append(select, value, text);
     linksElement.append(label);
-    select.addEventListener("change", updateSelectedLinks);
+    select.addEventListener("change", () => {
+      value.hidden = select.value !== "direct";
+      updateSelectedInputs();
+    });
+    value.addEventListener("input", updateSelectedInputs);
   }
-  updateSelectedLinks();
+  updateSelectedInputs();
 }
 
-function updateSelectedLinks(): void {
+function updateSelectedInputs(): void {
   if (!selectedWidget) return;
-  const controls = [
-    ...linksElement.querySelectorAll<HTMLSelectElement>("select"),
-  ];
-  selectedWidget.links = controls.flatMap((control) => {
-    if (!control.value) return [];
+  selectedWidget.inputs = {};
+  selectedWidget.links = [];
+  let invalid = false;
+  for (const control of linksElement.querySelectorAll<HTMLSelectElement>(
+    "select[data-target-port]",
+  )) {
+    const targetPort = control.dataset.targetPort ?? "";
+    if (!control.value) {
+      if (control.dataset.required === "true") invalid = true;
+      continue;
+    }
+    if (control.value === "direct") {
+      const textarea = linksElement.querySelector<HTMLTextAreaElement>(
+        `textarea[data-direct-value="${CSS.escape(targetPort)}"]`,
+      );
+      try {
+        selectedWidget.inputs[targetPort] = {
+          type: control.dataset.inputType ?? "",
+          value: JSON.parse(textarea?.value ?? ""),
+        };
+      } catch {
+        invalid = true;
+      }
+      continue;
+    }
     const [source_instance_id, source_port] = control.value.split("\u0000");
-    return [
-      {
-        source_instance_id,
-        source_port,
-        target_port: control.dataset.targetPort ?? "",
-      },
-    ];
-  });
-  confirmAddButton.disabled = controls.some(
-    (control) => control.dataset.required === "true" && !control.value,
-  );
+    selectedWidget.links.push({
+      source_instance_id,
+      source_port,
+      target_port: targetPort,
+    });
+  }
+  confirmAddButton.disabled = invalid;
 }
 
 function compatibleOutputs(linkType: string): Array<{
@@ -2190,6 +2248,7 @@ async function createSelectedWidget(): Promise<void> {
         variant_id: selection.variantId,
         position: slot,
         options: selection.options,
+        inputs: selection.inputs,
       },
       selection.links,
     );
@@ -2293,7 +2352,7 @@ async function removeSelectedWidget(): Promise<void> {
   confirmRemoveButton.disabled = true;
   clearError();
   try {
-    await removePlacement(dashboardId, removeInstanceId);
+    await removePlacement(dashboardId, removeInstanceId, descriptors);
     removeInstance(removeInstanceId);
     removeDialog.close();
   } catch (error) {
@@ -2310,7 +2369,7 @@ function removeInstance(instanceId: string): void {
   if (selectedInstanceId === instanceId) selectedInstanceId = null;
   instanceHealth.delete(instanceId);
   if (healthInstanceId === instanceId) healthDialog.close();
-  linkBus.removeInstance(instanceId);
+  inputBus.removeInstance(instanceId);
   pendingUpdates.delete(instanceId);
   frontends.get(instanceId)?.destroy();
   frontends.delete(instanceId);
@@ -2463,7 +2522,7 @@ async function reconcileDashboard(): Promise<void> {
   const theme = parseTheme(await themeResponse.json());
   const widgets = parseWidgetList(await widgetsResponse.json()).widgets;
   const descriptorMap = new Map(widgets.map((widget) => [widget.id, widget]));
-  const snapshot = await reconcileRuntime();
+  const snapshot = await reconcileRuntime(descriptorMap);
   const dashboard = snapshot.dashboards.find(({ id }) => id === dashboardId);
   if (!dashboard) {
     showError("dashboard was not found");
@@ -2518,6 +2577,14 @@ connection = connectRuntime({
       void reconcileDashboard().catch((error) =>
         showError(errorMessage(error)),
       );
+  },
+  onInstanceInputsUpdated(runtimeId, inputs) {
+    const instance = [...resources.values()].find(
+      (candidate) => candidate.runtime_id === runtimeId,
+    );
+    if (!instance) return;
+    instance.inputs = inputs;
+    inputBus.setInputs(instance.id, inputs);
   },
   onWidgetUpdate(runtimeId, payload) {
     const instance = [...resources.values()].find(

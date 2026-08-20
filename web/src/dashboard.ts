@@ -4,6 +4,7 @@ import {
   type InstanceHealth,
   type RuntimeInstance,
   type Theme,
+  type TypedInput,
   type WidgetStateResource,
 } from "./protocol";
 
@@ -17,6 +18,10 @@ export type RuntimeEvents = {
   onConfigurationError(message: string): void;
   onInstanceCreated(instance: RuntimeInstance): void;
   onInstanceDestroyed(instanceId: string): void;
+  onInstanceInputsUpdated(
+    instanceId: string,
+    inputs: Record<string, TypedInput>,
+  ): void;
   onInstanceHealth(health: InstanceHealth): void;
   onWidgetUpdate(instanceId: string, payload: unknown): void;
   onWidgetStateUpdated(state: WidgetStateResource): void;
@@ -54,6 +59,12 @@ export function connectRuntime(events: RuntimeEvents): RuntimeConnection {
           break;
         case "instance_destroyed":
           events.onInstanceDestroyed(event.data.instance_id);
+          break;
+        case "instance_inputs_updated":
+          events.onInstanceInputsUpdated(
+            event.data.instance_id,
+            event.data.inputs,
+          );
           break;
         case "instance_error":
           events.onError(event.data.instance_id, event.data.error.message);

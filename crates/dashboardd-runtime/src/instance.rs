@@ -32,11 +32,21 @@ pub struct Instance {
     pub widget_id: WidgetId,
     pub variant_id: String,
     pub options: BTreeMap<String, Value>,
+    pub inputs: BTreeMap<String, TypedInput>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TypedInput {
+    #[serde(rename = "type")]
+    pub input_type: String,
+    pub value: Value,
 }
 
 pub struct CreateInstanceSpec {
     pub variant_id: String,
     pub options: BTreeMap<String, Value>,
+    pub inputs: BTreeMap<String, TypedInput>,
 }
 
 #[derive(Clone)]
@@ -78,6 +88,8 @@ pub enum InstanceError {
     BackendUnavailable,
     #[error("widget options are invalid: {0}")]
     InvalidOptions(String),
+    #[error("widget inputs are invalid: {0}")]
+    InvalidInputs(String),
     #[error("could not save runtime state")]
     PersistenceFailed,
     #[error("widget state exceeds 64 KiB")]
@@ -199,11 +211,13 @@ impl InstanceManager {
         let options = config
             .normalize_options(&spec.variant_id, &spec.options)
             .map_err(InstanceError::InvalidOptions)?;
+        let inputs = normalize_inputs(&config, &spec.variant_id, spec.inputs)?;
         let resource = Instance {
             id: format!("instance-{}", Uuid::new_v4()),
             widget_id: config.descriptor.id.clone(),
             variant_id: spec.variant_id,
             options,
+            inputs,
         };
         tracing::info!(
             instance_id = %resource.id,
@@ -249,6 +263,25 @@ impl InstanceManager {
         });
         instance.backend.shutdown().await;
         Ok(())
+    }
+
+    pub async fn set_inputs(
+        &self,
+        instance_id: &str,
+        inputs: BTreeMap<String, TypedInput>,
+    ) -> Result<Instance, InstanceError> {
+        let mut instances = self.inner.instances.lock().await;
+        let instance = instances
+            .get_mut(instance_id)
+            .ok_or(InstanceError::UnknownInstance)?;
+        let inputs = normalize_inputs(&instance.config, &instance.resource.variant_id, inputs)?;
+        instance.resource.inputs = inputs.clone();
+        let resource = instance.resource.clone();
+        let _ = self.inner.events.send(RuntimeEvent::InstanceInputsUpdated {
+            instance_id: instance_id.into(),
+            inputs,
+        });
+        Ok(resource)
     }
 
     pub async fn send(&self, instance_id: &str, payload: Value) -> Result<(), InstanceError> {
@@ -371,6 +404,25 @@ impl InstanceManager {
             instance.backend.shutdown().await;
         }
     }
+}
+
+fn normalize_inputs(
+    config: &WidgetConfig,
+    variant_id: &str,
+    inputs: BTreeMap<String, TypedInput>,
+) -> Result<BTreeMap<String, TypedInput>, InstanceError> {
+    for (port_id, input) in &inputs {
+        let port = config.input(variant_id, port_id).ok_or_else(|| {
+            InstanceError::InvalidInputs(format!("unknown or inapplicable input port {port_id:?}"))
+        })?;
+        if input.input_type != port.link_type {
+            return Err(InstanceError::InvalidInputs(format!(
+                "input port {port_id:?} requires type {:?}",
+                port.link_type
+            )));
+        }
+    }
+    Ok(inputs)
 }
 
 fn validate_widget_state(value: &Value) -> Result<(), InstanceError> {
@@ -631,6 +683,7 @@ mod tests {
     use std::fs;
 
     use super::*;
+    use crate::widget::{WidgetDescriptor, WidgetLinkPort, WidgetVariant};
 
     fn manager(label: &str) -> (InstanceManager, std::path::PathBuf) {
         let root = std::env::temp_dir().join(format!(
@@ -652,6 +705,77 @@ mod tests {
             Err(InstanceError::UnknownInstance)
         ));
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn validates_direct_input_ports_and_exact_types() {
+        let config = WidgetConfig {
+            descriptor: WidgetDescriptor {
+                id: "fixture".into(),
+                name: "Fixture".into(),
+                description: "Fixture widget".into(),
+                variants: vec![WidgetVariant {
+                    id: "summary".into(),
+                    name: "Summary".into(),
+                    width: 1,
+                    height: 1,
+                    frontend_url: "/fixture.js".into(),
+                    focus: false,
+                }],
+                options: vec![],
+                inputs: vec![WidgetLinkPort {
+                    id: "message".into(),
+                    name: "Message".into(),
+                    link_type: "fixture.message/v1".into(),
+                    variants: vec!["summary".into()],
+                    required: true,
+                }],
+                outputs: vec![],
+            },
+            backend: "backend".into(),
+            frontends: vec!["fixture.js".into()],
+        };
+        let input = TypedInput {
+            input_type: "fixture.message/v1".into(),
+            value: serde_json::json!({"opaque": [1, true, null]}),
+        };
+        assert_eq!(
+            normalize_inputs(
+                &config,
+                "summary",
+                BTreeMap::from([("message".into(), input.clone())]),
+            )
+            .unwrap(),
+            BTreeMap::from([("message".into(), input)])
+        );
+        assert!(matches!(
+            normalize_inputs(
+                &config,
+                "summary",
+                BTreeMap::from([(
+                    "message".into(),
+                    TypedInput {
+                        input_type: "wrong/v1".into(),
+                        value: Value::Null,
+                    },
+                )]),
+            ),
+            Err(InstanceError::InvalidInputs(_))
+        ));
+        assert!(matches!(
+            normalize_inputs(
+                &config,
+                "summary",
+                BTreeMap::from([(
+                    "unknown".into(),
+                    TypedInput {
+                        input_type: "fixture.message/v1".into(),
+                        value: Value::Null,
+                    },
+                )]),
+            ),
+            Err(InstanceError::InvalidInputs(_))
+        ));
     }
 
     #[tokio::test]

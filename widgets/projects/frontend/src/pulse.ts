@@ -51,7 +51,7 @@ export function mount(
   let query = "";
 
   const publish = (project: ProjectSelection | null): void => {
-    context.links.publish("selected_project", project);
+    context.outputs.publish("selected_project", project);
   };
   const select = (project: ProjectSummary): void => {
     selectedId = selectedId === project.project_id ? null : project.project_id;

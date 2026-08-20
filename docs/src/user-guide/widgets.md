@@ -29,8 +29,8 @@ Codex Usage starts the official Codex app server, refreshes authentication, and 
 
 Detailed variants provide manual refresh. Minimal variants show the provider and important remaining percentage without controls.
 
-## Links and shared state
+## Inputs, outputs, and shared state
 
-Typed links connect compatible widget placements in a browser-local Dashboard. Link payloads are page-local and reset on reload.
+Each widget input can use a direct typed JSON value or one compatible widget output in a browser-local Dashboard. Required inputs must have one of these bindings. Dynamic output values are page-local and reset on reload. Direct values remain in the browser-local Dashboard document.
 
 Package-wide shared state is bounded JSON persisted in `runtime.json`. It is public widget data and must not contain credentials or filesystem paths.

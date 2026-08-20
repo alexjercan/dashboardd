@@ -53,7 +53,7 @@ export function mount(
     project: null,
     selectedTaskKey: null,
     publishSelection(task: Task): void {
-      context.links.publish("selected_task", {
+      context.outputs.publish("selected_task", {
         project_id: task.project_id,
         project: task.project,
         worktree_id: task.worktree_id,
@@ -62,7 +62,7 @@ export function mount(
       });
     },
     clearSelection(): void {
-      context.links.publish("selected_task", null);
+      context.outputs.publish("selected_task", null);
     },
   };
   const viewId = createViewId();
@@ -118,8 +118,9 @@ export function mount(
     },
   );
 
-  const unsubscribeProject = context.links.subscribe("project", (payload) => {
-    const project = parseProjectSelection(payload);
+  const unsubscribeProject = context.inputs.subscribe("project", (payload) => {
+    const project =
+      payload === undefined ? null : parseProjectSelection(payload);
     if (project === undefined || sameSelection(project, state.project)) return;
     state.project = project;
     void context

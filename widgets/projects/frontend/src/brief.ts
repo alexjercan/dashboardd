@@ -57,8 +57,8 @@ export function mount(
       })
       .catch(() => renderState(shadow, next.project, "Project unavailable"));
   };
-  const unsubscribe = context.links.subscribe("project", (payload) => {
-    if (payload === null) {
+  const unsubscribe = context.inputs.subscribe("project", (payload) => {
+    if (payload === null || payload === undefined) {
       selection = null;
       details = null;
       renderState(

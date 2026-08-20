@@ -10,7 +10,7 @@ use axum::{
         header::{CACHE_CONTROL, CONTENT_TYPE},
     },
     response::{IntoResponse, Response, Sse, sse::Event, sse::KeepAlive},
-    routing::{get, post},
+    routing::{get, post, put},
 };
 use dashboardd_widget_protocol::{InstanceId, WidgetId};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -28,7 +28,7 @@ use crate::{
     configuration::Theme,
     event::{self, RuntimeErrorData, RuntimeEvent},
     health::InstanceHealth,
-    instance::{CreateInstanceSpec, Instance, InstanceError},
+    instance::{CreateInstanceSpec, Instance, InstanceError, TypedInput},
     widget::{WidgetDescriptor, WidgetLinkPort, WidgetVariant},
 };
 
@@ -54,6 +54,14 @@ pub struct CreateInstance {
     pub variant_id: String,
     #[serde(default)]
     pub options: BTreeMap<String, Value>,
+    #[serde(default)]
+    pub inputs: BTreeMap<String, TypedInput>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetInstanceInputs {
+    pub inputs: BTreeMap<String, TypedInput>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -89,6 +97,7 @@ pub struct SetWidgetState {
         get_instance,
         create_instance,
         delete_instance,
+        set_instance_inputs,
         send_widget_message,
         get_widget_state,
         set_widget_state,
@@ -108,6 +117,8 @@ pub struct SetWidgetState {
         WidgetLinkPort,
         WidgetStateResource,
         SetWidgetState,
+        SetInstanceInputs,
+        TypedInput,
         WidgetList,
         WidgetVariant,
     )),
@@ -147,6 +158,10 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/api/v1/instances/{instance_id}/restart",
             post(restart_instance),
+        )
+        .route(
+            "/api/v1/instances/{instance_id}/inputs",
+            put(set_instance_inputs),
         )
         .route(
             "/api/v1/instances/{instance_id}/messages",
@@ -221,6 +236,7 @@ async fn create_instance(
             CreateInstanceSpec {
                 variant_id: request.variant_id,
                 options: request.options,
+                inputs: request.inputs,
             },
         )
         .await?;
@@ -273,6 +289,20 @@ async fn restart_instance(
     State(state): State<AppState>,
 ) -> Result<Json<InstanceHealth>, ApiError> {
     Ok(Json(state.instances.restart(&instance_id).await?))
+}
+
+#[utoipa::path(put, path = "/api/v1/instances/{instance_id}/inputs", tag = "instances", request_body = SetInstanceInputs, responses((status = 200, body = Instance), (status = 400, body = ErrorResponse), (status = 404, body = ErrorResponse)))]
+async fn set_instance_inputs(
+    AxumPath(instance_id): AxumPath<InstanceId>,
+    State(state): State<AppState>,
+    ApiJson(request): ApiJson<SetInstanceInputs>,
+) -> Result<Json<Instance>, ApiError> {
+    Ok(Json(
+        state
+            .instances
+            .set_inputs(&instance_id, request.inputs)
+            .await?,
+    ))
 }
 
 #[utoipa::path(post, path = "/api/v1/instances/{instance_id}/messages", tag = "instances", request_body(content = Value), responses((status = 202), (status = 404, body = ErrorResponse), (status = 503, body = ErrorResponse)))]
@@ -417,6 +447,7 @@ impl From<InstanceError> for ApiError {
             InstanceError::UnknownInstance => (StatusCode::NOT_FOUND, "unknown_instance"),
             InstanceError::UnknownVariant => (StatusCode::NOT_FOUND, "unknown_variant"),
             InstanceError::InvalidOptions(_) => (StatusCode::BAD_REQUEST, "invalid_options"),
+            InstanceError::InvalidInputs(_) => (StatusCode::BAD_REQUEST, "invalid_inputs"),
             InstanceError::BackendNotFound => {
                 (StatusCode::INTERNAL_SERVER_ERROR, "backend_not_found")
             }
@@ -567,6 +598,7 @@ mod tests {
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let document: Value = serde_json::from_slice(&body).unwrap();
         assert!(document["paths"]["/api/v1/instances"].is_object());
+        assert!(document["paths"]["/api/v1/instances/{instance_id}/inputs"].is_object());
         assert!(document["paths"]["/api/v1/dashboards"].is_null());
         assert!(document["paths"]["/api/v1/events"].is_object());
     }

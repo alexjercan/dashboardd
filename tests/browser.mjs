@@ -896,7 +896,7 @@ try {
   await page.locator('.widget-option input[type="text"]').fill(tatrRoot);
   assert.equal(await page.locator("#widget-links-fieldset").isVisible(), true);
   assert.match(
-    await page.locator("#widget-links select option").textContent(),
+    await page.locator("#widget-links select option").first().textContent(),
     /Tatr Tasks at column 1, row 4/,
   );
   await page.locator("#confirm-add").click();
@@ -919,7 +919,7 @@ try {
 
   await page.locator('.dashboard-slot[data-column="0"][data-row="6"]').click();
   await page.locator('.widget-choice[data-widget-id="projects"]').click();
-  const rootsControl = page.locator(".widget-option textarea");
+  const rootsControl = page.locator("#widget-options textarea");
   assert.equal(
     await rootsControl.isVisible(),
     true,
@@ -936,9 +936,9 @@ try {
   await page.locator('.dashboard-slot[data-column="3"][data-row="6"]').click();
   await page.locator('.widget-choice[data-widget-id="projects"]').click();
   await page.locator(".variant-choice", { hasText: "Project Brief" }).click();
-  await page.locator(".widget-option textarea").fill(tatrRoot);
+  await page.locator("#widget-options textarea").fill(tatrRoot);
   assert.match(
-    await page.locator("#widget-links select option").textContent(),
+    await page.locator("#widget-links select option").first().textContent(),
     /Projects at column 1, row 7/,
   );
   await page.locator("#confirm-add").click();
@@ -950,10 +950,60 @@ try {
     .locator(".state", { hasText: "Select a project" })
     .waitFor();
 
+  await page.locator('.dashboard-slot[data-column="6"][data-row="6"]').click();
+  await page.locator(".widget-choice", { hasText: "External Fixture" }).click();
+  await page.locator("#widget-links select").selectOption("direct");
+  await page
+    .locator('#widget-links textarea[data-direct-value="message"]')
+    .fill('{"text":"first"}');
+  await page.locator("#confirm-add").click();
+  const directInstance = await localInstanceAt(page, dashboardId, 6, 6);
+  assert.deepEqual(directInstance.inputs, {
+    message: {
+      type: "dashboardd.fixture-message/v1",
+      value: { text: "first" },
+    },
+  });
+  const directFrame = page.locator(`[data-instance-id="${directInstance.id}"]`);
+  await directFrame
+    .locator('.fixture-input:text-is(\'{"text":"first"}\')')
+    .waitFor();
+  await directFrame.locator(".widget-link-badge.input").click();
+  await page.locator("#link-source").selectOption("direct");
+  await page.locator("#link-direct-value").fill('{"text":"updated"}');
+  await page.locator("#confirm-link").click();
+  await directFrame
+    .locator('.fixture-input:text-is(\'{"text":"updated"}\')')
+    .waitFor();
+  assert.equal(
+    (await localInstanceAt(page, dashboardId, 6, 6)).runtime_id,
+    directInstance.runtime_id,
+    "direct input updates retain the runtime instance",
+  );
+  await directFrame.locator(".widget-link-badge.input").click();
+  await page.locator("#link-source").selectOption("");
+  await page.locator("#confirm-link").click();
+  await directFrame
+    .locator('.fixture-input:text-is("Input is unbound")')
+    .waitFor();
+  await removeWidget(page, directInstance.id);
+
+  const invalidInput = await page.request.post(`${dashboardApiUrl}/instances`, {
+    data: {
+      widget_id: "external-fixture",
+      variant_id: "summary",
+      inputs: {
+        message: { type: "wrong/v1", value: null },
+      },
+    },
+  });
+  assert.equal(invalidInput.status(), 400);
+  assert.equal((await invalidInput.json()).error.code, "invalid_inputs");
+
   const projectFilterBadge = tatrFrame.locator(".widget-link-badge.input");
   assert.equal(
     await projectFilterBadge.textContent(),
-    "Project filter: Not linked",
+    "Project filter: Unbound",
   );
   await projectFilterBadge.click();
   assert.equal(
@@ -1533,6 +1583,10 @@ try {
     .waitFor();
 
   await page.locator("#edit-layout").click();
+  await projectFrame.locator(".widget-link-badge.input").click();
+  await page.locator("#link-source").selectOption("direct");
+  await page.locator("#link-direct-value").fill("null");
+  await page.locator("#confirm-link").click();
   await removeWidget(page, projectsListInstance.id);
   await projectsListFrame.waitFor({ state: "detached" });
   await projectFrame
@@ -1550,10 +1604,14 @@ try {
     `${baseUrl}/api/v1/widget-state/projects`,
   );
   assert.equal((await retainedPins.json()).value.pins.length, 2);
+  await detailsFrame.locator(".widget-link-badge.input").click();
+  await page.locator("#link-source").selectOption("direct");
+  await page.locator("#link-direct-value").fill("null");
+  await page.locator("#confirm-link").click();
   await removeWidget(page, tatrInstance.id);
   await tatrFrame.waitFor({ state: "detached" });
   await detailsFrame
-    .locator(".widget-link-badge.input", { hasText: "Not linked" })
+    .locator(".widget-link-badge.input", { hasText: "Direct value" })
     .waitFor();
   await removeWidget(page, detailsInstance.id);
   await detailsFrame.waitFor({ state: "detached" });
@@ -1931,12 +1989,13 @@ async function exerciseUsageCommands(page, widgetId) {
       variantId: variant,
       instanceId: `${id}-command-test`,
       options: { display_mode: "usage" },
-      links: {
-        publish() {},
+      inputs: {
+        get() {},
         subscribe() {
           return () => {};
         },
       },
+      outputs: { publish() {} },
       async send(payload) {
         commands.push(payload);
       },
@@ -1972,12 +2031,13 @@ async function exerciseUsageCommands(page, widgetId) {
       variantId: "minimal",
       instanceId: `${id}-minimal-command-test`,
       options: {},
-      links: {
-        publish() {},
+      inputs: {
+        get() {},
         subscribe() {
           return () => {};
         },
       },
+      outputs: { publish() {} },
       async send() {},
     });
     minimalFrontend.update({

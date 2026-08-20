@@ -27,7 +27,8 @@ export interface WidgetContext {
   variantId: string;
   instanceId: string;
   options: Readonly<Record<string, boolean | number | string>>;
-  links: WidgetLinks;
+  inputs: WidgetInputs;
+  outputs: WidgetOutputs;
   sharedState: WidgetSharedState;
   send(payload: unknown): Promise<void>;
 }
@@ -60,16 +61,25 @@ export interface WidgetFrontend {
 
 Options and frontend state are visible browser data. Do not place secrets or sensitive paths in either.
 
-## Links
+## Inputs and outputs
 
 ```ts
-interface WidgetLinks {
+interface WidgetInputs {
+  get(input: string): unknown | undefined;
+  subscribe(
+    input: string,
+    handler: (payload: unknown | undefined) => void,
+  ): () => void;
+}
+
+interface WidgetOutputs {
   publish(output: string, payload: unknown): void;
-  subscribe(input: string, handler: (payload: unknown) => void): () => void;
 }
 ```
 
-Links are typed in the runtime manifest. Payloads are page-local and reset on reload. `subscribe()` immediately supplies current state when available. Call the returned cleanup function from `destroy()`.
+Inputs and outputs are typed in the runtime manifest. A host can supply an input from a direct typed value or a dynamic output link. `get()` returns the effective value. `subscribe()` supplies the effective value immediately and uses `undefined` when the input is unbound or removed. Call the cleanup function from `destroy()`.
+
+Direct values use `{ "type": "<manifest-type>", "value": <opaque-json> }`. dashboardd validates the exact type string but leaves the JSON value opaque. Values and dynamic output payloads are public browser data. Do not include secrets or filesystem paths.
 
 ## Shared state
 

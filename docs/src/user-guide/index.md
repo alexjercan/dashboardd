@@ -1,6 +1,6 @@
 # User guide
 
-A dashboard owns a canonical 3 to 24 column layout, widget instances, options, and links. Desktop layouts fill the viewport. Narrow displays project the same composition into a scrolling three-column view.
+A browser-local Dashboard owns a canonical 3 to 24 column layout, widget placements, options, direct inputs, and links. Desktop layouts fill the viewport. Narrow displays project the same composition into a scrolling three-column view.
 
 Dashboard routes are:
 

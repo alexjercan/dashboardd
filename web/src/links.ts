@@ -1,93 +1,120 @@
-import type { WidgetLinks } from "@dashboardd/widget-sdk";
+import type { WidgetContext } from "@dashboardd/widget-sdk";
 import type { DashboardLink } from "./dashboard-store";
+import type { TypedInput } from "./protocol";
 
-type Handler = (payload: unknown) => void;
+type Handler = (payload: unknown | undefined) => void;
+type Capabilities = Pick<WidgetContext, "inputs" | "outputs">;
 
-export class WidgetLinkBus {
+export class WidgetInputBus {
   private links: DashboardLink[] = [];
+  private direct = new Map<string, Record<string, TypedInput>>();
   private latest = new Map<string, unknown>();
   private subscribers = new Map<string, Set<Handler>>();
 
-  context(instanceId: string): WidgetLinks {
+  context(instanceId: string): Capabilities {
     return {
-      publish: (output, payload) => this.publish(instanceId, output, payload),
-      subscribe: (input, handler) => this.subscribe(instanceId, input, handler),
+      inputs: {
+        get: (input) => this.value(instanceId, input),
+        subscribe: (input, handler) =>
+          this.subscribe(instanceId, input, handler),
+      },
+      outputs: {
+        publish: (output, payload) => this.publish(instanceId, output, payload),
+      },
     };
   }
 
+  setInputs(instanceId: string, inputs: Record<string, TypedInput>): void {
+    const previous = this.direct.get(instanceId) ?? {};
+    this.direct.set(instanceId, inputs);
+    for (const input of new Set([
+      ...Object.keys(previous),
+      ...Object.keys(inputs),
+    ])) {
+      if (this.linkFor(instanceId, input)) continue;
+      const before = previous[input]?.value;
+      const after = inputs[input]?.value;
+      if (!sameValue(before, after)) this.deliver(instanceId, input, after);
+    }
+  }
+
   replace(links: DashboardLink[]): void {
-    for (const previous of this.links)
-      if (
-        !links.some(
-          (link) =>
-            link.source_instance_id === previous.source_instance_id &&
-            link.source_port === previous.source_port &&
-            link.target_instance_id === previous.target_instance_id &&
-            link.target_port === previous.target_port,
-        )
-      )
-        this.deliver(previous.target_instance_id, previous.target_port, null);
+    const targets = new Set(
+      [...this.links, ...links].map((link) =>
+        key(link.target_instance_id, link.target_port),
+      ),
+    );
+    const previous = new Map(
+      [...targets].map((target) => {
+        const [instanceId, input] = splitKey(target);
+        return [target, this.value(instanceId, input)];
+      }),
+    );
     this.links = [...links];
-    for (const link of links) this.replay(link);
+    for (const target of targets) {
+      const [instanceId, input] = splitKey(target);
+      const value = this.value(instanceId, input);
+      if (!sameValue(previous.get(target), value))
+        this.deliver(instanceId, input, value);
+    }
   }
 
   update(link: DashboardLink): void {
-    const previous = this.links.find(
-      (existing) =>
-        existing.target_instance_id === link.target_instance_id &&
-        existing.target_port === link.target_port,
-    );
-    this.links = this.links.filter(
-      (existing) =>
-        existing.target_instance_id !== link.target_instance_id ||
-        existing.target_port !== link.target_port,
-    );
-    this.links.push(link);
-    if (
-      previous &&
-      (previous.source_instance_id !== link.source_instance_id ||
-        previous.source_port !== link.source_port)
-    )
-      this.deliver(link.target_instance_id, link.target_port, null);
-    this.replay(link);
+    this.replace([
+      ...this.links.filter(
+        (existing) =>
+          existing.target_instance_id !== link.target_instance_id ||
+          existing.target_port !== link.target_port,
+      ),
+      link,
+    ]);
   }
 
   delete(targetInstanceId: string, targetPort: string): void {
-    const linked = this.links.some(
-      (link) =>
-        link.target_instance_id === targetInstanceId &&
-        link.target_port === targetPort,
+    this.replace(
+      this.links.filter(
+        (link) =>
+          link.target_instance_id !== targetInstanceId ||
+          link.target_port !== targetPort,
+      ),
     );
-    this.links = this.links.filter(
-      (link) =>
-        link.target_instance_id !== targetInstanceId ||
-        link.target_port !== targetPort,
-    );
-    if (linked) this.deliver(targetInstanceId, targetPort, null);
   }
 
   removeInstance(instanceId: string): void {
-    const removed = this.links.filter(
-      (link) =>
-        link.source_instance_id === instanceId ||
-        link.target_instance_id === instanceId,
+    this.replace(
+      this.links.filter(
+        (link) =>
+          link.source_instance_id !== instanceId &&
+          link.target_instance_id !== instanceId,
+      ),
     );
-    this.links = this.links.filter(
-      (link) =>
-        link.source_instance_id !== instanceId &&
-        link.target_instance_id !== instanceId,
-    );
-    for (const link of removed)
-      if (link.source_instance_id === instanceId)
-        this.deliver(link.target_instance_id, link.target_port, null);
-    for (const key of this.latest.keys())
-      if (key.startsWith(`${instanceId}\u0000`)) this.latest.delete(key);
-    for (const key of this.subscribers.keys())
-      if (key.startsWith(`${instanceId}\u0000`)) this.subscribers.delete(key);
+    this.direct.delete(instanceId);
+    for (const stored of this.latest.keys())
+      if (stored.startsWith(`${instanceId}\u0000`)) this.latest.delete(stored);
+    for (const subscription of this.subscribers.keys())
+      if (subscription.startsWith(`${instanceId}\u0000`))
+        this.subscribers.delete(subscription);
   }
 
   list(): readonly DashboardLink[] {
     return this.links;
+  }
+
+  private value(instanceId: string, input: string): unknown | undefined {
+    const link = this.linkFor(instanceId, input);
+    if (link)
+      return this.latest.get(key(link.source_instance_id, link.source_port));
+    return this.direct.get(instanceId)?.[input]?.value;
+  }
+
+  private linkFor(
+    instanceId: string,
+    input: string,
+  ): DashboardLink | undefined {
+    return this.links.find(
+      (link) =>
+        link.target_instance_id === instanceId && link.target_port === input,
+    );
   }
 
   private publish(instanceId: string, output: string, payload: unknown): void {
@@ -109,35 +136,20 @@ export class WidgetLinkBus {
       this.subscribers.set(subscription, handlers);
     }
     handlers.add(handler);
-    const link = this.links.find(
-      (candidate) =>
-        candidate.target_instance_id === instanceId &&
-        candidate.target_port === input,
-    );
-    if (link) {
-      const source = key(link.source_instance_id, link.source_port);
-      if (this.latest.has(source)) {
-        const payload = this.latest.get(source);
-        queueMicrotask(() => handler(payload));
-      }
-    }
+    queueMicrotask(() => {
+      if (handlers?.has(handler)) handler(this.value(instanceId, input));
+    });
     return () => {
       handlers?.delete(handler);
       if (handlers?.size === 0) this.subscribers.delete(subscription);
     };
   }
 
-  private replay(link: DashboardLink): void {
-    const source = key(link.source_instance_id, link.source_port);
-    if (this.latest.has(source))
-      this.deliver(
-        link.target_instance_id,
-        link.target_port,
-        this.latest.get(source),
-      );
-  }
-
-  private deliver(instanceId: string, input: string, payload: unknown): void {
+  private deliver(
+    instanceId: string,
+    input: string,
+    payload: unknown | undefined,
+  ): void {
     for (const handler of this.subscribers.get(key(instanceId, input)) ?? [])
       handler(payload);
   }
@@ -145,4 +157,18 @@ export class WidgetLinkBus {
 
 function key(instanceId: string, port: string): string {
   return `${instanceId}\u0000${port}`;
+}
+
+function splitKey(value: string): [string, string] {
+  const separator = value.indexOf("\u0000");
+  return [value.slice(0, separator), value.slice(separator + 1)];
+}
+
+function sameValue(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  try {
+    return JSON.stringify(left) === JSON.stringify(right);
+  } catch {
+    return false;
+  }
 }

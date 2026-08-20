@@ -69,6 +69,6 @@ Defaults must satisfy their type and constraints. `variants` limits an option to
 
 Options are public configuration. Never use options for secrets.
 
-## Link ports
+## Input and output ports
 
-Inputs and outputs declare a unique ID, display name, semantic type, applicable variants, and whether an input is required. dashboardd links ports only when their type strings match exactly.
+Inputs and outputs declare a unique ID, display name, semantic type, applicable variants, and whether an input is required. A host binds each input to one direct typed value or compatible dynamic output. Type strings must match exactly. dashboardd leaves input and output JSON values opaque.

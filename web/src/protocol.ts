@@ -1,4 +1,4 @@
-export const EVENT_VERSION = 2;
+export const EVENT_VERSION = 3;
 
 export type Theme = {
   fonts: { sans: string; mono: string };
@@ -69,11 +69,14 @@ export type InstanceHealth = {
   restart_count: number;
 };
 
+export type TypedInput = { type: string; value: unknown };
+
 export type RuntimeInstance = {
   id: string;
   widget_id: string;
   variant_id: string;
   options: Record<string, boolean | number | string>;
+  inputs: Record<string, TypedInput>;
 };
 
 export type WidgetList = { widgets: WidgetDescriptor[] };
@@ -96,6 +99,11 @@ export type RuntimeEvent =
       version: typeof EVENT_VERSION;
       kind: "instance_destroyed";
       data: { instance_id: string };
+    }
+  | {
+      version: typeof EVENT_VERSION;
+      kind: "instance_inputs_updated";
+      data: { instance_id: string; inputs: Record<string, TypedInput> };
     }
   | {
       version: typeof EVENT_VERSION;
@@ -171,7 +179,8 @@ export function parseRuntimeInstance(value: unknown): RuntimeInstance {
     typeof value.id !== "string" ||
     typeof value.widget_id !== "string" ||
     typeof value.variant_id !== "string" ||
-    !isOptions(value.options)
+    !isOptions(value.options) ||
+    !isTypedInputs(value.inputs)
   )
     throw new Error("invalid runtime instance");
   return {
@@ -179,6 +188,7 @@ export function parseRuntimeInstance(value: unknown): RuntimeInstance {
     widget_id: value.widget_id,
     variant_id: value.variant_id,
     options: value.options,
+    inputs: value.inputs,
   };
 }
 
@@ -250,6 +260,20 @@ export function parseRuntimeEvent(value: unknown): RuntimeEvent {
           data: { instance_id: value.data.instance_id },
         };
       break;
+    case "instance_inputs_updated":
+      if (
+        typeof value.data.instance_id === "string" &&
+        isTypedInputs(value.data.inputs)
+      )
+        return {
+          version: EVENT_VERSION,
+          kind: value.kind,
+          data: {
+            instance_id: value.data.instance_id,
+            inputs: value.data.inputs,
+          },
+        };
+      break;
     case "instance_error":
       if (
         (value.data.instance_id === null ||
@@ -304,6 +328,19 @@ export function parseRuntimeEvent(value: unknown): RuntimeEvent {
       break;
   }
   throw new Error("unknown runtime event");
+}
+
+function isTypedInputs(value: unknown): value is Record<string, TypedInput> {
+  return (
+    isRecord(value) &&
+    Object.values(value).every(
+      (input) =>
+        isRecord(input) &&
+        typeof input.type === "string" &&
+        "value" in input &&
+        Object.keys(input).every((key) => key === "type" || key === "value"),
+    )
+  );
 }
 
 function parseWidget(value: unknown): WidgetDescriptor {
