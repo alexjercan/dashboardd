@@ -122,6 +122,14 @@ struct TaskSelection {
     task_id: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ArtifactReference {
+    project_id: String,
+    worktree_id: String,
+    task_id: String,
+    artifact: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum ArtifactKind {
@@ -505,6 +513,101 @@ async fn resolve_selected_project(
     Err("Selected project worktree is unavailable".into())
 }
 
+async fn resolve_artifact_reference(
+    settings: &Settings,
+    reference: &ArtifactReference,
+) -> Result<(TaskSelection, PathBuf), String> {
+    for candidate in discover_projects(&settings.root, settings.recursive)? {
+        let project = project_name(&settings.root, &candidate);
+        let canonical = match candidate.canonicalize() {
+            Ok(path) => path,
+            Err(_) => continue,
+        };
+        let git = canonical.join(".git").is_dir() || canonical.join(".git").is_file();
+        if !git {
+            if opaque_id("project", &canonical) == reference.project_id
+                && opaque_id("worktree", &canonical) == reference.worktree_id
+            {
+                return Ok((
+                    TaskSelection {
+                        project_id: reference.project_id.clone(),
+                        project,
+                        worktree_id: reference.worktree_id.clone(),
+                        worktree: "Primary".into(),
+                        task_id: reference.task_id.clone(),
+                    },
+                    canonical,
+                ));
+            }
+            continue;
+        }
+        let common = run_git(
+            &canonical,
+            &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+        )
+        .await
+        .ok()
+        .and_then(|output| {
+            PathBuf::from(String::from_utf8_lossy(&output).trim())
+                .canonicalize()
+                .ok()
+        });
+        let listing = run_git(&canonical, &["worktree", "list", "--porcelain", "-z"])
+            .await
+            .ok();
+        let (Some(common), Some(listing)) = (common, listing) else {
+            continue;
+        };
+        if opaque_id("project", &common) != reference.project_id
+            && opaque_id("project", &canonical) != reference.project_id
+        {
+            continue;
+        }
+        for (index, path) in parse_worktree_paths(&listing)
+            .into_iter()
+            .take(MAX_WORKTREES)
+            .enumerate()
+        {
+            let Ok(path) = path.canonicalize() else {
+                continue;
+            };
+            if opaque_id("worktree", &path) != reference.worktree_id || !path.join("tasks").is_dir()
+            {
+                continue;
+            }
+            let worktree = if index == 0 {
+                "Primary".into()
+            } else {
+                worktree_name(&path).await
+            };
+            return Ok((
+                TaskSelection {
+                    project_id: reference.project_id.clone(),
+                    project,
+                    worktree_id: reference.worktree_id.clone(),
+                    worktree,
+                    task_id: reference.task_id.clone(),
+                },
+                path,
+            ));
+        }
+    }
+    Err("Selected project worktree is unavailable".into())
+}
+
+async fn worktree_name(path: &Path) -> String {
+    run_git(path, &["branch", "--show-current"])
+        .await
+        .ok()
+        .and_then(|output| {
+            let branch = String::from_utf8_lossy(&output);
+            let branch = branch.trim();
+            (!branch.is_empty() && branch.len() <= 256 && !branch.chars().any(char::is_control))
+                .then(|| branch.to_owned())
+        })
+        .unwrap_or_else(|| "Detached".into())
+}
+
 fn parse_worktree_paths(output: &[u8]) -> Vec<PathBuf> {
     let mut paths = Vec::new();
     let mut path = None;
@@ -530,6 +633,14 @@ fn opaque_id(kind: &str, path: &Path) -> String {
         "{kind}-{}",
         &blake3::hash(path.as_os_str().as_encoded_bytes()).to_hex()[..20]
     )
+}
+
+fn valid_opaque_id(kind: &str, value: &str) -> bool {
+    value
+        .strip_prefix(&format!("{kind}-"))
+        .is_some_and(|digest| {
+            digest.len() == 20 && digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+        })
 }
 
 fn valid_task_id(value: &str) -> bool {
@@ -617,18 +728,22 @@ fn parse_project_selection(payload: &Value) -> Option<ProjectSelection> {
     })
 }
 
-fn parse_selection(payload: &Value) -> Option<TaskSelection> {
-    let selection = parse_project_selection(payload)?;
+fn parse_artifact_reference(payload: &Value) -> Option<ArtifactReference> {
+    let project_id = payload.get("project_id")?.as_str()?;
+    let worktree_id = payload.get("worktree_id")?.as_str()?;
     let task_id = payload.get("task_id")?.as_str()?;
-    if !valid_task_id(task_id) {
+    let artifact = parse_artifact(payload)?;
+    if !valid_opaque_id("project", project_id)
+        || !valid_opaque_id("worktree", worktree_id)
+        || !valid_task_id(task_id)
+    {
         return None;
     }
-    Some(TaskSelection {
-        project_id: selection.project_id,
-        project: selection.project,
-        worktree_id: selection.worktree_id,
-        worktree: selection.worktree,
+    Some(ArtifactReference {
+        project_id: project_id.into(),
+        worktree_id: worktree_id.into(),
         task_id: task_id.into(),
+        artifact,
     })
 }
 
@@ -918,31 +1033,35 @@ async fn handle_command(
             instance_id,
             settings,
             views,
-        } if payload.get("command").and_then(Value::as_str) == Some("select_task") => {
+        } if payload.get("command").and_then(Value::as_str) == Some("select_reference") => {
             let Some(view_id) = parse_view_id(payload) else {
                 return Ok(false);
             };
-            let Some(selection) = parse_selection(payload) else {
+            let Some(reference) = parse_artifact_reference(payload) else {
                 return Ok(false);
             };
-            let project_path = resolve_selected_project(
-                settings,
-                &ProjectSelection {
-                    project_id: selection.project_id.clone(),
-                    project: selection.project.clone(),
-                    worktree_id: selection.worktree_id.clone(),
-                    worktree: selection.worktree.clone(),
-                },
-            )
-            .await
-            .unwrap_or_default();
+            let artifact = reference.artifact.clone();
+            let (selection, project_path) = resolve_artifact_reference(settings, &reference)
+                .await
+                .unwrap_or_else(|_| {
+                    (
+                        TaskSelection {
+                            project_id: reference.project_id,
+                            project: "Project".into(),
+                            worktree_id: reference.worktree_id,
+                            worktree: "Worktree".into(),
+                            task_id: reference.task_id,
+                        },
+                        PathBuf::new(),
+                    )
+                });
             limit_views(views, &view_id);
             views.insert(
                 view_id.clone(),
                 DetailView {
                     selection,
                     project_path,
-                    artifact: "TASK.md".into(),
+                    artifact,
                     previous: None,
                 },
             );
@@ -955,19 +1074,19 @@ async fn handle_command(
             let Some(view_id) = parse_view_id(payload) else {
                 return Ok(false);
             };
-            let Some(selection) = parse_selection(payload) else {
-                return Ok(false);
-            };
-            let Some(artifact) = parse_artifact(payload) else {
+            let Some(reference) = parse_artifact_reference(payload) else {
                 return Ok(false);
             };
             let Some(view) = views.get_mut(&view_id) else {
                 return Ok(false);
             };
-            if view.selection != selection {
+            if view.selection.project_id != reference.project_id
+                || view.selection.worktree_id != reference.worktree_id
+                || view.selection.task_id != reference.task_id
+            {
                 return Ok(false);
             }
-            view.artifact = artifact;
+            view.artifact = reference.artifact;
             view.previous = None;
             publish_detail(stdout, instance_id, &view_id, views, true).await?;
             Ok(true)
@@ -1366,6 +1485,19 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resolved, worktree);
+        let reference = ArtifactReference {
+            project_id: selection.project_id.clone(),
+            worktree_id: selection.worktree_id.clone(),
+            task_id: "20260814-170000".into(),
+            artifact: "TASK.md".into(),
+        };
+        let (resolved_selection, resolved_path) = resolve_artifact_reference(&settings, &reference)
+            .await
+            .unwrap();
+        assert_eq!(resolved_path, worktree);
+        assert_eq!(resolved_selection.project, "sample");
+        assert_eq!(resolved_selection.worktree, "feature/tasks");
+        assert_eq!(resolved_selection.task_id, reference.task_id);
         let snapshot = Loader::default()
             .load(&settings, Some((&selection, &resolved)))
             .unwrap();
@@ -1392,6 +1524,24 @@ mod tests {
         assert_eq!(artifacts[0].path, "TASK.md");
         assert!(parse_artifact(&serde_json::json!({"artifact": "notes/file.md"})).is_some());
         assert!(parse_artifact(&serde_json::json!({"artifact": "../file.md"})).is_none());
+        assert!(
+            parse_artifact_reference(&serde_json::json!({
+                "project_id": "project-0123456789abcdefabcd",
+                "worktree_id": "worktree-0123456789abcdefabcd",
+                "task_id": "20260814-160000",
+                "artifact": "notes/file.md"
+            }))
+            .is_some()
+        );
+        assert!(
+            parse_artifact_reference(&serde_json::json!({
+                "project_id": "/private/project",
+                "worktree_id": "worktree-0123456789abcdefabcd",
+                "task_id": "20260814-160000",
+                "artifact": "notes/file.md"
+            }))
+            .is_none()
+        );
         assert!(parse_artifact(&serde_json::json!({"artifact": "/file.md"})).is_none());
         fs::remove_dir_all(root).unwrap();
     }

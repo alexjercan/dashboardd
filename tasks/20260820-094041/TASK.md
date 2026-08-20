@@ -124,11 +124,19 @@ Step status: COMPLETE.
 
 ### 7. Add direct Tatr Task Artifact surfaces
 
-- Define direct project, worktree, task, and artifact reference inputs.
-- Validate opaque identities and resolve the selected artifact without hidden Projects or Tasks widgets.
-- Keep filesystem paths and sensitive values out of browser payloads and control logs.
+Accepted contract:
 
-Completion gate: `dashboardctl` can open a specific Tatr task artifact in a standalone native window.
+- Replace the separate task-selection link with one atomic `artifact` input and `selected_artifact` output of type `tatr.task-artifact-reference/v1`.
+- The opaque value contains `project_id`, `worktree_id`, `task_id`, and a bounded task-relative `artifact` path. Do not include project or worktree display labels in the input.
+- The Tasks variant publishes `TASK.md` for a selected task. The Artifact variant resolves project and worktree labels in the backend, opens the requested initial artifact, and retains its existing picker for switching to other artifacts in the same task and window.
+- Replace the old `selected_task`, `task`, and `tatr.task-selection/v1` contract without compatibility aliases.
+- Keep `root` and `recursive` as per-instance widget options. Local browser visibility of configured paths is acceptable. Keep existing metadata-only control audit logging.
+- Validate opaque project and worktree IDs, strict task IDs, and bounded relative artifact paths. Resolve identities only against discovered local projects and return no absolute path.
+- Use the generic typed `dashboardctl open` and `update` commands. Do not add a path resolver or data-query API.
+
+Completion gate: `dashboardctl` can open a specific Tatr task artifact in a standalone native window, and that window can switch to another artifact for the same task.
+
+Step status: COMPLETE.
 
 ### 8. Package the desktop service
 
@@ -301,6 +309,27 @@ Completion gate: the packaged desktop service starts from rofi, accepts control 
 - Live update, focus, list, close, and Quit commands pass. Close removes the instance and surface; Quit exits the recorded PID and removes the control socket.
 - Full workspace tests and Clippy with warnings denied pass. Contract, SDK, production frontend, widget preparation, Chromium integration, and documentation builds pass.
 - Updated the root npm dependency hash for Nix. `nix flake check --no-build` remains blocked by the local Nix 2.34 evaluator producing an unrealized filtered Rust source store path; checking the archived flake fails at the same rust-flake source lookup.
+
+## Step 7 implementation notes
+
+- Replaced the Tasks variant's `selected_task` output and Artifact variant's `task` input with atomic `selected_artifact` and `artifact` ports using `tatr.task-artifact-reference/v1`.
+- The Tasks frontend publishes only project ID, worktree ID, task ID, and `TASK.md`. The Artifact frontend uses the input artifact as its initial selection and keeps picker changes local to the current view.
+- Added strict project and worktree opaque-ID parsing to the backend. Direct references resolve IDs against discovered projects and Git worktrees, derive display labels locally, and retain existing task ID and relative artifact path guards.
+- Kept generic desktop open and update operations. The feature adds no path resolver, domain-specific desktop command, or data-query API.
+
+## Step 7 bugs and fixes
+
+- The old task-selection value depended on project and worktree display labels supplied by another frontend. Direct references now contain identity only; the backend resolves labels from the matching project and Git branch.
+- Four independent identity inputs could produce mixed transient references during updates. One composite input makes project, worktree, task, and initial artifact replacement atomic.
+- The first full browser run retained the old input-port display label assertion. Updated the scenario to require the new `Task artifact` label; the complete rerun passed.
+
+## Step 7 verification results
+
+- Focused backend tests and Clippy with warnings denied pass. The production Tatr frontend build passes.
+- A live `dashboardctl open` resolved task `20260814-175958` from opaque project and worktree IDs, opened `TASK.md` in a healthy 720x720 floating native window, and retained the artifact picker.
+- User playtest confirmed the initial artifact rendered and the same window switched to another task artifact.
+- Controlled close and Quit removed the surface, instance, process, and control socket.
+- Full workspace tests and Clippy with warnings denied pass. Contract, SDK, production frontend, widget preparation, Chromium integration, and documentation builds pass.
 
 ## Step 2 implementation notes
 

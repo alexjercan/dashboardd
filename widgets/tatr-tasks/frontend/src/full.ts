@@ -53,16 +53,15 @@ export function mount(
     project: null,
     selectedTaskKey: null,
     publishSelection(task: Task): void {
-      context.outputs.publish("selected_task", {
+      context.outputs.publish("selected_artifact", {
         project_id: task.project_id,
-        project: task.project,
         worktree_id: task.worktree_id,
-        worktree: task.worktree,
         task_id: task.id,
+        artifact: "TASK.md",
       });
     },
     clearSelection(): void {
-      context.outputs.publish("selected_task", null);
+      context.outputs.publish("selected_artifact", null);
     },
   };
   const viewId = createViewId();

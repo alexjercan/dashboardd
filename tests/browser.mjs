@@ -301,7 +301,7 @@ try {
     catalog
       .find((widget) => widget.id === "tatr-tasks")
       .outputs.map((port) => [port.id, port.type, port.variants]),
-    [["selected_task", "tatr.task-selection/v1", ["full"]]],
+    [["selected_artifact", "tatr.task-artifact-reference/v1", ["full"]]],
   );
   assert.deepEqual(
     catalog
@@ -309,7 +309,7 @@ try {
       .inputs.map((port) => [port.id, port.type, port.variants, port.required]),
     [
       ["project", "dashboardd.project-selection/v1", ["full"], false],
-      ["task", "tatr.task-selection/v1", ["details"], true],
+      ["artifact", "tatr.task-artifact-reference/v1", ["details"], true],
     ],
   );
   assert.deepEqual(
@@ -914,7 +914,7 @@ try {
   await page.locator(".widget-link-badge.output").waitFor();
   assert.match(
     await detailsFrame.locator(".widget-link-badge.input").textContent(),
-    /Linked task list: Tatr Tasks at column 1, row 4/,
+    /Task artifact: Tatr Tasks at column 1, row 4/,
   );
 
   await page.locator('.dashboard-slot[data-column="0"][data-row="6"]').click();

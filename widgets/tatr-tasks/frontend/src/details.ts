@@ -8,16 +8,19 @@ import type {
 import widgetReset from "@dashboardd/widget-sdk/widget.css";
 import styles from "./details.css";
 
-type TaskSelection = {
+type ArtifactReference = {
   project_id: string;
-  project: string;
   worktree_id: string;
-  worktree: string;
   task_id: string;
+  artifact: string;
+};
+type ResolvedTask = Omit<ArtifactReference, "artifact"> & {
+  project: string;
+  worktree: string;
 };
 type ArtifactKind = "markdown" | "html" | "text" | "image";
 type ArtifactDescriptor = { path: string; kind: ArtifactKind };
-type ArtifactDetails = TaskSelection & {
+type ArtifactDetails = ResolvedTask & {
   artifact: string;
   artifacts: ArtifactDescriptor[];
   kind: ArtifactKind;
@@ -49,7 +52,7 @@ export function mount(
   );
   const viewId = createViewId();
   let hasDetails = false;
-  let selection: TaskSelection | null = null;
+  let selection: ArtifactReference | null = null;
   let requestedArtifact = "TASK.md";
 
   const requestArtifact = (artifact: string): void => {
@@ -61,7 +64,9 @@ export function mount(
       .send({
         command: "select_artifact",
         view_id: viewId,
-        ...selection,
+        project_id: selection.project_id,
+        worktree_id: selection.worktree_id,
+        task_id: selection.task_id,
         artifact,
       })
       .catch(() => {
@@ -69,7 +74,7 @@ export function mount(
       });
   };
 
-  const unsubscribe = context.inputs.subscribe("task", (payload) => {
+  const unsubscribe = context.inputs.subscribe("artifact", (payload) => {
     if (payload === null || payload === undefined) {
       selection = null;
       hasDetails = false;
@@ -81,14 +86,14 @@ export function mount(
         .catch(() => {});
       return;
     }
-    const next = parseSelection(payload);
+    const next = parseArtifactReference(payload);
     if (!next) return;
     selection = next;
-    requestedArtifact = "TASK.md";
+    requestedArtifact = next.artifact;
     hasDetails = false;
     renderLoading(shadow, next);
     void context
-      .send({ command: "select_task", view_id: viewId, ...next })
+      .send({ command: "select_reference", view_id: viewId, ...next })
       .catch(() => renderState(shadow, "Task artifact unavailable"));
   });
 
@@ -111,10 +116,9 @@ export function mount(
         hasDetails = true;
         selection = {
           project_id: details.project_id,
-          project: details.project,
           worktree_id: details.worktree_id,
-          worktree: details.worktree,
           task_id: details.task_id,
+          artifact: details.artifact,
         };
         renderDetails(shadow, details, requestArtifact);
       } else if (!hasDetails && isRecord(payload.error)) {
@@ -134,26 +138,28 @@ export function mount(
   };
 }
 
-function renderLoading(shadow: ShadowRoot, selection: TaskSelection): void {
+function renderLoading(shadow: ShadowRoot, selection: ArtifactReference): void {
   const picker = required<HTMLDetailsElement>(shadow, ".picker");
   picker.hidden = false;
   picker.open = false;
-  renderIdentity(shadow, selection, "TASK.md");
+  renderIdentity(shadow, selection, selection.artifact);
   required<HTMLElement>(shadow, ".artifact-menu").replaceChildren();
-  renderState(shadow, "Loading TASK.md...");
+  renderState(shadow, `Loading ${selection.artifact}...`);
 }
 
 function renderIdentity(
   shadow: ShadowRoot,
-  selection: TaskSelection,
+  selection: ArtifactReference | ResolvedTask,
   artifact: string,
 ): void {
-  const project =
-    selection.worktree === "Primary"
-      ? selection.project
-      : `${selection.project} // ${selection.worktree}`;
+  const prefix =
+    "project" in selection
+      ? selection.worktree === "Primary"
+        ? `${selection.project} // `
+        : `${selection.project} // ${selection.worktree} // `
+      : "";
   required<HTMLElement>(shadow, ".identity").textContent =
-    `${project} // ${selection.task_id}/${artifact}`;
+    `${prefix}${selection.task_id}/${artifact}`;
 }
 
 function renderState(shadow: ShadowRoot, message: string): void {
@@ -337,27 +343,43 @@ function createViewId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
-function parseSelection(value: unknown): TaskSelection | null {
+function parseArtifactReference(value: unknown): ArtifactReference | null {
   if (
     !isRecord(value) ||
     typeof value.project_id !== "string" ||
-    typeof value.project !== "string" ||
     typeof value.worktree_id !== "string" ||
-    typeof value.worktree !== "string" ||
-    typeof value.task_id !== "string"
+    typeof value.task_id !== "string" ||
+    typeof value.artifact !== "string"
   )
     return null;
   return {
     project_id: value.project_id,
-    project: value.project,
     worktree_id: value.worktree_id,
-    worktree: value.worktree,
     task_id: value.task_id,
+    artifact: value.artifact,
+  };
+}
+
+function parseResolvedTask(value: unknown): ResolvedTask | null {
+  const reference = parseArtifactReference(value);
+  if (
+    !reference ||
+    !isRecord(value) ||
+    typeof value.project !== "string" ||
+    typeof value.worktree !== "string"
+  )
+    return null;
+  return {
+    project_id: reference.project_id,
+    project: value.project,
+    worktree_id: reference.worktree_id,
+    worktree: value.worktree,
+    task_id: reference.task_id,
   };
 }
 
 function parseDetails(value: unknown): ArtifactDetails | null {
-  const selection = parseSelection(value);
+  const selection = parseResolvedTask(value);
   if (
     !selection ||
     !isRecord(value) ||

@@ -22,9 +22,9 @@ frontend = "frontend/dist/details.js"
 focus = true
 
 [[outputs]]
-id = "selected_task"
-name = "Selected task"
-type = "tatr.task-selection/v1"
+id = "selected_artifact"
+name = "Selected task artifact"
+type = "tatr.task-artifact-reference/v1"
 variants = ["full"]
 required = false
 
@@ -36,9 +36,9 @@ variants = ["full"]
 required = false
 
 [[inputs]]
-id = "task"
-name = "Linked task list"
-type = "tatr.task-selection/v1"
+id = "artifact"
+name = "Task artifact"
+type = "tatr.task-artifact-reference/v1"
 variants = ["details"]
 required = true
 

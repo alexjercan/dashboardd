@@ -26,4 +26,11 @@ dashboardctl open example --variant full \
 
 `update --inputs` replaces the complete direct-input map. Omit it to retain current inputs. Widget options are immutable; close and reopen a surface to change them.
 
+A Tatr Artifact window accepts one atomic project, worktree, task, and initial artifact reference. The window's artifact picker can then switch files within that task:
+
+```console
+dashboardctl open tatr-tasks --variant details \
+  --inputs '{"artifact":{"type":"tatr.task-artifact-reference/v1","value":{"project_id":"project-...","worktree_id":"worktree-...","task_id":"20260820-094041","artifact":"TASK.md"}}}'
+```
+
 Windows are ordinary, decorated, and resizable. Their initial aspect ratio follows the selected manifest variant. Native close deletes the associated runtime instance. Tray Quit and `dashboardctl quit` close all surfaces, stop all widget backends, and exit the service.
