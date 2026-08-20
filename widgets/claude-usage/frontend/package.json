@@ -1,13 +1,13 @@
 {
   "name": "@dashboardd/claude-usage-widget",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "scripts": {
     "build": "webpack --mode production",
     "watch": "webpack --mode development --watch"
   },
   "dependencies": {
-    "@dashboardd/widget-sdk": "0.1.0"
+    "@dashboardd/widget-sdk": "0.2.0"
   },
   "devDependencies": {
     "ts-loader": "^9.5.2",

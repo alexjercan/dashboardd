@@ -226,6 +226,24 @@ Step status: COMPLETE.
 - Projects backend tests and Clippy with warnings denied pass. The production Projects frontend build and widget preparation pass.
 - User playtest confirmed the Project Brief launch form and resulting widget flow.
 
+### 12. Release and deploy version 0.2.0
+
+Accepted contract:
+
+- Release the completed transport-free runtime, native desktop host, schema version 3 bundles, and widget-owned launch forms as `v0.2.0`. Keep all workspace, npm, Tauri, Nix, documentation, and SDK artifact versions aligned.
+- Push the reviewed master branch before the annotated release tag. Let the tag workflow create the GitHub release and attach the tested widget SDK tarball.
+- Update `nix.dotfiles` to pin the immutable `v0.2.0` revision, enable the reusable desktop module, run its focused checks, and activate Home Manager.
+
+Completion gate: GitHub exposes `v0.2.0`, the pinned Home Manager generation runs the packaged desktop service with all built-in widgets, and the local configuration no longer depends on a dashboardd worktree.
+
+Step status: IN PROGRESS.
+
+## Step 12 preparation notes
+
+- Aligned the Rust workspace, npm workspaces, SDK dependency edges, Tauri configuration, Nix derivation names, SDK examples, and release assertion on version 0.2.0.
+- Regenerated Cargo and npm locks. The npm workspace metadata change altered the fixed-output dependency hash without changing the dependency set; updated the Nix hash from its reported value.
+- Workspace tests and Clippy with warnings denied pass at version 0.2.0. SDK packaging, formatting, focused Nix SDK packaging, and the complete Nix desktop package build pass.
+
 ## Excluded
 
 - Pi assistant extension and delegated-agent orchestration.

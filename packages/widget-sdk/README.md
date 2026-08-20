@@ -5,16 +5,13 @@ Frontend types, lifecycle helpers, and shared styles for dashboardd widgets.
 ## Install
 
 ```bash
-npm install ./dashboardd-widget-sdk-0.1.0.tgz
+npm install ./dashboardd-widget-sdk-0.2.0.tgz
 ```
 
 ## Use
 
 ```ts
-import type {
-  WidgetContext,
-  WidgetFrontend,
-} from "@dashboardd/widget-sdk";
+import type { WidgetContext, WidgetFrontend } from "@dashboardd/widget-sdk";
 import widgetReset from "@dashboardd/widget-sdk/widget.css";
 
 export function mount(

@@ -14,7 +14,7 @@ Build and install a local artifact:
 
 ```bash
 nix build .#widget-sdk
-npm install ./result/dashboardd-widget-sdk-0.1.0.tgz
+npm install ./result/dashboardd-widget-sdk-0.2.0.tgz
 ```
 
 Tagged dashboardd releases attach the same tested tarball to GitHub Releases. External repositories must depend on a versioned artifact, not a dashboardd source path.

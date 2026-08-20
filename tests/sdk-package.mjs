@@ -28,7 +28,7 @@ try {
   const [record] = JSON.parse(packed);
   assert.ok(record, "npm pack returns one SDK package");
   assert.equal(record.name, "@dashboardd/widget-sdk");
-  assert.equal(record.version, "0.1.0");
+  assert.equal(record.version, "0.2.0");
   assert.deepEqual(
     record.files.map(({ path: file }) => file).sort(),
     [

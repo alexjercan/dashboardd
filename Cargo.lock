@@ -532,7 +532,7 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
 name = "claude-usage"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "dashboardd-widget-protocol",
  "reqwest 0.12.28",
@@ -543,7 +543,7 @@ dependencies = [
 
 [[package]]
 name = "codex-usage"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "dashboardd-widget-protocol",
  "serde",
@@ -631,7 +631,7 @@ dependencies = [
 
 [[package]]
 name = "cpu"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "dashboardd-widget-protocol",
  "serde",
@@ -776,7 +776,7 @@ dependencies = [
 
 [[package]]
 name = "dashboardd-desktop"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "dashboardd-desktop-control",
  "dashboardd-runtime",
@@ -792,7 +792,7 @@ dependencies = [
 
 [[package]]
 name = "dashboardd-desktop-control"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "serde",
@@ -802,7 +802,7 @@ dependencies = [
 
 [[package]]
 name = "dashboardd-runtime"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "dashboardd-widget-bundle",
  "dashboardd-widget-protocol",
@@ -819,7 +819,7 @@ dependencies = [
 
 [[package]]
 name = "dashboardd-server"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "axum",
  "dashboardd-runtime",
@@ -840,7 +840,7 @@ dependencies = [
 
 [[package]]
 name = "dashboardd-widget-bundle"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_ignored",
@@ -852,7 +852,7 @@ dependencies = [
 
 [[package]]
 name = "dashboardd-widget-protocol"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -986,7 +986,7 @@ dependencies = [
 
 [[package]]
 name = "disk"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "dashboardd-widget-protocol",
  "serde",
@@ -2330,7 +2330,7 @@ dependencies = [
 
 [[package]]
 name = "memory"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "dashboardd-widget-protocol",
  "serde",
@@ -2434,7 +2434,7 @@ dependencies = [
 
 [[package]]
 name = "network"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "dashboardd-widget-protocol",
  "serde",
@@ -3023,7 +3023,7 @@ dependencies = [
 
 [[package]]
 name = "projects"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "blake3",
  "dashboardd-widget-protocol",
@@ -4029,7 +4029,7 @@ checksum = "61c41af27dd6d1e27b1b16b489db798443478cef1f06a660c96db617ba5de3b1"
 
 [[package]]
 name = "tatr-tasks"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "base64 0.22.1",
  "blake3",
@@ -5756,7 +5756,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "dashboardd-widget-bundle",
  "serde_json",

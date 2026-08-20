@@ -1,12 +1,12 @@
 {
   "name": "@dashboardd/projects-widget",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "scripts": {
     "build": "webpack --mode production"
   },
   "dependencies": {
-    "@dashboardd/widget-sdk": "0.1.0",
+    "@dashboardd/widget-sdk": "0.2.0",
     "dompurify": "^3.2.6",
     "marked": "^16.1.1"
   },

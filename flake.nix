@@ -92,9 +92,9 @@
           '') widgetIds;
           dashboardAssets = pkgs.buildNpmPackage {
             pname = "dashboardd-assets";
-            version = "0.1.0";
+            version = "0.2.0";
             src = ./.;
-            npmDepsHash = "sha256-pYB0K1m65f6wnMIGM9mTG7bGhClgCUyGDKeiJdoCKco=";
+            npmDepsHash = "sha256-VcmOwf1kYWEy3cVNnw0EzdEzuxfs4NSiid0OVMOL6yc=";
             nativeBuildInputs = [ widgetTool ];
             postBuild = ''
               mkdir packed
@@ -111,7 +111,7 @@
             '';
           };
           bundledWidgets =
-            pkgs.runCommand "dashboardd-bundled-widgets-0.1.0"
+            pkgs.runCommand "dashboardd-bundled-widgets-0.2.0"
               {
                 meta.description = "Built-in dashboardd runtime widget bundles";
               }
@@ -120,7 +120,7 @@
                 ln -s ${dashboardAssets}/share/dashboardd/widgets "$out/share/dashboardd/widgets"
               '';
           dashboardd =
-            pkgs.runCommand "dashboardd-0.1.0"
+            pkgs.runCommand "dashboardd-0.2.0"
               {
                 nativeBuildInputs = [ pkgs.makeWrapper ];
                 meta = {
@@ -137,7 +137,7 @@
                   --set-default DASHBOARDD_WIDGET_PATH "$out/share/dashboardd/widgets"
               '';
           dashboarddDesktop =
-            pkgs.runCommand "dashboardd-desktop-0.1.0"
+            pkgs.runCommand "dashboardd-desktop-0.2.0"
               {
                 nativeBuildInputs = [ pkgs.makeWrapper ];
                 meta = {
@@ -174,7 +174,7 @@
               '';
           widgetSdk = pkgs.stdenvNoCC.mkDerivation {
             pname = "dashboardd-widget-sdk";
-            version = "0.1.0";
+            version = "0.2.0";
             src = ./.;
             nativeBuildInputs = [
               pkgs.nodejs_22
@@ -198,7 +198,7 @@
           };
           docs = pkgs.stdenvNoCC.mkDerivation {
             pname = "dashboardd-docs";
-            version = "0.1.0";
+            version = "0.2.0";
             src = ./.;
             nativeBuildInputs = [
               pkgs.mdbook

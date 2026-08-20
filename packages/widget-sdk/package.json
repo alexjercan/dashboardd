@@ -1,6 +1,6 @@
 {
   "name": "@dashboardd/widget-sdk",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Frontend types, lifecycle helpers, and styles for dashboardd widgets",
   "license": "MIT",
   "type": "module",
