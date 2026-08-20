@@ -8,6 +8,7 @@ Dashboard routes are:
 - `/d/<dashboard-id>` - Zen view.
 - `/d/<dashboard-id>/edit` - layout editor.
 - `/d/<dashboard-id>/focus/<instance-id>` - focused widget.
+- `/surface/<runtime-instance-id>` - one existing runtime instance without Dashboard composition. Add `?presentation=tile` for tile presentation; the default is Focus.
 
 All dashboards continue running for immediate switching. Widget instance IDs are globally unique. Shared widget package state remains global.
 

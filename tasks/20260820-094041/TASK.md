@@ -75,11 +75,22 @@ Step status: COMPLETE.
 
 ### 5. Add the standalone surface host
 
+Accepted contract:
+
+- Serve a dedicated standalone host at `/surface/{instance_id}` using separate `surface.html`, `surface.js`, and `surface.css` build outputs.
+- Attach to exactly one existing runtime instance. The surface never creates or deletes it. The caller owns instance lifetime; unload destroys only the frontend and subscriptions.
+- Load the instance, widget descriptor and frontend, theme, health, and shared state. Subscribe to runtime event protocol version 3 for backend updates, direct inputs, health, shared state, theme, and instance deletion.
+- Provide direct SDK inputs, no-op outputs, shared state, and backend messages. Exclude Dashboard storage, composition, navigation, links, and reconciliation.
+- Accept `?presentation=focus|tile`, default to `focus`, and fail closed on invalid values.
+- Show a compact Restart overlay only for degraded, stale, or failed health. Show a terminal unavailable state after instance deletion.
+
 - Add `web/surface` to mount exactly one runtime instance.
 - Support direct inputs, backend updates, health, presentation, and cleanup.
 - Exclude Dashboard composition, navigation, layout, and links.
 
 Completion gate: a browser-hosted standalone route displays one live CPU widget without a Dashboard document.
+
+Step status: COMPLETE.
 
 ### 6. Connect desktop windows to real widgets
 
@@ -201,6 +212,26 @@ Completion gate: the packaged desktop service starts from rofi, accepts control 
 - All workspace Rust tests pass, including 25 runtime tests. Workspace Clippy passes for all targets with warnings denied.
 - Rust formatting, Prettier formatting, contract tests, external SDK tests, production builds, widget preparation, documentation build, and the complete Chromium integration suite pass.
 - Chromium proves direct input creation, frontend `get` and subscription delivery, atomic update without instance recreation, unbinding to `undefined`, required dynamic rebinding, runtime type rejection, restart reconciliation, and existing dynamic links.
+
+## Step 5 implementation notes
+
+- Added a dedicated multi-entry web build. `surface.html`, `surface.js`, and `surface.css` are independent from the Dashboard entry and are served at `/surface/{instance_id}`.
+- Added a standalone host that attaches to one existing runtime instance, loads its descriptor, frontend, theme, health, and shared state, and consumes runtime event protocol version 3. It does not import or mutate Dashboard storage.
+- Added direct input delivery, no-op outputs, backend messages, shared-state updates, backend payload updates, health tracking, and frontend presentation selection. Focus is the default; `?presentation=tile` selects tile presentation.
+- Added a compact degraded-health overlay with Restart and a terminal unavailable state for invalid routes, missing instances, invalid presentation values, and instance deletion.
+- Kept runtime ownership outside the page. Closing a surface destroys its frontend and event stream but leaves the runtime instance alive.
+- Updated the runtime facade test, Nix package assertions, user documentation, and the external fixture backend. The fixture can report degraded health for Restart coverage.
+
+## Step 5 bugs and fixes
+
+- The first surface module initialized its direct-input bus before the class declaration, which strict TypeScript rejected. Moved initialization below the declaration while keeping all event callbacks asynchronous.
+- Terminal surfaces initially retained an idle event stream after deletion or invalid startup. Close the runtime connection when entering the unavailable state.
+
+## Step 5 verification results
+
+- All workspace Rust tests pass, including 25 runtime tests. Workspace Clippy passes for all targets with warnings denied.
+- Rust formatting, Prettier formatting, contract tests, external SDK tests, production multi-entry builds, widget preparation, documentation build, and the complete Chromium integration suite pass.
+- Chromium proves live standalone CPU rendering, default Focus and explicit tile presentation, direct input updates, degraded health and Restart, deletion handling, invalid-route rejection, unchanged Dashboard storage, and caller-owned instance lifetime after page close.
 
 ## Step 2 implementation notes
 

@@ -132,6 +132,7 @@ struct ApiDoc;
 
 pub fn build_router(state: AppState) -> Router {
     let index = state.web_dir.join("index.html");
+    let surface = state.web_dir.join("surface.html");
     let web_dir = state.web_dir.clone();
     Router::new()
         .route("/health", get(health))
@@ -168,6 +169,7 @@ pub fn build_router(state: AppState) -> Router {
             post(send_widget_message),
         )
         .route("/api/v1/events", get(runtime_events))
+        .route_service("/surface/{instance_id}", ServeFile::new(surface))
         .route_service("/d/{dashboard_id}", ServeFile::new(index.clone()))
         .route_service("/d/{dashboard_id}/edit", ServeFile::new(index.clone()))
         .route_service(

@@ -153,6 +153,9 @@
             nativeBuildInputs = [ dashboardd pkgs.curl pkgs.jq widgetTool ];
           } ''
             test -f ${dashboardd}/share/dashboardd/web/index.html
+            test -f ${dashboardd}/share/dashboardd/web/surface.html
+            test -f ${dashboardd}/share/dashboardd/web/surface.js
+            test -f ${dashboardd}/share/dashboardd/web/surface.css
             for bundle in ${dashboardd}/share/dashboardd/widgets/*; do
               dashboardd-widget check "$bundle"
             done

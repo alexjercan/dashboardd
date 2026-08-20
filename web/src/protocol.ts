@@ -142,7 +142,7 @@ export type RuntimeEvent =
 export function parseWidgetList(value: unknown): WidgetList {
   if (!isRecord(value) || !Array.isArray(value.widgets))
     throw new Error("invalid widget list");
-  return { widgets: value.widgets.map(parseWidget) };
+  return { widgets: value.widgets.map(parseWidgetDescriptor) };
 }
 
 export function parseInstanceList(value: unknown): InstanceList {
@@ -343,7 +343,7 @@ function isTypedInputs(value: unknown): value is Record<string, TypedInput> {
   );
 }
 
-function parseWidget(value: unknown): WidgetDescriptor {
+export function parseWidgetDescriptor(value: unknown): WidgetDescriptor {
   if (
     !isRecord(value) ||
     typeof value.id !== "string" ||

@@ -57,9 +57,13 @@ for line in sys.stdin:
             if data.get("instance_id") != instance_id:
                 fail("invalid_instance", "Instance ID does not match")
                 continue
+            payload = data.get("payload")
+            if isinstance(payload, dict) and payload.get("command") == "degrade":
+                fail("fixture_degraded", "Fixture requested degraded health")
+                continue
             send(
                 "update",
-                {"instance_id": instance_id, "payload": data.get("payload")},
+                {"instance_id": instance_id, "payload": payload},
             )
         elif kind == "ping":
             send("pong", {"nonce": data.get("nonce")})

@@ -161,6 +161,7 @@ mod tests {
         ));
         fs::create_dir_all(&root).unwrap();
         fs::write(root.join("index.html"), "runtime test").unwrap();
+        fs::write(root.join("surface.html"), "surface test").unwrap();
         let runtime = Runtime::start(RuntimeConfig {
             widget_roots: Vec::new(),
             web_dir: root.clone(),
@@ -174,6 +175,16 @@ mod tests {
         let response = runtime
             .router()
             .oneshot(Request::get("/health").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+        let response = runtime
+            .router()
+            .oneshot(
+                Request::get("/surface/instance-test")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
         assert_eq!(response.status(), 200);
