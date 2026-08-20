@@ -1,8 +1,8 @@
 # Build desktop-hosted standalone widget surfaces
 
-- STATUS: OPEN
+- STATUS: IN_PROGRESS
 - PRIORITY: 100
-- TAGS: desktop,tauri,runtime,widgets,surface,nix
+- TAGS: desktop, tauri, runtime, widgets, surface, nix
 
 ## Goal
 
@@ -18,14 +18,17 @@ Build the dashboardd-side runtime, standalone surface, and resident Tauri deskto
 
 ### 1. Build the resident desktop lifecycle slice
 
-- Add retained `dashboardd-desktop` and `dashboardctl` crates.
+- Add retained `dashboardd-desktop`, `dashboardd-desktop-control`, and `dashboardctl` crates. Keep all versioned wire types, size limits, and encoding rules in the small shared control crate; the Tauri service and CLI client depend on it.
 - Start hidden with a system tray item and remain resident with no windows.
 - Implement the same-user Unix socket, bounded versioned JSON request protocol, metadata-only JSONL audit log, and static local demo windows.
 - Add `open-demo`, `list`, `focus`, and `close` commands.
+- Create normal decorated and resizable 720x480 logical-pixel demo windows. Use Tauri's stable process-wide X11 class `dashboardd-desktop`; its per-window `window_classname` API is Windows-only. Do not use unsafe GTK hooks, force floating, or enable always-on-top behavior. Let i3 own placement, workspaces, and floating rules.
 - Verify tray Quit closes windows, stops the socket server, removes the socket, and exits under X11 and i3.
 - Keep this slice free of real widgets, runtime extraction, systemd units, and Nix deployment.
 
 Completion gate: `dashboardctl open-demo` creates a controllable Tauri window while the tray service remains resident.
+
+Step status: COMPLETE.
 
 ### 2. Extract `dashboardd-runtime`
 
@@ -103,3 +106,24 @@ Completion gate: the packaged desktop service starts from rofi, accepts control 
 - Playtest tray lifecycle, window creation, focus, close, restart, stale socket handling, and multi-window behavior under X11 and i3.
 - Review CPU and Tatr Artifact windows at practical wide and narrow sizes.
 - Before final landing, run the repository formatting, workspace tests, Clippy with warnings denied, production builds, widget preparation, Chromium integration, documentation build, and Nix flake checks.
+
+## Step 1 implementation notes
+
+- Added separate `dashboardd-desktop-control`, `dashboardctl`, and `dashboardd-desktop` packages. The shared crate owns protocol version 1, 64 KiB JSON-line framing, command and response types, and the session socket path.
+- Added a Clap-based client, hidden Tauri process, generated tray icon, Quit menu, UI-thread window dispatch, memory-only surface registry, static CSP-restricted demo asset, safe same-user stale-socket replacement, and metadata-only rotating audit log.
+- Added Linux Tauri build and runtime libraries to the Nix development shell. `LD_LIBRARY_PATH` is required because the tray library loads AppIndicator dynamically.
+- Kept windows ordinary, decorated, resizable, and WM-owned. Tauri exposes `window_classname` only on Windows, so i3 can match the stable process-wide X11 class `Dashboardd-desktop`.
+
+## Step 1 bugs and fixes
+
+- The initial generated PNG omitted all scanlines. Tauri decoded an empty icon and Tao panicked while creating the first window. Regenerated a valid RGBA PNG.
+- The first Nix shell exposed AppIndicator through pkg-config but not the runtime loader. Added the Linux library path to the shell.
+- Binding the socket inside Tauri setup made an already-running second process panic through Tauri's setup failure path. Moved socket and audit preparation before Tauri initialization so a second process exits cleanly with status 1.
+
+## Step 1 verification results
+
+- Protocol and client tests, formatting, affected-package Clippy with warnings denied, and the desktop build pass.
+- Live socket checks cover empty list, two opens, focus, close, and retained list state. The socket is owned by the user with mode 0600, and audit records contain no titles or payloads.
+- X11 reports the live demo as `WM_CLASS(STRING) = "dashboardd-desktop", "Dashboardd-desktop"`.
+- A second service process exits with status 1 and `dashboardd desktop is already running` rather than panicking.
+- User playtest confirmed tray visibility, visual rendering, focus, and close behavior. Tray Quit stopped PID 1591776 and removed the control socket.

@@ -26,6 +26,13 @@
           rustNightly = pkgs.rust-bin.nightly.latest.default.override {
             extensions = [ "rust-src" "clippy" "rustfmt" ];
           };
+          tauriLinuxLibraries = lib.optionals pkgs.stdenv.isLinux [
+            pkgs.webkitgtk_4_1
+            pkgs.gtk3
+            pkgs.libayatana-appindicator
+            pkgs.librsvg
+            pkgs.openssl
+          ];
           dashboarddUnwrapped = config.rust-project.crates.dashboardd.crane.outputs.drv.crate;
           widgetTool = config.rust-project.crates.dashboardd-widget.crane.outputs.drv.crate;
           widgetIds = [
@@ -187,8 +194,11 @@
               pkgs.python3
               pkgs.mdbook
               pkgs.mdbook-mermaid
-            ];
+            ] ++ lib.optionals pkgs.stdenv.isLinux [
+              pkgs.pkg-config
+            ] ++ tauriLinuxLibraries;
 
+            LD_LIBRARY_PATH = lib.makeLibraryPath tauriLinuxLibraries;
             RUST_SRC_PATH = "${rustNightly}/lib/rustlib/src/rust/library";
             CHROMIUM_PATH = "${pkgs.chromium}/bin/chromium";
           };
