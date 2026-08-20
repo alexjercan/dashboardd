@@ -236,13 +236,20 @@ Accepted contract:
 
 Completion gate: GitHub exposes `v0.2.0`, the pinned Home Manager generation runs the packaged desktop service with all built-in widgets, and the local configuration no longer depends on a dashboardd worktree.
 
-Step status: IN PROGRESS.
+Step status: COMPLETE.
 
 ## Step 12 preparation notes
 
 - Aligned the Rust workspace, npm workspaces, SDK dependency edges, Tauri configuration, Nix derivation names, SDK examples, and release assertion on version 0.2.0.
 - Regenerated Cargo and npm locks. The npm workspace metadata change altered the fixed-output dependency hash without changing the dependency set; updated the Nix hash from its reported value.
 - Workspace tests and Clippy with warnings denied pass at version 0.2.0. SDK packaging, formatting, focused Nix SDK packaging, and the complete Nix desktop package build pass.
+
+## Step 12 release and deployment results
+
+- Published dashboardd 0.2.0 at `https://github.com/alexjercan/dashboardd/releases/tag/v0.2.0`. The release workflow passed and attached `dashboardd-widget-sdk-0.2.0.tgz`.
+- Migrated the independent Today widget to source manifest schema 3, the released dashboardd 0.2.0 SDK and packer output, and released Today 0.3.1. Its complete flake check and release workflow pass.
+- Pinned dashboardd 0.2.0 and Today 0.3.1 in `nix.dotfiles`. Replaced the local legacy service module with dashboardd's exported Home Manager module, enabled browser and desktop auto-start, composed Today into both widget roots, and exposed the browser host on `0.0.0.0:8000`.
+- `nix flake check -L` and the Home Manager activation package build pass in `nix.dotfiles`. The active browser and desktop services discover all eight built-in widgets plus Today; the browser listens on all interfaces at port 8000.
 
 ## Excluded
 
