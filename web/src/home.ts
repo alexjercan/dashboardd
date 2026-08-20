@@ -1,13 +1,31 @@
 import { CommandPalette } from "./command-palette";
 import {
-  parseDashboard,
-  parseDashboardEvent,
-  parseDashboardList,
+  createDashboard as createLocalDashboard,
+  deleteDashboard as deleteLocalDashboard,
+  duplicateDashboard as duplicateLocalDashboard,
+  loadDashboards as loadLocalDashboards,
+  materializeDashboard,
+  onDashboardStorageChange,
+  placementIdForRuntime,
+  reconcileRuntime,
+  updateDashboard as updateLocalDashboard,
+  type DashboardDocument,
+  type Instance,
+} from "./dashboard-store";
+import {
+  parseInstanceHealthList,
+  parseRuntimeEvent,
   parseTheme,
-  type Dashboard,
+  parseWidgetList,
   type HealthStatus,
+  type InstanceHealth,
   type Theme,
 } from "./protocol";
+
+type Dashboard = DashboardDocument & {
+  instances: Instance[];
+  health: InstanceHealth[];
+};
 
 const app = document.querySelector<HTMLElement>("#app")!;
 
@@ -71,40 +89,44 @@ gallery.addEventListener("pointerdown", (event) => {
 
 void Promise.all([loadTheme(), loadDashboards()]);
 const events = new EventSource("/api/v1/events");
+events.addEventListener("open", scheduleRefresh);
 events.addEventListener("message", (message) => {
   try {
-    const event = parseDashboardEvent(JSON.parse(message.data));
+    const event = parseRuntimeEvent(JSON.parse(message.data));
     if (event.kind === "theme_updated") {
       applyTheme(event.data.theme);
       return;
     }
     if (event.kind === "instance_health_updated") {
-      const dashboard = dashboards.find(
-        (candidate) => candidate.id === event.data.dashboard_id,
+      const placementId = placementIdForRuntime(event.data.health.instance_id);
+      if (!placementId) return;
+      const dashboard = dashboards.find((candidate) =>
+        candidate.instances.some(({ id }) => id === placementId),
       );
       if (!dashboard) return;
+      const health = { ...event.data.health, instance_id: placementId };
       const index = dashboard.health.findIndex(
-        (health) => health.instance_id === event.data.health.instance_id,
+        (candidate) => candidate.instance_id === placementId,
       );
-      if (index >= 0) dashboard.health[index] = event.data.health;
-      else dashboard.health.push(event.data.health);
+      if (index >= 0) dashboard.health[index] = health;
+      else dashboard.health.push(health);
       updateHealthSummary(dashboard);
       return;
     }
     if (
-      event.kind === "dashboard_created" ||
-      event.kind === "dashboard_updated" ||
-      event.kind === "dashboard_destroyed" ||
       event.kind === "instance_created" ||
-      event.kind === "instance_updated" ||
       event.kind === "instance_destroyed"
     )
       scheduleRefresh();
   } catch {
-    // Reconciliation recovers from events added by newer servers.
+    // Reconciliation recovers from events added by newer runtimes.
   }
 });
-window.addEventListener("beforeunload", () => events.close());
+const removeStorageListener = onDashboardStorageChange(scheduleRefresh);
+window.addEventListener("beforeunload", () => {
+  removeStorageListener();
+  events.close();
+});
 
 function handleHomeKeydown(event: KeyboardEvent): void {
   if (
@@ -277,10 +299,33 @@ function executeHomeCommand(value: string): string | null {
 
 async function loadDashboards(): Promise<void> {
   try {
-    const response = await fetch("/api/v1/dashboards");
-    if (!response.ok)
-      throw new Error(`${response.status} ${response.statusText}`);
-    dashboards = parseDashboardList(await response.json()).dashboards;
+    const widgetsResponse = await fetch("/api/v1/widgets");
+    if (!widgetsResponse.ok)
+      throw new Error(
+        `${widgetsResponse.status} ${widgetsResponse.statusText}`,
+      );
+    const widgets = parseWidgetList(await widgetsResponse.json()).widgets;
+    const descriptors = new Map(widgets.map((widget) => [widget.id, widget]));
+    const snapshot = await reconcileRuntime();
+    const healthResponse = await fetch("/api/v1/instance-health");
+    if (!healthResponse.ok)
+      throw new Error(`${healthResponse.status} ${healthResponse.statusText}`);
+    const healthByRuntime = new Map(
+      parseInstanceHealthList(await healthResponse.json()).instances.map(
+        (health) => [health.instance_id, health],
+      ),
+    );
+    dashboards = loadLocalDashboards().map((dashboard) => {
+      const instances = materializeDashboard(dashboard, snapshot, descriptors);
+      return {
+        ...dashboard,
+        instances,
+        health: instances.flatMap((instance) => {
+          const health = healthByRuntime.get(instance.runtime_id);
+          return health ? [{ ...health, instance_id: instance.id }] : [];
+        }),
+      };
+    });
     if (refreshTimer !== null) {
       window.clearTimeout(refreshTimer);
       refreshTimer = null;
@@ -413,67 +458,47 @@ function createTile(): HTMLElement {
 async function createDashboard(): Promise<void> {
   const name = window.prompt("Dashboard name");
   if (name === null) return;
-  const dashboard = await dashboardRequest("/api/v1/dashboards", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
+  try {
+    const dashboard = await createLocalDashboard(
       name,
-      columns: suggestedColumns(window.innerWidth),
-    }),
-  });
-  if (dashboard)
+      suggestedColumns(window.innerWidth),
+    );
     window.location.assign(`/d/${encodeURIComponent(dashboard.id)}/edit`);
+  } catch (error) {
+    showError(errorMessage(error));
+  }
 }
 
 async function renameDashboard(dashboard: Dashboard): Promise<void> {
   const name = window.prompt("Dashboard name", dashboard.name);
   if (name === null) return;
-  await dashboardRequest(
-    `/api/v1/dashboards/${encodeURIComponent(dashboard.id)}`,
-    {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name }),
-    },
-  );
-  await loadDashboards();
+  try {
+    await updateLocalDashboard(dashboard.id, (document) => {
+      document.name = name;
+    });
+    await loadDashboards();
+  } catch (error) {
+    showError(errorMessage(error));
+  }
 }
 
 async function duplicateDashboard(dashboard: Dashboard): Promise<void> {
-  const copy = await dashboardRequest(
-    `/api/v1/dashboards/${encodeURIComponent(dashboard.id)}/duplicate`,
-    { method: "POST" },
-  );
-  if (copy) window.location.assign(`/d/${encodeURIComponent(copy.id)}/edit`);
+  try {
+    const copy = await duplicateLocalDashboard(dashboard.id);
+    window.location.assign(`/d/${encodeURIComponent(copy.id)}/edit`);
+  } catch (error) {
+    showError(errorMessage(error));
+  }
 }
 
 async function deleteDashboard(dashboard: Dashboard): Promise<void> {
   if (!window.confirm(`Delete ${dashboard.name} and all of its widgets?`))
     return;
   try {
-    const response = await fetch(
-      `/api/v1/dashboards/${encodeURIComponent(dashboard.id)}`,
-      { method: "DELETE" },
-    );
-    if (!response.ok) throw await responseError(response);
+    await deleteLocalDashboard(dashboard.id);
     await loadDashboards();
   } catch (error) {
     showError(`Could not delete dashboard: ${errorMessage(error)}`);
-  }
-}
-
-async function dashboardRequest(
-  url: string,
-  init: RequestInit,
-): Promise<Dashboard | null> {
-  try {
-    const response = await fetch(url, init);
-    if (!response.ok) throw await responseError(response);
-    clearError();
-    return parseDashboard(await response.json());
-  } catch (error) {
-    showError(errorMessage(error));
-    return null;
   }
 }
 
@@ -552,15 +577,6 @@ function applyTheme(theme: Theme): void {
   document.documentElement.style.setProperty(
     "--dashboardd-font-mono",
     `"${theme.fonts.mono}", ui-monospace, monospace`,
-  );
-}
-
-async function responseError(response: Response): Promise<Error> {
-  const value = (await response.json().catch(() => null)) as {
-    error?: { message?: string };
-  } | null;
-  return new Error(
-    value?.error?.message ?? `${response.status} ${response.statusText}`,
   );
 }
 

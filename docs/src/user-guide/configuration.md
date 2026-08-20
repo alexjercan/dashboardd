@@ -20,27 +20,16 @@ mono = "Iosevka"
 
 Unspecified values retain built-in defaults.
 
-## Initial widgets
+## Dashboard composition
 
-Initial widgets apply only when `dashboard.json` does not exist. Positions are one-based. The normalized composition is then persisted, and edits become authoritative.
+Each browser stores its Dashboard documents, placements, and links in local storage. The runtime starts with no instances and recreates a browser's instances when that browser reconnects. Separate browser profiles can keep different Dashboard compositions against one runtime.
 
-```toml
-[[dashboard.initial_widgets]]
-widget = "cpu"
-variant = "full"
-position = [1, 1]
-
-[dashboard.initial_widgets.options]
-show_core_temperatures = true
-history_points = 40
-```
-
-Widget options are public instance configuration. Do not place credentials, tokens, or sensitive paths in options.
+Widget options and Dashboard documents are public browser data. Do not place credentials, tokens, or sensitive paths in them.
 
 ## Environment variables
 
 - `DASHBOARDD_CONFIG_FILE` - configuration file override.
-- `DASHBOARDD_STATE_FILE` - state file override.
+- `DASHBOARDD_STATE_FILE` - durable package-wide widget state file override. Runtime instances and Dashboard composition are not stored in this file.
 - `DASHBOARDD_WIDGET_PATH` - platform-separated installed widget roots. An explicit value replaces the packaged default. Empty means no widgets. Missing roots, empty path entries, invalid bundles, and duplicate widget IDs stop startup.
 - `DASHBOARDD_WEB_DIR` - dashboard frontend asset directory. Defaults to `web/dist` for source development.
 - `DASHBOARDD_PORT` - listen port.

@@ -22,6 +22,7 @@ tower-http = { version = "0.7.0", features = ["fs", "trace"] }
 tracing = "0.1.44"
 utoipa = "5.4.0"
 utoipa-swagger-ui = { version = "9.0.2", features = ["axum", "vendored"] }
+uuid = { version = "1.24.0", features = ["v4"] }
 
 [dev-dependencies]
 tower = { version = "0.5.3", features = ["util"] }

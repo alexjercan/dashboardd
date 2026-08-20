@@ -1,5 +1,5 @@
 import type { WidgetLinks } from "@dashboardd/widget-sdk";
-import type { DashboardLink } from "./protocol";
+import type { DashboardLink } from "./dashboard-store";
 
 type Handler = (payload: unknown) => void;
 

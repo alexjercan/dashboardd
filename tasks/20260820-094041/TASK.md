@@ -49,6 +49,8 @@ Step status: COMPLETE.
 
 Completion gate: separate browsers can keep different local Dashboard compositions against one runtime.
 
+Step status: COMPLETE.
+
 ### 4. Add typed direct widget inputs
 
 - Add versioned typed input envelopes to instance creation and update.
@@ -129,6 +131,41 @@ Completion gate: the packaged desktop service starts from rofi, accepts control 
 - X11 reports the live demo as `WM_CLASS(STRING) = "dashboardd-desktop", "Dashboardd-desktop"`.
 - A second service process exits with status 1 and `dashboardd desktop is already running` rather than panicking.
 - User playtest confirmed tray visibility, visual rendering, focus, and close behavior. Tray Quit stopped PID 1591776 and removed the control socket.
+
+## Step 3 accepted contract
+
+- Replace dashboard-scoped runtime resources with global memory-only instance CRUD at `/api/v1/instances`. An instance contains only a server-generated random ID, widget ID, variant ID, and normalized options. Keep health, restart, messages, and events global. Reserve instance updates for Step 4 direct inputs.
+- Advance runtime events to version 2. Remove dashboard and link events and remove dashboard identity from instance, health, error, and widget update events.
+- Store version 1 Dashboard documents at `dashboardd.dashboards/v1` in browser local storage. Documents own dashboard identity, name, columns, stable placement IDs, positions, options, and links between placement IDs.
+- Store transient `placement_id -> runtime_instance_id` bindings separately at `dashboardd.instance-bindings/v1`. Reconcile all local Dashboard placements whenever a browser page connects. Retain exact live matches and recreate missing bindings after runtime restart.
+- Serialize cross-tab reconciliation and mutations with Web Locks when available and an in-process fallback otherwise. Use storage events to refresh other tabs. Separate browser storage contexts keep independent compositions and runtime instances.
+- Persist the local Dashboard document before deleting removed runtime resources. Leave unknown global instances untouched because runtime instances have no creator or ownership metadata.
+- Replace server state with schema version 4 containing only durable package-wide widget state. Runtime instances always start empty. Rename the default state file to `runtime.json`, reject explicitly selected old state files, and remove `dashboard.initial_widgets` configuration.
+- Do not migrate old server-owned Dashboard composition or add backward-compatible API routes.
+
+## Step 3 implementation notes
+
+- Replaced all dashboard-scoped HTTP resources with global memory-only instance CRUD, health, restart, messages, and version 2 runtime events. Runtime instances use server-generated `instance-<uuid>` IDs and contain only widget ID, variant ID, and normalized options. Old composition fields and dashboard API routes are rejected.
+- Reduced durable runtime state to schema version 4 package-wide widget state. Renamed the default file to `runtime.json`, removed `dashboard.initial_widgets`, and made every runtime start with zero instances.
+- Added `web/src/dashboard-store.ts`. Browser local storage owns version 1 Dashboard documents, stable placement IDs, layout, options, and links. A separate binding cache maps placements to current runtime instance IDs.
+- Reworked Home and Dashboard hosts around local documents. Dashboard creation, rename, duplication, deletion, column changes, placement movement, collision checks, and links no longer call server composition APIs.
+- Reconciliation runs on event-stream connection and browser storage changes. It retains exact runtime matches, recreates missing instances after restart, filters global events through local bindings, and leaves unknown global instances untouched.
+- Added cross-tab binding claims in addition to Web Locks. This prevents two tabs from creating duplicate runtime instances when both react to the same local storage mutation. Abandoned claims expire after five seconds.
+- Updated browser integration to prove two isolated browser contexts keep different Dashboard documents against one runtime and independently recreate their instances after two runtime restarts.
+
+## Step 3 bugs and fixes
+
+- Comparing options with direct JSON serialization treated different object key orders as different specifications and recreated valid instances. Compare sorted option entries.
+- Web Locks were unavailable in the integration browser, so two tabs could create the same placement concurrently. Added local storage claim-and-verify binding acquisition.
+- A stale reconciliation snapshot could overwrite a resolved claim with its old pending value. Changed stale cleanup to reload and update one current binding at a time.
+- Removing the old instance mutex exposed concurrent shared-state revision updates. Added a dedicated async mutation lock so only one writer can commit a revision.
+- A placement retained its mounted frontend when reconciliation assigned a new runtime ID, leaving widget commands bound to the stopped backend. Remount the frontend whenever its runtime binding changes.
+
+## Step 3 verification results
+
+- All workspace Rust tests pass, including 23 runtime tests. Workspace Clippy passes for all targets with warnings denied.
+- Rust formatting, Prettier formatting, contract tests, external SDK tests, production frontend builds, widget preparation, backend probes, documentation build, and the complete Chromium integration suite pass.
+- Chromium verifies local Dashboard CRUD and layout, cross-tab synchronization, browser-local links, global runtime CRUD, memory-only restart behavior, independent browser compositions, shared widget state schema 4 persistence, and graceful shutdown.
 
 ## Step 2 implementation notes
 

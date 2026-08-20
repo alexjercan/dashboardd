@@ -9,7 +9,7 @@ use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use tokio::sync::broadcast;
 use utoipa::ToSchema;
 
-use crate::{event::DashboardEvent, state::DashboardId};
+use crate::event::RuntimeEvent;
 
 pub const PROBE_INTERVAL: Duration = Duration::from_secs(10);
 pub const STALE_AFTER: Duration = Duration::from_secs(30);
@@ -45,9 +45,8 @@ pub struct InstanceHealth {
 
 #[derive(Clone)]
 pub struct HealthTracker {
-    dashboard_id: DashboardId,
     state: Arc<Mutex<HealthState>>,
-    events: broadcast::Sender<DashboardEvent>,
+    events: broadcast::Sender<RuntimeEvent>,
 }
 
 struct HealthState {
@@ -59,14 +58,9 @@ struct HealthState {
 }
 
 impl HealthTracker {
-    pub fn new(
-        dashboard_id: DashboardId,
-        instance_id: InstanceId,
-        events: broadcast::Sender<DashboardEvent>,
-    ) -> Self {
+    pub fn new(instance_id: InstanceId, events: broadcast::Sender<RuntimeEvent>) -> Self {
         let now = Instant::now();
         Self {
-            dashboard_id,
             state: Arc::new(Mutex::new(HealthState {
                 public: InstanceHealth {
                     instance_id,
@@ -205,10 +199,9 @@ impl HealthTracker {
     }
 
     fn emit(&self, health: InstanceHealth) {
-        let _ = self.events.send(DashboardEvent::InstanceHealthUpdated {
-            dashboard_id: self.dashboard_id.clone(),
-            health,
-        });
+        let _ = self
+            .events
+            .send(RuntimeEvent::InstanceHealthUpdated { health });
     }
 }
 
@@ -236,7 +229,7 @@ mod tests {
     #[test]
     fn tracks_lifecycle_staleness_recovery_and_restarts() {
         let (events, _) = broadcast::channel(16);
-        let tracker = HealthTracker::new("dashboard-1".into(), "cpu-1".into(), events);
+        let tracker = HealthTracker::new("cpu-1".into(), events);
         let launched = tracker.state.lock().unwrap().launched;
 
         tracker.check_stale_at(launched + STALE_AFTER);
@@ -263,7 +256,7 @@ mod tests {
     #[test]
     fn truncates_public_errors_without_splitting_utf8() {
         let (events, _) = broadcast::channel(4);
-        let tracker = HealthTracker::new("dashboard-1".into(), "cpu-1".into(), events);
+        let tracker = HealthTracker::new("cpu-1".into(), events);
         let message = "a".repeat(511) + "€";
         tracker.reported_error(&"c".repeat(80), &message);
 

@@ -1,7 +1,6 @@
 //! Read-only user configuration and effective public theme.
 
 use std::{
-    collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
     sync::{Arc, RwLock},
@@ -10,12 +9,11 @@ use std::{
 
 use notify::{RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use tokio::{sync::broadcast, task::JoinHandle};
 use utoipa::ToSchema;
 
 use crate::{
-    event::{DashboardError, DashboardEvent},
+    event::{RuntimeErrorData, RuntimeEvent},
     instance::InstanceManager,
 };
 
@@ -23,23 +21,6 @@ use crate::{
 #[serde(default, deny_unknown_fields)]
 pub struct UserConfiguration {
     pub theme: ThemeOverrides,
-    pub dashboard: DashboardConfiguration,
-}
-
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct DashboardConfiguration {
-    pub initial_widgets: Vec<InitialWidget>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct InitialWidget {
-    pub widget: String,
-    pub variant: String,
-    pub position: [u32; 2],
-    #[serde(default)]
-    pub options: BTreeMap<String, Value>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -243,7 +224,7 @@ pub fn watch(
                             themes.replace(theme.clone());
                             if changed || had_error {
                                 tracing::info!(path = %path.display(), "reloaded user theme");
-                                instances.publish(DashboardEvent::ThemeUpdated {
+                                instances.publish(RuntimeEvent::ThemeUpdated {
                                     theme: Box::new(theme),
                                 });
                             }
@@ -270,8 +251,8 @@ fn nearest_watch_root(path: &Path) -> PathBuf {
 }
 
 fn publish_error(instances: &InstanceManager, message: String) {
-    instances.publish(DashboardEvent::ConfigurationError {
-        error: DashboardError {
+    instances.publish(RuntimeEvent::ConfigurationError {
+        error: RuntimeErrorData {
             code: "invalid_configuration".into(),
             message,
         },
@@ -325,11 +306,11 @@ mod tests {
         ));
         let configuration = load(&path).unwrap();
         assert_eq!(configuration.theme.effective().unwrap(), Theme::default());
-        assert!(configuration.dashboard.initial_widgets.is_empty());
+        assert_eq!(configuration.theme.effective().unwrap(), Theme::default());
     }
 
     #[test]
-    fn parses_theme_and_initial_widgets() {
+    fn parses_theme() {
         let configuration: UserConfiguration = toml::from_str(
             r##"
 [theme]
@@ -338,14 +319,6 @@ accent = "#AABBCC"
 [theme.fonts]
 sans = "Iosevka Term"
 mono = "Iosevka Term Mono"
-
-[[dashboard.initial_widgets]]
-widget = "cpu"
-variant = "full"
-position = [1, 2]
-
-[dashboard.initial_widgets.options]
-history_points = 40
 "##,
         )
         .unwrap();
@@ -353,11 +326,6 @@ history_points = 40
         assert_eq!(theme.accent, "#aabbcc");
         assert_eq!(theme.fonts.sans, "Iosevka Term");
         assert_eq!(theme.fonts.mono, "Iosevka Term Mono");
-        assert_eq!(configuration.dashboard.initial_widgets[0].position, [1, 2]);
-        assert_eq!(
-            configuration.dashboard.initial_widgets[0].options["history_points"],
-            Value::from(40)
-        );
     }
 
     #[test]

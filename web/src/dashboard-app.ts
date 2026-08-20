@@ -1,19 +1,30 @@
 import { isWidgetModule, type WidgetFrontend } from "@dashboardd/widget-sdk";
 import { CommandPalette } from "./command-palette";
 import {
-  connectDashboard,
+  connectRuntime,
   type ConnectionStatus,
-  type DashboardConnection,
+  type RuntimeConnection,
 } from "./dashboard";
+import {
+  addPlacement,
+  createDashboard,
+  getDashboard,
+  loadDashboards,
+  materializeDashboard,
+  onDashboardStorageChange,
+  placementIdForRuntime,
+  reconcileRuntime,
+  removePlacement,
+  updateDashboard,
+  type DashboardLink,
+  type Instance,
+} from "./dashboard-store";
 import { WidgetLinkBus } from "./links";
 import { WidgetStateBus } from "./state";
 import {
-  parseDashboard,
-  parseDashboardList,
-  parseInstance,
-  type DashboardLayout,
-  type DashboardLink,
-  type Instance,
+  parseInstanceHealthList,
+  parseTheme,
+  parseWidgetList,
   type InstanceHealth,
   type Theme,
   type WidgetDescriptor,
@@ -21,11 +32,12 @@ import {
   type WidgetVariant,
 } from "./protocol";
 
+type DashboardLayout = { columns: number };
+
 const app = document.querySelector<HTMLElement>("#app")!;
 const route = parseDashboardRoute(window.location.pathname);
 const dashboardId = route?.dashboardId ?? "";
 const dashboardPath = `/d/${encodeURIComponent(dashboardId)}`;
-const apiDashboardPath = `/api/v1/dashboards/${encodeURIComponent(dashboardId)}`;
 
 app.innerHTML = `
   <section class="dashboard-shell">
@@ -233,7 +245,7 @@ let relinkTarget: {
   required: boolean;
 } | null = null;
 let drag: DragState | null = null;
-let connection: DashboardConnection;
+let connection: RuntimeConnection;
 let controlsTimer: number | null = null;
 let keyboardMode: "dashboard" | "widget" = focusedInstanceId
   ? "widget"
@@ -958,6 +970,9 @@ function applySnapshot(
 }
 
 function upsertInstance(instance: Instance): void {
+  const previous = resources.get(instance.id);
+  if (previous && previous.runtime_id !== instance.runtime_id)
+    removeInstance(instance.id);
   resources.set(instance.id, instance);
   const frame = containers.get(instance.id);
   if (frame) applyLayout(frame, instance);
@@ -1042,11 +1057,11 @@ async function mountWidget(instance: Instance): Promise<void> {
     const frontend = module.mount(mount, {
       widgetId: instance.widget_id,
       variantId: instance.variant_id,
-      instanceId: instance.id,
+      instanceId: instance.runtime_id,
       options: instance.options,
       links: linkBus.context(instance.id),
       sharedState: stateBus.context(instance.widget_id),
-      send: (payload) => connection.sendWidget(instance.id, payload),
+      send: (payload) => connection.sendWidget(instance.runtime_id, payload),
     });
     if (!resources.has(instance.id)) {
       frontend.destroy();
@@ -1496,39 +1511,27 @@ async function saveLink(): Promise<void> {
   if (!target || (target.required && !linkSourceElement.value)) return;
   confirmLinkButton.disabled = true;
   try {
-    const url = `${apiDashboardPath}/links/${encodeURIComponent(target.instanceId)}/${encodeURIComponent(target.input)}`;
-    if (!linkSourceElement.value) {
-      const linked = linkBus
-        .list()
-        .some(
-          (link) =>
-            link.target_instance_id === target.instanceId &&
-            link.target_port === target.input,
-        );
-      if (!linked) {
-        linkDialog.close();
-        renderCanvas();
-        return;
-      }
-      const response = await fetch(url, { method: "DELETE" });
-      if (!response.ok)
-        throw new Error(`${response.status} ${response.statusText}`);
-      linkBus.delete(target.instanceId, target.input);
-    } else {
-      const [sourceInstanceId, sourcePort] =
-        linkSourceElement.value.split("\u0000");
-      const response = await fetch(url, {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
+    let updated: DashboardLink | null = null;
+    await updateDashboard(dashboardId, (dashboard) => {
+      dashboard.links = dashboard.links.filter(
+        (link) =>
+          link.target_instance_id !== target.instanceId ||
+          link.target_port !== target.input,
+      );
+      if (linkSourceElement.value) {
+        const [sourceInstanceId, sourcePort] =
+          linkSourceElement.value.split("\u0000");
+        updated = {
           source_instance_id: sourceInstanceId,
           source_port: sourcePort,
-        }),
-      });
-      if (!response.ok)
-        throw new Error(`${response.status} ${response.statusText}`);
-      linkBus.update((await response.json()) as DashboardLink);
-    }
+          target_instance_id: target.instanceId,
+          target_port: target.input,
+        };
+        dashboard.links.push(updated);
+      }
+    });
+    if (updated) linkBus.update(updated);
+    else linkBus.delete(target.instanceId, target.input);
     linkDialog.close();
     renderCanvas();
   } catch (error) {
@@ -1648,10 +1651,27 @@ function isWithinBounds(
   column: number,
   row: number,
 ): boolean {
+  return layoutWithinBounds({ ...instance.layout, column, row });
+}
+
+function layoutWithinBounds(layout: Instance["layout"]): boolean {
   return (
-    column >= 0 &&
-    row >= 0 &&
-    column + instance.layout.width <= dashboardLayout.columns
+    layout.column >= 0 &&
+    layout.row >= 0 &&
+    layout.column + layout.width <= dashboardLayout.columns &&
+    layout.row + layout.height <= 24
+  );
+}
+
+function layoutsOverlap(
+  left: Instance["layout"],
+  right: Instance["layout"],
+): boolean {
+  return (
+    left.column < right.column + right.width &&
+    left.column + left.width > right.column &&
+    left.row < right.row + right.height &&
+    left.row + left.height > right.row
   );
 }
 
@@ -1679,22 +1699,29 @@ async function moveInstance(
   if (
     !instance ||
     !isWithinBounds(instance, column, row) ||
-    instanceAt(column, row, instanceId)
+    overlappingInstances(
+      column,
+      row,
+      instance.layout.width,
+      instance.layout.height,
+      instanceId,
+    ).length > 0
   ) {
     announce("That position is unavailable");
     return;
   }
   clearError();
   try {
-    const updated = await apiRequest(
-      `${apiDashboardPath}/instances/${encodeURIComponent(instanceId)}`,
-      {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ position: { column, row } }),
-      },
-    );
-    if (updated) upsertInstance(updated);
+    await updateDashboard(dashboardId, (dashboard) => {
+      const placement = dashboard.placements.find(
+        ({ id }) => id === instanceId,
+      );
+      if (!placement) throw new Error("widget placement was not found");
+      placement.position = { column, row };
+    });
+    instance.layout.column = column;
+    instance.layout.row = row;
+    upsertInstance(instance);
     announce(
       `${descriptors.get(instance.widget_id)?.name ?? "Widget"} moved to column ${column + 1}, row ${row + 1}`,
     );
@@ -1715,24 +1742,53 @@ async function swapInstances(
   if (!source || !target) return;
   clearError();
   try {
-    const response = await fetch(`${apiDashboardPath}/layout/swap`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        source_instance_id: sourceId,
-        target_instance_id: targetId,
-      }),
-    });
-    if (!response.ok) {
-      const body = (await response.json().catch(() => null)) as {
-        error?: { message?: string };
-      } | null;
-      throw new Error(
-        body?.error?.message ?? `${response.status} ${response.statusText}`,
+    const sourceNext = {
+      ...source.layout,
+      column: target.layout.column,
+      row: target.layout.row,
+    };
+    const targetNext = {
+      ...target.layout,
+      column: source.layout.column,
+      row: source.layout.row,
+    };
+    const others = [...resources.values()].filter(
+      ({ id }) => id !== sourceId && id !== targetId,
+    );
+    if (
+      !layoutWithinBounds(sourceNext) ||
+      !layoutWithinBounds(targetNext) ||
+      layoutsOverlap(sourceNext, targetNext) ||
+      others.some(
+        (instance) =>
+          layoutsOverlap(sourceNext, instance.layout) ||
+          layoutsOverlap(targetNext, instance.layout),
+      )
+    )
+      throw new Error("resulting layout is invalid");
+    await updateDashboard(dashboardId, (dashboard) => {
+      const sourcePlacement = dashboard.placements.find(
+        ({ id }) => id === sourceId,
       );
-    }
-    const body = (await response.json()) as { instances: unknown[] };
-    for (const value of body.instances) upsertInstance(parseInstance(value));
+      const targetPlacement = dashboard.placements.find(
+        ({ id }) => id === targetId,
+      );
+      if (!sourcePlacement || !targetPlacement)
+        throw new Error("widget placement was not found");
+      const sourcePosition = sourcePlacement.position;
+      sourcePlacement.position = targetPlacement.position;
+      targetPlacement.position = sourcePosition;
+    });
+    const sourcePosition = {
+      column: source.layout.column,
+      row: source.layout.row,
+    };
+    source.layout.column = target.layout.column;
+    source.layout.row = target.layout.row;
+    target.layout.column = sourcePosition.column;
+    target.layout.row = sourcePosition.row;
+    upsertInstance(source);
+    upsertInstance(target);
     announce(
       `${descriptors.get(source.widget_id)?.name ?? "Widget"} swapped with ${descriptors.get(target.widget_id)?.name ?? "widget"}`,
     );
@@ -2105,21 +2161,40 @@ function showWidgetCatalog(): void {
 
 async function createSelectedWidget(): Promise<void> {
   if (!selectedSlot || !selectedWidget) return;
+  const slot = selectedSlot;
+  const selection = selectedWidget;
   confirmAddButton.disabled = true;
   clearError();
   try {
-    await apiRequest(`${apiDashboardPath}/instances`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        widget_id: selectedWidget.widgetId,
-        variant_id: selectedWidget.variantId,
-        position: selectedSlot,
-        options: selectedWidget.options,
-        links: selectedWidget.links,
-      }),
-    });
+    const descriptor = descriptors.get(selection.widgetId);
+    const variant = descriptor?.variants.find(
+      ({ id }) => id === selection.variantId,
+    );
+    if (!variant) throw new Error("widget variant was not found");
+    const candidate = {
+      ...slot,
+      width: variant.width,
+      height: variant.height,
+    };
+    if (
+      !layoutWithinBounds(candidate) ||
+      [...resources.values()].some((instance) =>
+        layoutsOverlap(candidate, instance.layout),
+      )
+    )
+      throw new Error("layout overlaps another widget placement");
+    await addPlacement(
+      dashboardId,
+      {
+        widget_id: selection.widgetId,
+        variant_id: selection.variantId,
+        position: slot,
+        options: selection.options,
+      },
+      selection.links,
+    );
     addDialog.close();
+    await reconcileDashboard();
   } catch (error) {
     showError(errorMessage(error));
     confirmAddButton.disabled = false;
@@ -2188,7 +2263,9 @@ async function restartSelectedWidget(): Promise<void> {
   restartWidgetButton.textContent = "Restarting...";
   clearError();
   try {
-    await connection.restartWidget(instanceId);
+    const instance = resources.get(instanceId);
+    if (!instance) throw new Error("widget placement was not found");
+    await connection.restartWidget(instance.runtime_id);
     announcementElement.textContent = "Widget backend restarted";
   } catch (error) {
     showError(errorMessage(error));
@@ -2216,10 +2293,8 @@ async function removeSelectedWidget(): Promise<void> {
   confirmRemoveButton.disabled = true;
   clearError();
   try {
-    await apiRequest(
-      `${apiDashboardPath}/instances/${encodeURIComponent(removeInstanceId)}`,
-      { method: "DELETE" },
-    );
+    await removePlacement(dashboardId, removeInstanceId);
+    removeInstance(removeInstanceId);
     removeDialog.close();
   } catch (error) {
     showError(errorMessage(error));
@@ -2275,13 +2350,16 @@ function renderCanvasDimensions(): void {
 async function updateDashboardColumns(columns: number): Promise<void> {
   if (columns < 3 || columns > 24) return;
   try {
-    const response = await fetch(apiDashboardPath, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ columns }),
+    if (
+      columns < dashboardLayout.columns &&
+      [...resources.values()].some(
+        (instance) => instance.layout.column + instance.layout.width > columns,
+      )
+    )
+      throw new Error("dashboard columns would place a widget out of bounds");
+    const dashboard = await updateDashboard(dashboardId, (document) => {
+      document.columns = columns;
     });
-    if (!response.ok) throw await responseError(response);
-    const dashboard = parseDashboard(await response.json());
     dashboardLayout = { columns: dashboard.columns };
     renderCanvas();
     announce(`${dashboard.columns} dashboard columns`);
@@ -2290,21 +2368,9 @@ async function updateDashboardColumns(columns: number): Promise<void> {
   }
 }
 
-async function responseError(response: Response): Promise<Error> {
-  const value = (await response.json().catch(() => null)) as {
-    error?: { message?: string };
-  } | null;
-  return new Error(
-    value?.error?.message ?? `${response.status} ${response.statusText}`,
-  );
-}
-
 async function loadDashboardSwitcher(): Promise<void> {
   try {
-    const response = await fetch("/api/v1/dashboards");
-    if (!response.ok)
-      throw new Error(`${response.status} ${response.statusText}`);
-    const dashboards = parseDashboardList(await response.json()).dashboards;
+    const dashboards = loadDashboards();
     dashboardNames.clear();
     for (const dashboard of dashboards)
       dashboardNames.set(dashboard.id, dashboard.name);
@@ -2350,17 +2416,10 @@ async function switchDashboard(): Promise<void> {
       return;
     }
     try {
-      const response = await fetch("/api/v1/dashboards", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          name,
-          columns: Math.max(3, Math.min(24, Math.round(innerWidth / 160))),
-        }),
-      });
-      if (!response.ok)
-        throw new Error(`${response.status} ${response.statusText}`);
-      const dashboard = parseDashboard(await response.json());
+      const dashboard = await createDashboard(
+        name,
+        Math.max(3, Math.min(24, Math.round(innerWidth / 160))),
+      );
       window.location.assign(`/d/${encodeURIComponent(dashboard.id)}/edit`);
     } catch (error) {
       showError(`Could not create dashboard: ${errorMessage(error)}`);
@@ -2369,23 +2428,6 @@ async function switchDashboard(): Promise<void> {
     return;
   }
   window.location.assign(target);
-}
-
-async function apiRequest(
-  input: string,
-  init: RequestInit,
-): Promise<Instance | null> {
-  const response = await fetch(input, init);
-  if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as {
-      error?: { message?: string };
-    } | null;
-    throw new Error(
-      body?.error?.message ?? `${response.status} ${response.statusText}`,
-    );
-  }
-  if (response.status === 204) return null;
-  return parseInstance(await response.json());
 }
 
 function variantFor(
@@ -2410,52 +2452,98 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-syncRoute(false);
-void loadDashboardSwitcher();
+async function reconcileDashboard(): Promise<void> {
+  console.debug("Reconciling browser-local dashboard");
+  const [themeResponse, widgetsResponse] = await Promise.all([
+    fetch("/api/v1/theme"),
+    fetch("/api/v1/widgets"),
+  ]);
+  if (!themeResponse.ok || !widgetsResponse.ok)
+    throw new Error("could not load runtime resources");
+  const theme = parseTheme(await themeResponse.json());
+  const widgets = parseWidgetList(await widgetsResponse.json()).widgets;
+  const descriptorMap = new Map(widgets.map((widget) => [widget.id, widget]));
+  const snapshot = await reconcileRuntime();
+  const dashboard = snapshot.dashboards.find(({ id }) => id === dashboardId);
+  if (!dashboard) {
+    showError("dashboard was not found");
+    return;
+  }
+  const healthResponse = await fetch("/api/v1/instance-health");
+  if (!healthResponse.ok) throw new Error("could not load instance health");
+  const instances = materializeDashboard(dashboard, snapshot, descriptorMap);
+  const placementByRuntime = new Map(
+    instances.map((instance) => [instance.runtime_id, instance.id]),
+  );
+  const health = parseInstanceHealthList(
+    await healthResponse.json(),
+  ).instances.flatMap((record) => {
+    const placementId = placementByRuntime.get(record.instance_id);
+    return placementId ? [{ ...record, instance_id: placementId }] : [];
+  });
+  applyTheme(theme);
+  applySnapshot(
+    { columns: dashboard.columns },
+    widgets,
+    instances,
+    health,
+    dashboard.links,
+  );
+  await loadDashboardSwitcher();
+}
 
-connection = connectDashboard(dashboardId, {
-  onDashboardsChanged(dashboard, destroyedDashboardId) {
-    if (destroyedDashboardId === dashboardId) window.location.assign("/");
-    else {
-      if (
-        dashboard?.id === dashboardId &&
-        dashboard.columns !== dashboardLayout.columns
-      ) {
-        dashboardLayout = { columns: dashboard.columns };
-        renderCanvasDimensions();
-        renderCanvas();
-      }
-      void loadDashboardSwitcher();
-    }
-  },
+syncRoute(false);
+const removeStorageListener = onDashboardStorageChange(() => {
+  if (!getDashboard(dashboardId)) window.location.assign("/");
+  else
+    void reconcileDashboard().catch((error) => showError(errorMessage(error)));
+});
+
+connection = connectRuntime({
   onStatus: renderStatus,
+  onReconnect: reconcileDashboard,
   onTheme: applyTheme,
   onConfigurationError: showConfigurationError,
-  onSnapshot: applySnapshot,
-  onInstanceCreated: upsertInstance,
-  onInstanceHealth: updateInstanceHealth,
-  onInstanceUpdated: upsertInstance,
-  onInstanceDestroyed: removeInstance,
-  onLinkUpdated(link) {
-    linkBus.update(link);
-    renderCanvas();
+  onInstanceCreated() {
+    // Reconciliation binds only instances requested by this browser store.
   },
-  onLinkDestroyed(targetInstanceId, targetPort) {
-    linkBus.delete(targetInstanceId, targetPort);
-    renderCanvas();
+  onInstanceHealth(health) {
+    const placementId = placementIdForRuntime(health.instance_id);
+    if (placementId && resources.has(placementId))
+      updateInstanceHealth({ ...health, instance_id: placementId });
   },
-  onWidgetUpdate(instanceId, payload) {
-    const frontend = frontends.get(instanceId);
+  onInstanceDestroyed(runtimeId) {
+    const placementId = placementIdForRuntime(runtimeId);
+    if (placementId && resources.has(placementId))
+      void reconcileDashboard().catch((error) =>
+        showError(errorMessage(error)),
+      );
+  },
+  onWidgetUpdate(runtimeId, payload) {
+    const instance = [...resources.values()].find(
+      (candidate) => candidate.runtime_id === runtimeId,
+    );
+    if (!instance) return;
+    const frontend = frontends.get(instance.id);
     if (frontend) frontend.update(payload);
-    else pendingUpdates.set(instanceId, payload);
+    else pendingUpdates.set(instance.id, payload);
   },
   onWidgetStateUpdated(state) {
     stateBus.update(state);
   },
-  onError: showError,
+  onError(runtimeId, message) {
+    if (
+      runtimeId === null ||
+      [...resources.values()].some(
+        (instance) => instance.runtime_id === runtimeId,
+      )
+    )
+      showError(message);
+  },
 });
 
 window.addEventListener("beforeunload", () => {
+  removeStorageListener();
   for (const frontend of frontends.values()) frontend.destroy();
   connection.close();
 });

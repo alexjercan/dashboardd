@@ -94,6 +94,7 @@ impl WidgetConfig {
             .find(|variant| variant.id == variant_id)
     }
 
+    #[cfg(test)]
     pub fn input(&self, variant_id: &str, port_id: &str) -> Option<&WidgetLinkPort> {
         self.descriptor
             .inputs
@@ -101,6 +102,7 @@ impl WidgetConfig {
             .find(|port| port.id == port_id && port.applies_to(variant_id))
     }
 
+    #[cfg(test)]
     pub fn output(&self, variant_id: &str, port_id: &str) -> Option<&WidgetLinkPort> {
         self.descriptor
             .outputs
@@ -143,6 +145,7 @@ impl WidgetConfig {
     }
 }
 
+#[cfg(test)]
 impl WidgetLinkPort {
     fn applies_to(&self, variant_id: &str) -> bool {
         self.variants.is_empty() || self.variants.iter().any(|variant| variant == variant_id)

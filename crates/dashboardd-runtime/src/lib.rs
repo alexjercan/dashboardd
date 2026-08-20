@@ -15,7 +15,7 @@ use thiserror::Error;
 use tokio::{sync::broadcast, task::JoinHandle};
 
 use configuration::ThemeManager;
-use instance::{DashboardLayout, InstanceError, InstanceManager};
+use instance::{InstanceError, InstanceManager};
 use state::StateStore;
 use widget::WidgetsManager;
 
@@ -26,7 +26,7 @@ pub struct RuntimeConfig {
     pub widget_roots: Vec<PathBuf>,
     /// Directory containing the built dashboard web application.
     pub web_dir: PathBuf,
-    /// Durable dashboard composition state file.
+    /// Durable package-wide widget state file.
     pub state_file: PathBuf,
     /// User configuration file watched for updates.
     pub config_file: PathBuf,
@@ -81,7 +81,7 @@ pub struct Runtime {
 }
 
 impl Runtime {
-    /// Discovers widgets, restores persisted state, and starts configuration watching.
+    /// Discovers widgets, restores shared state, and starts configuration watching.
     pub async fn start(config: RuntimeConfig) -> Result<Self, RuntimeError> {
         let (shutdown, _) = broadcast::channel(1);
         let widgets = WidgetsManager::discover(&config.widget_roots)
@@ -94,17 +94,11 @@ impl Runtime {
             .map_err(RuntimeError::Configuration)?;
         let themes = ThemeManager::new(theme);
         let store = Arc::new(StateStore::new(config.state_file.clone()));
-        let instances = InstanceManager::restore(
-            DashboardLayout::default(),
-            widgets.clone(),
-            store,
-            &user_configuration.dashboard.initial_widgets,
-        )
-        .await
-        .map_err(|source| RuntimeError::StateRestore {
-            path: config.state_file,
-            source,
-        })?;
+        let instances =
+            InstanceManager::restore(store).map_err(|source| RuntimeError::StateRestore {
+                path: config.state_file,
+                source,
+            })?;
         let state = AppState {
             widgets,
             instances,
@@ -129,7 +123,7 @@ impl Runtime {
         self.state.widgets.len()
     }
 
-    /// Builds the existing dashboard HTTP API and static-file router.
+    /// Builds the global runtime HTTP API and static-file router.
     pub fn router(&self) -> Router {
         api::build_router(self.state.clone())
     }

@@ -31,6 +31,6 @@ Detailed variants provide manual refresh. Minimal variants show the provider and
 
 ## Links and shared state
 
-Typed links connect compatible widget instances. Link payloads are page-local, reset on reload, and remain independent between browser tabs.
+Typed links connect compatible widget placements in a browser-local Dashboard. Link payloads are page-local and reset on reload.
 
-Package-wide shared state is bounded JSON persisted in `dashboard.json`. It is public widget data and must not contain credentials or filesystem paths.
+Package-wide shared state is bounded JSON persisted in `runtime.json`. It is public widget data and must not contain credentials or filesystem paths.

@@ -38,7 +38,7 @@ nix flake check
 npm run build
 cargo xtask widget prepare --all
 DASHBOARDD_WIDGET_PATH=.build/widgets cargo run -p dashboardd-server --bin dashboardd
-DASHBOARDD_STATE_FILE=/tmp/dashboard.json cargo run -p dashboardd-server --bin dashboardd
+DASHBOARDD_STATE_FILE=/tmp/runtime.json cargo run -p dashboardd-server --bin dashboardd
 RUST_LOG=dashboardd=debug,tower_http=debug cargo run -p dashboardd-server --bin dashboardd
 ```
 

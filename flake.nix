@@ -160,7 +160,7 @@
             ln -s ${./tests/fixtures/external-widget} external-widgets/external-fixture
             export DASHBOARDD_WIDGET_PATH="${bundledWidgets}/share/dashboardd/widgets:$PWD/external-widgets"
             export DASHBOARDD_PORT=17321
-            export DASHBOARDD_STATE_FILE="$TMPDIR/dashboard.json"
+            export DASHBOARDD_STATE_FILE="$TMPDIR/runtime.json"
             export DASHBOARDD_CONFIG_FILE="$TMPDIR/config.toml"
             dashboardd >dashboardd.log 2>&1 &
             pid=$!
