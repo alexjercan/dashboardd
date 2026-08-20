@@ -57,9 +57,20 @@ struct ServiceState {
     next_surface_id: AtomicU64,
     next_request_id: AtomicU64,
     surfaces: Mutex<BTreeMap<String, SurfaceInfo>>,
+    drafts: Mutex<BTreeMap<String, DraftInfo>>,
     socket_path: PathBuf,
     audit: Mutex<AuditLog>,
     runtime: RuntimeHandle,
+}
+
+#[derive(Clone)]
+struct DraftInfo {
+    instance_id: String,
+    widget_id: String,
+    variant_id: String,
+    widget_name: String,
+    frontend_path: PathBuf,
+    event_channel: Option<Channel<Value>>,
 }
 
 #[derive(Clone)]
@@ -91,6 +102,14 @@ pub enum StartError {
     Audit(#[source] io::Error),
     #[error("dashboardd desktop is already running")]
     AlreadyRunning,
+}
+
+#[derive(Serialize)]
+pub struct DraftSnapshot {
+    instance: Instance,
+    widget_name: String,
+    frontend_url: String,
+    theme: Theme,
 }
 
 #[derive(Serialize)]
@@ -140,6 +159,7 @@ impl DesktopService {
                 next_surface_id: AtomicU64::new(1),
                 next_request_id: AtomicU64::new(1),
                 surfaces: Mutex::new(BTreeMap::new()),
+                drafts: Mutex::new(BTreeMap::new()),
                 socket_path: prepared.socket_path.clone(),
                 audit: Mutex::new(prepared.audit.clone()),
                 runtime,
@@ -160,6 +180,143 @@ impl DesktopService {
 
     pub fn widgets(&self) -> Vec<dashboardd_runtime::WidgetDescriptor> {
         self.inner.runtime.widgets()
+    }
+
+    pub async fn prepare_draft(
+        &self,
+        window_label: &str,
+        widget_id: &str,
+        variant_id: &str,
+    ) -> Result<DraftSnapshot, String> {
+        let existing = {
+            self.inner
+                .drafts
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .get(window_label)
+                .cloned()
+        };
+        if let Some(draft) = existing {
+            return self.draft_snapshot(window_label, &draft).await;
+        }
+        let widget = self
+            .inner
+            .runtime
+            .widget(widget_id)
+            .ok_or_else(|| "widget was not found".to_owned())?;
+        widget
+            .variants
+            .iter()
+            .find(|variant| variant.id == variant_id)
+            .ok_or_else(|| "widget variant was not found".to_owned())?;
+        let frontend_path = self
+            .inner
+            .runtime
+            .widget_launch_frontend(widget_id, variant_id)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| "widget variant has no launch frontend".to_owned())?;
+        let instance = self
+            .inner
+            .runtime
+            .create_instance(
+                widget_id,
+                CreateInstanceSpec {
+                    variant_id: variant_id.to_owned(),
+                    options: BTreeMap::new(),
+                    inputs: BTreeMap::new(),
+                },
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+        let draft = DraftInfo {
+            instance_id: instance.id,
+            widget_id: widget_id.to_owned(),
+            variant_id: variant_id.to_owned(),
+            widget_name: widget.name,
+            frontend_path,
+            event_channel: None,
+        };
+        self.inner
+            .drafts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(window_label.to_owned(), draft.clone());
+        self.draft_snapshot(window_label, &draft).await
+    }
+
+    async fn draft_snapshot(
+        &self,
+        window_label: &str,
+        draft: &DraftInfo,
+    ) -> Result<DraftSnapshot, String> {
+        let instance = self
+            .inner
+            .runtime
+            .instance(&draft.instance_id)
+            .await
+            .map_err(|error| error.to_string())?;
+        Ok(DraftSnapshot {
+            instance,
+            widget_name: draft.widget_name.clone(),
+            frontend_url: format!("dashboardd-widget://localhost/{window_label}.js"),
+            theme: self.inner.runtime.theme(),
+        })
+    }
+
+    pub fn subscribe_draft(
+        &self,
+        window_label: &str,
+        channel: Channel<Value>,
+    ) -> Result<(), String> {
+        let mut drafts = self
+            .inner
+            .drafts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let draft = drafts
+            .get_mut(window_label)
+            .ok_or_else(|| "launch draft was not found".to_owned())?;
+        draft.event_channel = Some(channel);
+        Ok(())
+    }
+
+    pub async fn send_draft(&self, window_label: &str, payload: Value) -> Result<(), String> {
+        let instance_id = self
+            .inner
+            .drafts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(window_label)
+            .map(|draft| draft.instance_id.clone())
+            .ok_or_else(|| "launch draft was not found".to_owned())?;
+        self.inner
+            .runtime
+            .send_message(&instance_id, payload)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn cancel_draft(&self, window_label: &str) {
+        let draft = self
+            .inner
+            .drafts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(window_label);
+        if let Some(draft) = draft {
+            let _ = self.inner.runtime.delete_instance(&draft.instance_id).await;
+        }
+    }
+
+    pub fn complete_draft(
+        &self,
+        app: &AppHandle,
+        window_label: &str,
+        inputs: BTreeMap<String, DirectInput>,
+    ) -> Response {
+        let started = Instant::now();
+        let result = complete_draft_surface(app, &self.inner, window_label, inputs);
+        audited_result(&self.inner, "open", started, result).response
     }
 
     pub fn execute(&self, app: &AppHandle, command: Command) -> Response {
@@ -211,6 +368,11 @@ impl DesktopService {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clear();
+        self.inner
+            .drafts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clear();
         remove_socket_if_owned(&self.inner.socket_path);
     }
 
@@ -242,7 +404,15 @@ impl DesktopService {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(surface_id)
-            .map(|surface| surface.frontend_path.clone());
+            .map(|surface| surface.frontend_path.clone())
+            .or_else(|| {
+                self.inner
+                    .drafts
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .get(surface_id)
+                    .map(|draft| draft.frontend_path.clone())
+            });
         let Some(path) = path else {
             return protocol_response(http::StatusCode::NOT_FOUND, b"not found".to_vec());
         };
@@ -522,6 +692,7 @@ fn discover(state: &Arc<ServiceState>) -> CommandResult {
                         "name": variant.name,
                         "width": variant.width,
                         "height": variant.height,
+                        "launch_frontend": variant.launch_frontend,
                         "focus": variant.focus,
                     })
                 })
@@ -562,18 +733,7 @@ fn open_surface(
     if let Err(result) = validate_required_inputs(&widget, &variant_id, &inputs) {
         return result;
     }
-    let runtime_inputs = inputs
-        .into_iter()
-        .map(|(id, input)| {
-            (
-                id,
-                TypedInput {
-                    input_type: input.input_type,
-                    value: input.value,
-                },
-            )
-        })
-        .collect();
+    let runtime_inputs = direct_inputs(inputs);
     let instance = match tauri::async_runtime::block_on(state.runtime.create_instance(
         &widget_id,
         CreateInstanceSpec {
@@ -585,6 +745,80 @@ fn open_surface(
         Ok(instance) => instance,
         Err(error) => return instance_failed(error),
     };
+    create_surface_for_instance(app, state, widget, variant, instance, presentation)
+}
+
+fn complete_draft_surface(
+    app: &AppHandle,
+    state: &Arc<ServiceState>,
+    window_label: &str,
+    inputs: BTreeMap<String, DirectInput>,
+) -> CommandResult {
+    let draft = state
+        .drafts
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(window_label)
+        .cloned();
+    let Some(draft) = draft else {
+        return failed("draft_not_found", "launch draft was not found".into());
+    };
+    let Some(widget) = state.runtime.widget(&draft.widget_id) else {
+        delete_draft(state, window_label, &draft);
+        return failed("widget_not_found", "widget was not found".into());
+    };
+    let Some(variant) = widget
+        .variants
+        .iter()
+        .find(|variant| variant.id == draft.variant_id)
+        .cloned()
+    else {
+        delete_draft(state, window_label, &draft);
+        return failed("variant_not_found", "widget variant was not found".into());
+    };
+    if let Err(result) = validate_required_inputs(&widget, &draft.variant_id, &inputs) {
+        delete_draft(state, window_label, &draft);
+        return result;
+    }
+    let runtime_inputs = direct_inputs(inputs);
+    let instance = match tauri::async_runtime::block_on(
+        state
+            .runtime
+            .set_instance_inputs(&draft.instance_id, runtime_inputs),
+    ) {
+        Ok(instance) => instance,
+        Err(error) => {
+            delete_draft(state, window_label, &draft);
+            return instance_failed(error);
+        }
+    };
+    state
+        .drafts
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .remove(window_label);
+    create_surface_for_instance(app, state, widget, variant, instance, Presentation::Focus)
+}
+
+fn delete_draft(state: &Arc<ServiceState>, window_label: &str, draft: &DraftInfo) {
+    state
+        .drafts
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .remove(window_label);
+    let _ = tauri::async_runtime::block_on(state.runtime.delete_instance(&draft.instance_id));
+}
+
+fn create_surface_for_instance(
+    app: &AppHandle,
+    state: &Arc<ServiceState>,
+    widget: dashboardd_runtime::WidgetDescriptor,
+    variant: dashboardd_runtime::WidgetVariant,
+    instance: Instance,
+    presentation: Presentation,
+) -> CommandResult {
+    let widget_id = widget.id.to_string();
+    let variant_id = variant.id.clone();
     let frontend_path = match state.runtime.widget_frontend(&widget_id, &variant_id) {
         Ok(path) => path,
         Err(error) => {
@@ -827,7 +1061,7 @@ fn close_surface(app: &AppHandle, state: &Arc<ServiceState>, surface_id: &str) -
 }
 
 fn emit_runtime_event(state: &Arc<ServiceState>, event: RuntimeEvent) {
-    let targets = {
+    let mut targets = {
         let surfaces = state
             .surfaces
             .lock()
@@ -863,12 +1097,60 @@ fn emit_runtime_event(state: &Arc<ServiceState>, event: RuntimeEvent) {
             | RuntimeEvent::ConfigurationError { .. } => matching(&|_| true),
         }
     };
+    let draft_targets = {
+        let drafts = state
+            .drafts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        drafts
+            .values()
+            .filter(|draft| match &event {
+                RuntimeEvent::InstanceDestroyed { instance_id }
+                | RuntimeEvent::InstanceInputsUpdated { instance_id, .. }
+                | RuntimeEvent::WidgetUpdate { instance_id, .. } => {
+                    draft.instance_id == *instance_id
+                }
+                RuntimeEvent::InstanceHealthUpdated {
+                    health: InstanceHealth { instance_id, .. },
+                }
+                | RuntimeEvent::InstanceError {
+                    instance_id: Some(instance_id),
+                    ..
+                } => draft.instance_id == *instance_id,
+                RuntimeEvent::InstanceError {
+                    instance_id: None, ..
+                }
+                | RuntimeEvent::ThemeUpdated { .. }
+                | RuntimeEvent::ConfigurationError { .. } => true,
+                RuntimeEvent::InstanceCreated { .. } | RuntimeEvent::WidgetStateUpdated { .. } => {
+                    false
+                }
+            })
+            .filter_map(|draft| draft.event_channel.clone())
+            .collect::<Vec<_>>()
+    };
+    targets.extend(draft_targets);
     let Ok(payload) = serde_json::to_value(event) else {
         return;
     };
     for channel in targets {
         let _ = channel.send(payload.clone());
     }
+}
+
+fn direct_inputs(inputs: BTreeMap<String, DirectInput>) -> BTreeMap<String, TypedInput> {
+    inputs
+        .into_iter()
+        .map(|(id, input)| {
+            (
+                id,
+                TypedInput {
+                    input_type: input.input_type,
+                    value: input.value,
+                },
+            )
+        })
+        .collect()
 }
 
 fn validate_required_inputs(

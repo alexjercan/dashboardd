@@ -53,6 +53,15 @@ header p {
   font-size: 12px;
 }
 
+.custom-launcher {
+  min-width: 0;
+}
+
+.custom-launcher[hidden],
+#launcher-form[hidden] {
+  display: none;
+}
+
 .inputs {
   display: grid;
   gap: 18px;

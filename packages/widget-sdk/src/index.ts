@@ -56,6 +56,38 @@ export interface WidgetFrontend {
   destroy(): void;
 }
 
+/** One completed direct input returned by a widget-owned launch form. */
+export interface WidgetLaunchInput {
+  type: string;
+  value: unknown;
+}
+
+/** Narrow host capabilities supplied to one widget-owned launch form. */
+export interface WidgetLaunchContext {
+  widgetId: string;
+  variantId: string;
+  instanceId: string;
+  options: WidgetOptions;
+  /** Sends widget-owned JSON to the draft backend. */
+  send(payload: unknown): Promise<void>;
+  /** Adopts the draft instance into a normal surface with complete inputs. */
+  complete(inputs: Record<string, WidgetLaunchInput>): Promise<void>;
+  /** Cancels the draft and closes its launch window. */
+  cancel(): Promise<void>;
+}
+
+/** ES module shape loaded for one widget-owned launch form. */
+export interface WidgetLaunchModule {
+  mount(container: HTMLElement, context: WidgetLaunchContext): WidgetFrontend;
+}
+
+/** Checks the runtime shape required from a launch frontend module. */
+export function isWidgetLaunchModule(
+  value: unknown,
+): value is WidgetLaunchModule {
+  return isWidgetModule(value);
+}
+
 /** ES module shape loaded for one installed frontend variant. */
 export interface WidgetModule {
   mount(container: HTMLElement, context: WidgetContext): WidgetFrontend;

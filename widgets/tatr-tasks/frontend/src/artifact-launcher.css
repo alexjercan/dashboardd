@@ -1,0 +1,107 @@
+:host {
+  display: block;
+  color: var(--dashboardd-color-text);
+  font-family: var(--dashboardd-font-sans);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+form {
+  display: grid;
+  gap: 14px;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+}
+
+label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  color: var(--dashboardd-color-text-bright);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+input,
+select,
+button {
+  border: 1px solid var(--dashboardd-color-border);
+  border-radius: 4px;
+  background: var(--dashboardd-color-surface);
+  color: var(--dashboardd-color-text-bright);
+  font: 12px var(--dashboardd-font-sans);
+}
+
+input,
+select {
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 8px;
+}
+
+input:focus,
+select:focus,
+button:focus-visible {
+  border-color: var(--dashboardd-color-accent);
+  outline: 1px solid var(--dashboardd-color-accent);
+}
+
+.task-list {
+  min-height: 150px;
+  padding: 3px;
+}
+
+.hint,
+.error {
+  margin: 0;
+  font-size: 11px;
+}
+
+.hint {
+  color: var(--dashboardd-color-text-muted);
+}
+
+.error {
+  color: var(--dashboardd-color-danger);
+}
+
+.error[hidden] {
+  display: none;
+}
+
+footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+button {
+  min-width: 84px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+button.primary {
+  border-color: var(--dashboardd-color-accent);
+  background: var(--dashboardd-color-accent);
+  color: var(--dashboardd-color-canvas);
+  font-weight: 700;
+}
+
+button:disabled {
+  cursor: wait;
+  opacity: 0.5;
+}
+
+@media (max-width: 480px) {
+  .row {
+    grid-template-columns: 1fr;
+  }
+}

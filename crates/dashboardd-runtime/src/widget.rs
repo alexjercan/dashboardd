@@ -18,6 +18,7 @@ pub struct WidgetVariant {
     pub width: u32,
     pub height: u32,
     pub frontend_url: String,
+    pub launch_frontend: bool,
     pub focus: bool,
 }
 
@@ -83,6 +84,7 @@ pub struct WidgetConfig {
     pub descriptor: WidgetDescriptor,
     pub backend: PathBuf,
     pub frontends: Vec<PathBuf>,
+    pub launch_frontends: Vec<Option<PathBuf>>,
 }
 
 impl WidgetConfig {
@@ -114,6 +116,14 @@ impl WidgetConfig {
             .iter()
             .position(|variant| variant.id == variant_id)
             .map(|index| self.frontends[index].as_path())
+    }
+
+    pub fn launch_frontend(&self, variant_id: &str) -> Option<&Path> {
+        self.descriptor
+            .variants
+            .iter()
+            .position(|variant| variant.id == variant_id)
+            .and_then(|index| self.launch_frontends[index].as_deref())
     }
 
     pub fn normalize_options(
@@ -264,6 +274,7 @@ fn read_config(widget_directory: &Path) -> io::Result<WidgetConfig> {
                         "/widgets/{widget_id}/variants/{}/frontend.js",
                         variant.id
                     ),
+                    launch_frontend: variant.launch_frontend.is_some(),
                     id: variant.id,
                     name: variant.name,
                     width: variant.width,
@@ -277,6 +288,7 @@ fn read_config(widget_directory: &Path) -> io::Result<WidgetConfig> {
         },
         backend: checked.backend,
         frontends: checked.frontends,
+        launch_frontends: checked.launch_frontends,
     })
 }
 
@@ -347,7 +359,7 @@ mod tests {
         fs::write(
             directory.join("widget.json"),
             format!(
-                r#"{{"schema_version":2,"id":"{id}","name":"{id}","description":"Test widget","backend":"backend","variants":[{{"id":"full","name":"Full","width":1,"height":1,"frontend":"full.js","focus":false}}],"options":[],"inputs":[],"outputs":[]}}"#
+                r#"{{"schema_version":3,"id":"{id}","name":"{id}","description":"Test widget","backend":"backend","variants":[{{"id":"full","name":"Full","width":1,"height":1,"frontend":"full.js","focus":false}}],"options":[],"inputs":[],"outputs":[]}}"#
             ),
         )
         .unwrap();
@@ -369,7 +381,7 @@ mod tests {
         fs::create_dir_all(&cpu).unwrap();
         fs::write(
             cpu.join("widget.json"),
-            r#"{"schema_version":2,"id":"cpu","name":"CPU","description":"Processor usage","backend":"backend","variants":[{"id":"full","name":"Full","width":3,"height":3,"frontend":"full.js","focus":true}],"options":[{"id":"root","name":"Root","description":"Project root","variants":["full"],"default":"~/personal","type":"text","multiline":false},{"id":"history_points","name":"History length","description":"Retained samples","variants":["full"],"default":40,"type":"integer","minimum":20,"maximum":120,"step":10}],"inputs":[{"id":"task","name":"Task","type":"task/v1","variants":["full"],"required":true}],"outputs":[{"id":"selection","name":"Selection","type":"task/v1","variants":["full"],"required":false}]}"#,
+            r#"{"schema_version":3,"id":"cpu","name":"CPU","description":"Processor usage","backend":"backend","variants":[{"id":"full","name":"Full","width":3,"height":3,"frontend":"full.js","launch_frontend":"full-launch.js","focus":true}],"options":[{"id":"root","name":"Root","description":"Project root","variants":["full"],"default":"~/personal","type":"text","multiline":false},{"id":"history_points","name":"History length","description":"Retained samples","variants":["full"],"default":40,"type":"integer","minimum":20,"maximum":120,"step":10}],"inputs":[{"id":"task","name":"Task","type":"task/v1","variants":["full"],"required":true}],"outputs":[{"id":"selection","name":"Selection","type":"task/v1","variants":["full"],"required":false}]}"#,
         )
         .unwrap();
         fs::write(cpu.join("backend"), "executable").unwrap();
@@ -379,6 +391,7 @@ mod tests {
             fs::set_permissions(cpu.join("backend"), fs::Permissions::from_mode(0o755)).unwrap();
         }
         fs::write(cpu.join("full.js"), "export function mount() {}").unwrap();
+        fs::write(cpu.join("full-launch.js"), "export function mount() {}").unwrap();
 
         let widgets = WidgetsManager::discover(std::slice::from_ref(&root)).unwrap();
         let config = widgets.get("cpu").unwrap();
@@ -387,11 +400,16 @@ mod tests {
         assert_eq!(config.descriptor.variants[0].id, "full");
         assert_eq!(config.descriptor.variants[0].width, 3);
         assert!(config.descriptor.variants[0].focus);
+        assert!(config.descriptor.variants[0].launch_frontend);
         assert_eq!(
             config.descriptor.variants[0].frontend_url,
             "/widgets/cpu/variants/full/frontend.js"
         );
         assert_eq!(config.frontend("full"), Some(cpu.join("full.js").as_path()));
+        assert_eq!(
+            config.launch_frontend("full"),
+            Some(cpu.join("full-launch.js").as_path())
+        );
         assert!(matches!(
             config.descriptor.options[0].kind,
             WidgetOptionKind::Text { multiline: false }
@@ -498,7 +516,7 @@ mod tests {
         fs::create_dir_all(&cpu).unwrap();
         fs::write(
             cpu.join("widget.json"),
-            r#"{"schema_version":2,"id":"cpu","name":"CPU","description":"Processor usage","backend":"backend","variants":[{"id":"full","name":"Full","width":3,"height":3,"frontend":"full.js","focus":false}],"options":[{"id":"history_points","name":"History","description":"Samples","variants":["full"],"default":40,"type":"integer","minimum":20,"maximum":120,"step":0}],"inputs":[],"outputs":[]}"#,
+            r#"{"schema_version":3,"id":"cpu","name":"CPU","description":"Processor usage","backend":"backend","variants":[{"id":"full","name":"Full","width":3,"height":3,"frontend":"full.js","focus":false}],"options":[{"id":"history_points","name":"History","description":"Samples","variants":["full"],"default":40,"type":"integer","minimum":20,"maximum":120,"step":0}],"inputs":[],"outputs":[]}"#,
         )
         .unwrap();
         fs::write(cpu.join("backend"), "executable").unwrap();

@@ -168,6 +168,40 @@ Completion gate: one generated tray menu opens both direct and prompted variants
 
 Step status: COMPLETE.
 
+### 10. Add widget-owned launch forms
+
+Accepted contract:
+
+- Add an optional per-variant `launch_frontend` bundle entry. The normal frontend renders the opened surface; the launch frontend collects the complete required typed-input map. Variants without one retain the generic raw JSON fallback.
+- A custom launch creates one draft instance using normalized default options and no direct input, then mounts only the validated launch frontend in the scoped launch window. It does not mount another widget variant or expose general runtime, filesystem, shell, or desktop control access.
+- Scope launch IPC and backend events to the invoking window and draft instance. The launch frontend can initialize, subscribe, send backend messages, complete with declared typed inputs, or cancel.
+- On completion, validate exact input IDs and types, update the draft instance, create the normal surface around that same instance, and close the launch window. Do not restart the backend. Cancel, native close, invalid completion, or surface creation failure deletes the draft instance.
+- Add a dedicated Tatr Artifact launch frontend with Project, Worktree, searchable Task, and Artifact controls. The Tatr backend supplies bounded choices using existing root and recursive options. Keep opaque IDs hidden, prefer Primary, select sole choices automatically, sort through existing task order, and default to `TASK.md`.
+- Return no absolute paths. The completed value remains `tatr.task-artifact-reference/v1`; direct `dashboardctl open` remains unchanged. Add no public resolver or query API.
+
+Completion gate: `Open Widget -> Tatr Tasks -> Artifact` opens a compact form, resolves all opaque identity fields from user-visible choices, adopts the draft backend into the resulting Artifact surface, and requires no JSON entry.
+
+Step status: COMPLETE.
+
+## Step 10 implementation notes
+
+- Replaced widget source and runtime manifest schema version 2 with version 3. Added an optional per-variant `launch_frontend`, packaged it as a separate validated asset, exposed only its availability through discovery, and added the launch module contract to the public SDK.
+- Added desktop draft instances, invoking-window-scoped launch subscriptions and backend messages, exact completion validation, same-instance surface adoption, and cleanup for cancel, native close, invalid completion, and failed surface creation. The generic raw JSON path remains unchanged for required-input variants without a launch frontend.
+- Added a Tatr Artifact launch module and bounded backend catalog commands. The form uses display names, prefers Primary, searches tasks in backend order, defaults to `TASK.md`, and submits only the existing opaque `tatr.task-artifact-reference/v1` value.
+
+## Step 10 bugs and fixes
+
+- A draft mutex guard initially survived across an await, making the Tauri command future non-Send. Copied the draft from a short lock scope before awaiting its snapshot.
+- The launch dialog inherited the compact JSON-prompt height and could not fit the structured form. Custom launch frontends now receive a dedicated 680-pixel dialog.
+- The first focused Nix build omitted the new untracked launch source from the Git flake snapshot. Staging the reviewed source restored the complete package input; the package then built successfully.
+- Running widget preparation concurrently with the complete npm suite caused a transient TypeScript resolution race while workspace builds regenerated the SDK output. Sequential verification passes.
+
+## Step 10 verification results
+
+- User playtest confirmed the compact Tatr Artifact form, readable controls, and successful Artifact opening without JSON. The test service intentionally exposed only Tatr Tasks through an isolated widget root; it exited cleanly and removed its socket afterward.
+- Workspace Rust tests and Clippy with warnings denied pass. Formatting, all production frontend builds, contract and SDK tests, Chromium integration, widget preparation, and documentation builds pass.
+- The focused Nix desktop package builds successfully with all eight schema version 3 built-in widget bundles and the packaged Tatr launch frontend.
+
 ## Excluded
 
 - Pi assistant extension and delegated-agent orchestration.

@@ -4,7 +4,7 @@ Widget contracts use independent versions because they change at different rates
 
 ## Source manifest
 
-`schema_version` in `widget.toml` selects the packer input shape. Source version 2 contains built artifact paths and no build-system fields. It is versioned independently from the generated runtime manifest.
+`schema_version` in `widget.toml` selects the packer input shape. Source version 3 contains built normal and optional launch frontend paths and no build-system fields. It is versioned independently from the generated runtime manifest.
 
 ## Runtime manifest
 

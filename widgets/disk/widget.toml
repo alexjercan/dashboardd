@@ -1,4 +1,4 @@
-schema_version = 2
+schema_version = 3
 id = "disk"
 name = "Disk"
 description = "Root filesystem capacity and I/O"

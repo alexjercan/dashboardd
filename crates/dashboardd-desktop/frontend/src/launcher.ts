@@ -1,26 +1,93 @@
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
+import {
+  isWidgetLaunchModule,
+  type WidgetFrontend,
+  type WidgetLaunchInput,
+} from "@dashboardd/widget-sdk";
 import "./launcher.css";
 
 type InputPrompt = { id: string; name: string; type: string };
-type LaunchDialog = { title: string; inputs: InputPrompt[] };
+type Theme = Record<string, string | { sans: string; mono: string }> & {
+  fonts: { sans: string; mono: string };
+};
+type Draft = {
+  instance: {
+    id: string;
+    widget_id: string;
+    variant_id: string;
+    options: Record<string, boolean | number | string>;
+  };
+  widget_name: string;
+  frontend_url: string;
+  theme: Theme;
+};
+type LaunchDialog =
+  | { mode: "json"; title: string; inputs: InputPrompt[] }
+  | { mode: "custom"; title: string; draft: Draft };
+type RuntimeEvent = { kind: string; data: Record<string, unknown> };
 
 const title = required<HTMLElement>("#title");
 const form = required<HTMLFormElement>("#launcher-form");
 const inputs = required<HTMLElement>("#inputs");
+const custom = required<HTMLElement>("#custom-launcher");
 const errorElement = required<HTMLElement>("#error");
 const cancel = required<HTMLButtonElement>("#cancel");
 const open = required<HTMLButtonElement>("#open");
+let frontend: WidgetFrontend | undefined;
+let pendingUpdate: unknown;
+let hasPendingUpdate = false;
 
 async function start(): Promise<void> {
   try {
     const dialog = await invoke<LaunchDialog>("launcher_initialize");
     title.textContent = dialog.title;
     document.title = `${dialog.title} - dashboardd`;
-    for (const prompt of dialog.inputs) inputs.append(inputField(prompt));
-    inputs.querySelector("textarea")?.focus();
+    if (dialog.mode === "custom") await mountCustom(dialog.draft);
+    else mountJson(dialog.inputs);
   } catch (error) {
     showError(message(error));
     open.disabled = true;
+  }
+}
+
+function mountJson(prompts: InputPrompt[]): void {
+  for (const prompt of prompts) inputs.append(inputField(prompt));
+  inputs.querySelector("textarea")?.focus();
+}
+
+async function mountCustom(draft: Draft): Promise<void> {
+  form.hidden = true;
+  custom.hidden = false;
+  applyTheme(draft.theme);
+  const events = new Channel<RuntimeEvent>();
+  events.onmessage = (event) => {
+    if (event.kind === "widget_update") {
+      if (frontend) frontend.update(event.data.payload);
+      else {
+        pendingUpdate = event.data.payload;
+        hasPendingUpdate = true;
+      }
+    }
+  };
+  await invoke("launcher_subscribe", { onEvent: events });
+  const module: unknown = await import(
+    /* webpackIgnore: true */ draft.frontend_url
+  );
+  if (!isWidgetLaunchModule(module)) throw new Error("invalid launch frontend");
+  frontend = module.mount(custom, {
+    widgetId: draft.instance.widget_id,
+    variantId: draft.instance.variant_id,
+    instanceId: draft.instance.id,
+    options: draft.instance.options,
+    send: (payload) => invoke("launcher_send", { payload }),
+    complete: (completedInputs: Record<string, WidgetLaunchInput>) =>
+      invoke("launcher_complete", { inputs: completedInputs }),
+    cancel: () => invoke("launcher_cancel"),
+  });
+  if (hasPendingUpdate) {
+    frontend.update(pendingUpdate);
+    pendingUpdate = undefined;
+    hasPendingUpdate = false;
   }
 }
 
@@ -86,6 +153,24 @@ async function submit(): Promise<void> {
   }
 }
 
+function applyTheme(theme: Theme): void {
+  for (const [name, value] of Object.entries(theme)) {
+    if (name === "fonts") continue;
+    document.documentElement.style.setProperty(
+      `--dashboardd-color-${name.replaceAll("_", "-")}`,
+      value as string,
+    );
+  }
+  document.documentElement.style.setProperty(
+    "--dashboardd-font-sans",
+    `"${theme.fonts.sans}", ui-sans-serif, system-ui, sans-serif`,
+  );
+  document.documentElement.style.setProperty(
+    "--dashboardd-font-mono",
+    `"${theme.fonts.mono}", ui-monospace, monospace`,
+  );
+}
+
 function showError(text: string): void {
   errorElement.textContent = text;
   errorElement.hidden = false;
@@ -106,4 +191,5 @@ function required<T extends Element>(selector: string): T {
   return element;
 }
 
+window.addEventListener("beforeunload", () => frontend?.destroy());
 void start();

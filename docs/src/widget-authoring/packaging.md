@@ -11,12 +11,12 @@ nix build github:alexjercan/dashboardd#dashboardd-widget-bundle
 
 ## Source manifest
 
-Source manifest schema version 2 is the input contract. The machine-readable schema is [`schemas/widget-source-v2.schema.json`](https://github.com/alexjercan/dashboardd/blob/master/schemas/widget-source-v2.schema.json).
+Source manifest schema version 3 is the input contract. The machine-readable schema is [`schemas/widget-source-v3.schema.json`](https://github.com/alexjercan/dashboardd/blob/master/schemas/widget-source-v3.schema.json).
 
 Create `widget.toml` in the widget project:
 
 ```toml
-schema_version = 2
+schema_version = 3
 id = "today"
 name = "Today"
 description = "Daily tasks, habits, and health"
@@ -28,12 +28,13 @@ name = "Summary"
 width = 3
 height = 2
 frontend = "dist/frontend/summary.js"
+launch_frontend = "dist/frontend/summary-launch.js"
 focus = false
 ```
 
-Backend and frontend values are paths to already-built artifacts. Paths are relative to the directory containing `widget.toml`. Absolute paths, empty paths, `.`, and `..` are rejected.
+Backend, frontend, and optional launch frontend values are paths to already-built artifacts. A launch frontend collects required typed inputs before the normal frontend opens. Variants without one use the desktop host's raw JSON fallback. Paths are relative to the directory containing `widget.toml`. Absolute paths, empty paths, `.`, and `..` are rejected.
 
-Options, inputs, and outputs use the same fields as the [runtime manifest](runtime-bundle.md). Source schema version 2 is a breaking replacement for the repository-specific schema version 1. Cargo package names, npm workspace names, and source entry points are not part of the public packaging contract.
+Options, inputs, and outputs use the same fields as the [runtime manifest](runtime-bundle.md). Source schema version 3 is a breaking replacement for the repository-specific schema version 1. Cargo package names, npm workspace names, and source entry points are not part of the public packaging contract.
 
 ## Pack
 
@@ -50,6 +51,7 @@ dist/today/
   widget.json
   bin/today
   frontend/summary.js
+  frontend/summary-launch.js
 ```
 
 Artifact names inside the bundle are stable and independent of source artifact names. The backend receives executable permissions. Manifests and frontends receive non-executable permissions.
@@ -64,7 +66,7 @@ dashboardd-widget check dist/today
 
 The check is static. It:
 
-- Parses runtime manifest schema version 2.
+- Parses runtime manifest schema version 3.
 - Rejects unknown fields and invalid metadata.
 - Validates option defaults and link variant references.
 - Rejects path traversal.

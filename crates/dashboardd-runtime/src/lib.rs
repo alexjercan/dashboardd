@@ -187,6 +187,22 @@ impl RuntimeHandle {
             .ok_or(InstanceError::UnknownVariant)
     }
 
+    /// Returns the validated launch frontend path for one widget variant, when declared.
+    pub fn widget_launch_frontend(
+        &self,
+        widget_id: &str,
+        variant_id: &str,
+    ) -> Result<Option<PathBuf>, InstanceError> {
+        let config = self
+            .widgets
+            .get(widget_id)
+            .ok_or(InstanceError::UnknownWidget)?;
+        config
+            .variant(variant_id)
+            .ok_or(InstanceError::UnknownVariant)?;
+        Ok(config.launch_frontend(variant_id).map(PathBuf::from))
+    }
+
     /// Returns the current effective theme.
     pub fn theme(&self) -> Theme {
         self.themes.current()

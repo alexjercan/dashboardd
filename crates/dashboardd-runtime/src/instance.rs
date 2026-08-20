@@ -721,6 +721,7 @@ mod tests {
                     width: 1,
                     height: 1,
                     frontend_url: "/fixture.js".into(),
+                    launch_frontend: false,
                     focus: false,
                 }],
                 options: vec![],
@@ -735,6 +736,7 @@ mod tests {
             },
             backend: "backend".into(),
             frontends: vec!["fixture.js".into()],
+            launch_frontends: vec![None],
         };
         let input = TypedInput {
             input_type: "fixture.message/v1".into(),

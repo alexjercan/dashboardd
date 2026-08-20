@@ -17,6 +17,10 @@ fn packs_and_checks_a_standalone_bundle() {
         Path::new("frontend/summary.js")
     );
     assert_eq!(
+        checked.manifest.variants[0].launch_frontend.as_deref(),
+        Some(Path::new("frontend/summary-launch.js"))
+    );
+    assert_eq!(
         fs::read_to_string(&checked.backend).unwrap(),
         "#!/bin/sh\nexit 0\n"
     );
@@ -54,7 +58,12 @@ fn produces_deterministic_bundle_contents() {
     pack(&fixture.manifest, &first).unwrap();
     pack(&fixture.manifest, &second).unwrap();
 
-    for relative in ["widget.json", "bin/example", "frontend/summary.js"] {
+    for relative in [
+        "widget.json",
+        "bin/example",
+        "frontend/summary.js",
+        "frontend/summary-launch.js",
+    ] {
         assert_eq!(
             fs::read(first.join(relative)).unwrap(),
             fs::read(second.join(relative)).unwrap()
@@ -180,10 +189,15 @@ impl Fixture {
             "export function mount() {}\n",
         )
         .unwrap();
+        fs::write(
+            project.join("dist/summary-launch.js"),
+            "export function mount() {}\n",
+        )
+        .unwrap();
         let manifest = project.join("widget.toml");
         fs::write(
             &manifest,
-            r#"schema_version = 2
+            r#"schema_version = 3
 id = "example"
 name = "Example"
 description = "External widget fixture"
@@ -195,6 +209,7 @@ name = "Summary"
 width = 3
 height = 2
 frontend = "dist/summary.js"
+launch_frontend = "dist/summary-launch.js"
 focus = false
 "#,
         )

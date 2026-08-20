@@ -1,4 +1,4 @@
-schema_version = 2
+schema_version = 3
 id = "codex-usage"
 name = "Codex Usage"
 description = "Weekly Codex subscription limit"

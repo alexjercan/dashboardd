@@ -18,7 +18,7 @@ use tauri::{
     tray::TrayIconBuilder,
 };
 
-use crate::service::DesktopService;
+use crate::service::{DesktopService, DraftSnapshot};
 
 #[derive(Clone)]
 pub struct LauncherService {
@@ -37,6 +37,7 @@ struct LaunchSpec {
     widget_id: String,
     variant_id: String,
     prompts: Vec<InputPrompt>,
+    custom: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -48,9 +49,16 @@ pub struct InputPrompt {
 }
 
 #[derive(Serialize)]
-pub struct LaunchDialog {
-    title: String,
-    inputs: Vec<InputPrompt>,
+#[serde(tag = "mode", rename_all = "snake_case")]
+pub enum LaunchDialog {
+    Json {
+        title: String,
+        inputs: Vec<InputPrompt>,
+    },
+    Custom {
+        title: String,
+        draft: Box<DraftSnapshot>,
+    },
 }
 
 impl LauncherService {
@@ -66,6 +74,7 @@ impl LauncherService {
                         widget_id: widget.id.to_string(),
                         variant_id: variant.id.clone(),
                         prompts: required_prompts(widget, &variant.id),
+                        custom: variant.launch_frontend,
                     },
                 );
                 action_index += 1;
@@ -127,7 +136,7 @@ impl LauncherService {
                             eprintln!("dashboardd-desktop: tray launch failed: {}", error.message);
                         }
                     });
-                } else if let Err(error) = launchers.open_dialog(app, spec) {
+                } else if let Err(error) = launchers.open_dialog(app, desktop.clone(), spec) {
                     eprintln!("dashboardd-desktop: cannot open launch dialog: {error}");
                 }
             })
@@ -135,7 +144,12 @@ impl LauncherService {
         Ok(())
     }
 
-    fn open_dialog(&self, app: &AppHandle, spec: LaunchSpec) -> Result<(), String> {
+    fn open_dialog(
+        &self,
+        app: &AppHandle,
+        desktop: DesktopService,
+        spec: LaunchSpec,
+    ) -> Result<(), String> {
         let label = format!(
             "launcher-{}",
             self.inner.next_dialog_id.fetch_add(1, Ordering::Relaxed)
@@ -145,7 +159,11 @@ impl LauncherService {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(label.clone(), spec.clone());
-        let height = (190.0 + spec.prompts.len() as f64 * 150.0).min(760.0);
+        let height = if spec.custom {
+            680.0
+        } else {
+            (190.0 + spec.prompts.len() as f64 * 150.0).min(760.0)
+        };
         let window =
             WebviewWindowBuilder::new(app, &label, WebviewUrl::App("launcher.html".into()))
                 .title(&spec.title)
@@ -165,6 +183,11 @@ impl LauncherService {
         window.on_window_event(move |event| {
             if matches!(event, tauri::WindowEvent::Destroyed) {
                 launchers.remove_dialog(&label);
+                let desktop = desktop.clone();
+                let label = label.clone();
+                tauri::async_runtime::spawn(async move {
+                    desktop.cancel_draft(&label).await;
+                });
             }
         });
         Ok(())
@@ -180,9 +203,10 @@ impl LauncherService {
 }
 
 #[tauri::command]
-pub fn launcher_initialize(
+pub async fn launcher_initialize(
     window: WebviewWindow,
     launchers: State<'_, LauncherService>,
+    desktop: State<'_, DesktopService>,
 ) -> Result<LaunchDialog, String> {
     let spec = launchers
         .inner
@@ -192,10 +216,61 @@ pub fn launcher_initialize(
         .get(window.label())
         .cloned()
         .ok_or_else(|| "launch dialog was not found".to_owned())?;
-    Ok(LaunchDialog {
-        title: spec.title,
-        inputs: spec.prompts,
-    })
+    if spec.custom {
+        let draft = desktop
+            .prepare_draft(window.label(), &spec.widget_id, &spec.variant_id)
+            .await?;
+        Ok(LaunchDialog::Custom {
+            title: spec.title,
+            draft: Box::new(draft),
+        })
+    } else {
+        Ok(LaunchDialog::Json {
+            title: spec.title,
+            inputs: spec.prompts,
+        })
+    }
+}
+
+#[tauri::command]
+pub fn launcher_subscribe(
+    window: WebviewWindow,
+    desktop: State<'_, DesktopService>,
+    on_event: tauri::ipc::Channel<Value>,
+) -> Result<(), String> {
+    desktop.subscribe_draft(window.label(), on_event)
+}
+
+#[tauri::command]
+pub async fn launcher_send(
+    window: WebviewWindow,
+    desktop: State<'_, DesktopService>,
+    payload: Value,
+) -> Result<(), String> {
+    desktop.send_draft(window.label(), payload).await
+}
+
+#[tauri::command]
+pub async fn launcher_complete(
+    window: WebviewWindow,
+    inputs: BTreeMap<String, DirectInput>,
+    launchers: State<'_, LauncherService>,
+    desktop: State<'_, DesktopService>,
+) -> Result<(), String> {
+    let app = window.app_handle().clone();
+    let label = window.label().to_owned();
+    let desktop = desktop.inner().clone();
+    let response =
+        tauri::async_runtime::spawn_blocking(move || desktop.complete_draft(&app, &label, inputs))
+            .await
+            .map_err(|error| error.to_string())?;
+    match response.outcome {
+        Outcome::Ok { .. } => {
+            launchers.remove_dialog(window.label());
+            window.close().map_err(|error| error.to_string())
+        }
+        Outcome::Failed { error } => Err(error.message),
+    }
 }
 
 #[tauri::command]
@@ -305,6 +380,7 @@ mod tests {
                 width: 1,
                 height: 1,
                 frontend_url: String::new(),
+                launch_frontend: true,
                 focus: true,
             }],
             options: vec![],
@@ -320,5 +396,6 @@ mod tests {
         let service = LauncherService::new(&[widget]);
         let action = &service.inner.actions["widget-0"];
         assert_eq!(action.prompts[0].input_type, "artifact/v1");
+        assert!(action.custom);
     }
 }

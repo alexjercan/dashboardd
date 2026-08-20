@@ -9,8 +9,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
-pub const SOURCE_SCHEMA_VERSION: u32 = 2;
-pub const RUNTIME_SCHEMA_VERSION: u32 = 2;
+pub const SOURCE_SCHEMA_VERSION: u32 = 3;
+pub const RUNTIME_SCHEMA_VERSION: u32 = 3;
 
 #[derive(Debug, Error)]
 pub enum WidgetPackageError {
@@ -59,6 +59,8 @@ pub struct SourceVariant {
     pub width: u32,
     pub height: u32,
     pub frontend: PathBuf,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launch_frontend: Option<PathBuf>,
     #[serde(default)]
     pub focus: bool,
 }
@@ -83,6 +85,8 @@ pub struct RuntimeVariant {
     pub width: u32,
     pub height: u32,
     pub frontend: PathBuf,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launch_frontend: Option<PathBuf>,
     pub focus: bool,
 }
 
@@ -136,6 +140,7 @@ pub struct CheckedBundle {
     pub manifest: RuntimeManifest,
     pub backend: PathBuf,
     pub frontends: Vec<PathBuf>,
+    pub launch_frontends: Vec<Option<PathBuf>>,
 }
 
 pub fn read_source_manifest(path: &Path) -> Result<SourceManifest, WidgetPackageError> {
@@ -208,11 +213,28 @@ fn check_bundle_at(
         })
         .collect::<Result<Vec<_>, WidgetPackageError>>()?;
 
+    let launch_frontends = manifest
+        .variants
+        .iter()
+        .map(|variant| {
+            variant
+                .launch_frontend
+                .as_ref()
+                .map(|path| {
+                    let frontend = directory.join(path);
+                    require_readable_file(&frontend, "declared launch frontend")?;
+                    Ok(frontend)
+                })
+                .transpose()
+        })
+        .collect::<Result<Vec<_>, WidgetPackageError>>()?;
+
     Ok(CheckedBundle {
         directory: directory.to_path_buf(),
         manifest,
         backend,
         frontends,
+        launch_frontends,
     })
 }
 
@@ -239,6 +261,9 @@ pub fn pack(manifest_path: &Path, output: &Path) -> Result<CheckedBundle, Widget
             &source_directory.join(&variant.frontend),
             "frontend artifact",
         )?;
+        if let Some(frontend) = &variant.launch_frontend {
+            require_readable_file(&source_directory.join(frontend), "launch frontend artifact")?;
+        }
     }
 
     let parent = output.parent().unwrap_or_else(|| Path::new("."));
@@ -286,12 +311,23 @@ fn pack_into(
                 &output.join(&frontend),
                 false,
             )?;
+            let launch_frontend = variant
+                .launch_frontend
+                .as_ref()
+                .map(|source| {
+                    let target =
+                        PathBuf::from("frontend").join(format!("{}-launch.js", variant.id));
+                    copy_file(&source_directory.join(source), &output.join(&target), false)?;
+                    Ok(target)
+                })
+                .transpose()?;
             Ok(RuntimeVariant {
                 id: variant.id.clone(),
                 name: variant.name.clone(),
                 width: variant.width,
                 height: variant.height,
                 frontend,
+                launch_frontend,
                 focus: variant.focus,
             })
         })
@@ -336,6 +372,9 @@ fn validate_source_manifest(
     validate_relative_path(path, "backend", &manifest.backend)?;
     for variant in &manifest.variants {
         validate_relative_path(path, "frontend", &variant.frontend)?;
+        if let Some(frontend) = &variant.launch_frontend {
+            validate_relative_path(path, "launch_frontend", frontend)?;
+        }
     }
     Ok(())
 }
@@ -359,6 +398,9 @@ fn validate_runtime_manifest(
     validate_relative_path(path, "backend", &manifest.backend)?;
     for variant in &manifest.variants {
         validate_relative_path(path, "frontend", &variant.frontend)?;
+        if let Some(frontend) = &variant.launch_frontend {
+            validate_relative_path(path, "launch_frontend", frontend)?;
+        }
     }
     Ok(())
 }

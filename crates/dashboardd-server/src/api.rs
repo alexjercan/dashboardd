@@ -125,6 +125,7 @@ pub struct WidgetVariantSchema {
     pub width: u32,
     pub height: u32,
     pub frontend_url: String,
+    pub launch_frontend: bool,
     pub focus: bool,
 }
 

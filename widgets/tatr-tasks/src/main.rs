@@ -169,6 +169,7 @@ enum Runtime {
     Details {
         instance_id: String,
         settings: Settings,
+        loader: Loader,
         views: HashMap<String, DetailView>,
     },
 }
@@ -225,6 +226,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             (Ok(settings), "details") => runtime = Some(Runtime::Details {
                                 instance_id,
                                 settings,
+                                loader: Loader::default(),
                                 views: HashMap::new(),
                             }),
                             (Ok(_), _) => write_error(&mut stdout, Some(instance_id), "invalid_variant", "unsupported Tatr Tasks variant".into()).await?,
@@ -606,6 +608,71 @@ async fn worktree_name(path: &Path) -> String {
                 .then(|| branch.to_owned())
         })
         .unwrap_or_else(|| "Detached".into())
+}
+
+async fn load_launch_tasks(settings: &Settings, loader: &mut Loader) -> Result<Snapshot, String> {
+    let mut tasks = Vec::new();
+    let mut seen_worktrees = HashSet::new();
+    for candidate in discover_projects(&settings.root, settings.recursive)? {
+        let project = project_name(&settings.root, &candidate);
+        let canonical = match candidate.canonicalize() {
+            Ok(path) => path,
+            Err(_) => continue,
+        };
+        let git = canonical.join(".git").is_dir() || canonical.join(".git").is_file();
+        if !git {
+            let selection = default_project_selection(&project, &canonical);
+            if seen_worktrees.insert(selection.worktree_id.clone()) {
+                tasks.extend(loader.load(settings, Some((&selection, &canonical)))?.tasks);
+            }
+            continue;
+        }
+        let common = run_git(
+            &canonical,
+            &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+        )
+        .await
+        .ok()
+        .and_then(|output| {
+            PathBuf::from(String::from_utf8_lossy(&output).trim())
+                .canonicalize()
+                .ok()
+        });
+        let listing = run_git(&canonical, &["worktree", "list", "--porcelain", "-z"])
+            .await
+            .ok();
+        let (Some(common), Some(listing)) = (common, listing) else {
+            continue;
+        };
+        let project_id = opaque_id("project", &common);
+        for (index, path) in parse_worktree_paths(&listing)
+            .into_iter()
+            .take(MAX_WORKTREES)
+            .enumerate()
+        {
+            let Ok(path) = path.canonicalize() else {
+                continue;
+            };
+            let worktree_id = opaque_id("worktree", &path);
+            if !path.join("tasks").is_dir() || !seen_worktrees.insert(worktree_id.clone()) {
+                continue;
+            }
+            let worktree = if index == 0 {
+                "Primary".into()
+            } else {
+                worktree_name(&path).await
+            };
+            let selection = ProjectSelection {
+                project_id: project_id.clone(),
+                project: project.clone(),
+                worktree_id,
+                worktree,
+            };
+            tasks.extend(loader.load(settings, Some((&selection, &path)))?.tasks);
+        }
+    }
+    sort_tasks(&mut tasks, settings.sort);
+    Ok(Snapshot { tasks })
 }
 
 fn parse_worktree_paths(output: &[u8]) -> Vec<PathBuf> {
@@ -1032,7 +1099,80 @@ async fn handle_command(
         Runtime::Details {
             instance_id,
             settings,
+            loader,
+            ..
+        } if payload.get("command").and_then(Value::as_str) == Some("launch_catalog") => {
+            let response = match load_launch_tasks(settings, loader).await {
+                Ok(snapshot) => serde_json::json!({
+                    "kind": "launch_catalog",
+                    "tasks": snapshot.tasks,
+                }),
+                Err(message) => serde_json::json!({
+                    "kind": "launch_catalog",
+                    "error": {"code": "tasks_unavailable", "message": message},
+                }),
+            };
+            write_message(
+                stdout,
+                WidgetToServer::Update {
+                    instance_id: instance_id.clone(),
+                    payload: response,
+                },
+            )
+            .await?;
+            Ok(true)
+        }
+        Runtime::Details {
+            instance_id,
+            settings,
+            ..
+        } if payload.get("command").and_then(Value::as_str) == Some("launch_artifacts") => {
+            let Some(reference) = parse_artifact_reference(payload) else {
+                return Ok(false);
+            };
+            let identity = serde_json::json!({
+                "project_id": reference.project_id,
+                "worktree_id": reference.worktree_id,
+                "task_id": reference.task_id,
+            });
+            let response = match resolve_artifact_reference(settings, &reference).await {
+                Ok((selection, project_path)) => resolve_task_directory(&project_path, &selection)
+                    .and_then(|directory| list_artifacts(&directory))
+                    .map(|artifacts| {
+                        serde_json::json!({
+                            "kind": "launch_artifacts",
+                            "identity": identity,
+                            "artifacts": artifacts,
+                        })
+                    })
+                    .unwrap_or_else(|message| {
+                        serde_json::json!({
+                            "kind": "launch_artifacts",
+                            "identity": identity,
+                            "error": {"code": "artifacts_unavailable", "message": message},
+                        })
+                    }),
+                Err(message) => serde_json::json!({
+                    "kind": "launch_artifacts",
+                    "identity": identity,
+                    "error": {"code": "artifacts_unavailable", "message": message},
+                }),
+            };
+            write_message(
+                stdout,
+                WidgetToServer::Update {
+                    instance_id: instance_id.clone(),
+                    payload: response,
+                },
+            )
+            .await?;
+            Ok(true)
+        }
+        Runtime::Details {
+            instance_id,
+            settings,
             views,
+            ..
         } if payload.get("command").and_then(Value::as_str) == Some("select_reference") => {
             let Some(view_id) = parse_view_id(payload) else {
                 return Ok(false);
@@ -1498,6 +1638,14 @@ mod tests {
         assert_eq!(resolved_selection.project, "sample");
         assert_eq!(resolved_selection.worktree, "feature/tasks");
         assert_eq!(resolved_selection.task_id, reference.task_id);
+        let launch = load_launch_tasks(&settings, &mut Loader::default())
+            .await
+            .unwrap();
+        assert!(launch.tasks.iter().any(|task| {
+            task.project_id == reference.project_id
+                && task.worktree_id == reference.worktree_id
+                && task.id == reference.task_id
+        }));
         let snapshot = Loader::default()
             .load(&settings, Some((&selection, &resolved)))
             .unwrap();

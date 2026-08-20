@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://alexjercan.github.io/dashboardd/schemas/widget-runtime-v2.schema.json",
-  "title": "dashboardd runtime widget manifest v2",
+  "$id": "https://alexjercan.github.io/dashboardd/schemas/widget-runtime-v3.schema.json",
+  "title": "dashboardd runtime widget manifest v3",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -16,7 +16,7 @@
     "outputs"
   ],
   "properties": {
-    "schema_version": { "const": 2 },
+    "schema_version": { "const": 3 },
     "id": { "$ref": "#/$defs/kebabId" },
     "name": { "$ref": "#/$defs/nonEmptyString" },
     "description": { "$ref": "#/$defs/nonEmptyString" },
@@ -73,6 +73,7 @@
         "width": { "type": "integer", "minimum": 1 },
         "height": { "type": "integer", "minimum": 1 },
         "frontend": { "$ref": "#/$defs/relativePath" },
+        "launch_frontend": { "$ref": "#/$defs/relativePath" },
         "focus": { "type": "boolean" }
       }
     },

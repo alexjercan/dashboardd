@@ -1,4 +1,4 @@
-schema_version = 2
+schema_version = 3
 id = "tatr-tasks"
 name = "Tatr Tasks"
 description = "Read-only tasks across local Tatr projects"
@@ -19,6 +19,7 @@ name = "Artifact"
 width = 3
 height = 3
 frontend = "frontend/dist/details.js"
+launch_frontend = "frontend/dist/artifact-launcher.js"
 focus = true
 
 [[outputs]]

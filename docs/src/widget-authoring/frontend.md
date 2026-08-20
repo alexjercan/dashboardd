@@ -81,6 +81,28 @@ Inputs and outputs are typed in the runtime manifest. A host can supply an input
 
 Direct values use `{ "type": "<manifest-type>", "value": <opaque-json> }`. dashboardd validates the exact type string but leaves the JSON value opaque. Values and dynamic output payloads are public browser data. Do not include secrets or filesystem paths.
 
+## Launch frontends
+
+A variant can declare a second ES module that collects required inputs before a desktop surface exists:
+
+```ts
+export interface WidgetLaunchContext {
+  widgetId: string;
+  variantId: string;
+  instanceId: string;
+  options: Readonly<Record<string, boolean | number | string>>;
+  send(payload: unknown): Promise<void>;
+  complete(
+    inputs: Record<string, { type: string; value: unknown }>,
+  ): Promise<void>;
+  cancel(): Promise<void>;
+}
+```
+
+The launch form uses a draft instance and its normal backend. `complete()` must provide the complete required typed-input map. The host validates it, adopts the same instance into the normal surface, and then destroys the launch frontend. Cancel and native close delete the draft instance. The launch frontend has no normal input, output, shared-state, filesystem, shell, or desktop-control capability.
+
+`mount()` returns the same `WidgetFrontend` lifecycle. Backend updates arrive through `update()`.
+
 ## Shared state
 
 ```ts

@@ -13,7 +13,10 @@ use std::{
 };
 
 use dashboardd_runtime::{Runtime, RuntimeConfig};
-use launcher::{LauncherService, launcher_cancel, launcher_initialize, launcher_submit};
+use launcher::{
+    LauncherService, launcher_cancel, launcher_complete, launcher_initialize, launcher_send,
+    launcher_submit, launcher_subscribe,
+};
 use service::{
     DesktopService, PreparedService, surface_initialize, surface_mutate_state, surface_restart,
     surface_send, surface_subscribe,
@@ -55,6 +58,9 @@ fn run() -> Result<(), Box<dyn Error>> {
             surface_restart,
             surface_mutate_state,
             launcher_initialize,
+            launcher_subscribe,
+            launcher_send,
+            launcher_complete,
             launcher_submit,
             launcher_cancel
         ])

@@ -7,8 +7,8 @@ import { spawn } from "node:child_process";
 import Ajv2020 from "ajv/dist/2020.js";
 
 const root = path.resolve(import.meta.dirname, "..");
-const sourceSchema = json("schemas/widget-source-v2.schema.json");
-const runtimeSchema = json("schemas/widget-runtime-v2.schema.json");
+const sourceSchema = json("schemas/widget-source-v3.schema.json");
+const runtimeSchema = json("schemas/widget-runtime-v3.schema.json");
 const protocolSchema = json("schemas/widget-backend-v1.schema.json");
 const fixtureRoot = path.join(root, "tests/fixtures/external-widget");
 const fixtureManifest = json("tests/fixtures/external-widget/widget.json");

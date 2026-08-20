@@ -1,6 +1,6 @@
 # Runtime bundle
 
-Runtime manifest schema version 2 is the installed widget discovery contract. The machine-readable schema is [`schemas/widget-runtime-v2.schema.json`](https://github.com/alexjercan/dashboardd/blob/master/schemas/widget-runtime-v2.schema.json). [`dashboardd-widget pack`](packaging.md) generates this manifest from a source `widget.toml`.
+Runtime manifest schema version 3 is the installed widget discovery contract. The machine-readable schema is [`schemas/widget-runtime-v3.schema.json`](https://github.com/alexjercan/dashboardd/blob/master/schemas/widget-runtime-v3.schema.json). [`dashboardd-widget pack`](packaging.md) generates this manifest from a source `widget.toml`.
 
 ## Layout
 
@@ -20,7 +20,7 @@ Manifest paths must be relative normal paths. Absolute paths, `..`, `.`, roots, 
 
 ```json
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "id": "today",
   "name": "Today",
   "description": "Daily tasks, habits, and health",
@@ -32,6 +32,7 @@ Manifest paths must be relative normal paths. Absolute paths, `..`, `.`, roots, 
       "width": 3,
       "height": 2,
       "frontend": "frontend/summary.js",
+      "launch_frontend": "frontend/summary-launch.js",
       "focus": false
     }
   ],
