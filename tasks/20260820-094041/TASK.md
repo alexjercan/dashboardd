@@ -1,6 +1,6 @@
 # Build desktop-hosted standalone widget surfaces
 
-- STATUS: IN_PROGRESS
+- STATUS: CLOSED
 - PRIORITY: 100
 - TAGS: desktop, tauri, runtime, widgets, surface, nix
 
