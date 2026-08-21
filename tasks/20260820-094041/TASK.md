@@ -10,7 +10,7 @@ Build the dashboardd-side runtime, standalone surface, and resident Tauri deskto
 
 ## Source design
 
-- Parent research task: `20260818-222337`.
+- Parent research task moved to the Scufris2 repository: `20260818-222337`.
 - Follow its accepted runtime, input, desktop lifecycle, Unix socket, logging, and window semantics.
 - This task implements dashboardd components only. The Pi assistant and delegated-agent orchestrator belong in a separate repository.
 
