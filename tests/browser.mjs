@@ -3,14 +3,17 @@ import {
   closeSync,
   existsSync,
   mkdirSync,
+  mkdtempSync,
   openSync,
   readFileSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
 import net from "node:net";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { chromium } from "playwright-core";
@@ -26,46 +29,51 @@ await verifyBackendHealthProbes();
 
 const dashboardPort = await reservePort();
 const browserPort = await reservePort();
-const stateFile = path.join(artifacts, `dashboard-${process.pid}.json`);
-const configFile = path.join(artifacts, `config-${process.pid}.toml`);
-const tatrRoot = path.join(artifacts, `tatr-${process.pid}`);
-const externalWidgetRoot = path.join(
-  artifacts,
-  `external-widgets-${process.pid}`,
-);
-mkdirSync(externalWidgetRoot, { recursive: true });
-symlinkSync(
-  path.join(root, "tests/fixtures/external-widget"),
-  path.join(externalWidgetRoot, "external-fixture"),
-  "dir",
-);
-writeTatrTask(
-  "sample",
-  "20260814-120000",
-  "Add Tatr widget",
-  "IN_PROGRESS",
-  100,
-  ["widget", "rust"],
-);
-writeTatrTask("tatr", "20260814-110000", "Document filters", "OPEN", 40, [
-  "docs",
-]);
-writeTatrTask("tatr", "20260814-100000", "Old task", "CLOSED", 200, [
-  "archive",
-]);
-writeTatrArtifacts("sample", "20260814-120000");
-writeProjectRepositories();
-writeConfiguration("#123456");
+const runtimeRoot = mkdtempSync(path.join(tmpdir(), "dashboardd-browser-"));
+const stateFile = path.join(runtimeRoot, "dashboard.json");
+const configFile = path.join(runtimeRoot, "config.toml");
+const tatrRoot = path.join(runtimeRoot, "tatr");
+const externalWidgetRoot = path.join(runtimeRoot, "external-widgets");
 const dashboardUrl = `http://127.0.0.1:${dashboardPort}`;
 const baseUrl = `http://127.0.0.1:${browserPort}`;
 const logPath = path.join(artifacts, "dashboardd.log");
-const log = openSync(logPath, "w");
-let dashboardd = startDashboardd();
+let log;
+let dashboardd;
 let browser;
 const pages = [];
 const proxy = networkProxy(browserPort, dashboardPort);
 
 try {
+  assert.equal(
+    isPathWithin(realpathSync(root), realpathSync(runtimeRoot)),
+    false,
+    "runtime fixtures stay outside the repository",
+  );
+  mkdirSync(externalWidgetRoot, { recursive: true });
+  symlinkSync(
+    path.join(root, "tests/fixtures/external-widget"),
+    path.join(externalWidgetRoot, "external-fixture"),
+    "dir",
+  );
+  writeTatrTask(
+    "sample",
+    "20260814-120000",
+    "Add Tatr widget",
+    "IN_PROGRESS",
+    100,
+    ["widget", "rust"],
+  );
+  writeTatrTask("tatr", "20260814-110000", "Document filters", "OPEN", 40, [
+    "docs",
+  ]);
+  writeTatrTask("tatr", "20260814-100000", "Old task", "CLOSED", 200, [
+    "archive",
+  ]);
+  writeTatrArtifacts("sample", "20260814-120000");
+  writeProjectRepositories();
+  writeConfiguration("#123456");
+  log = openSync(logPath, "w");
+  dashboardd = startDashboardd();
   await waitForHealth(dashboardUrl);
   await proxy.start();
   browser = await chromium.launch({
@@ -1966,13 +1974,26 @@ try {
   throw error;
 } finally {
   await browser?.close().catch(() => {});
-  await proxy.stop();
-  await stopRecordedProcess(dashboardd);
-  closeSync(log);
-  if (existsSync(stateFile)) unlinkSync(stateFile);
-  if (existsSync(configFile)) unlinkSync(configFile);
-  rmSync(tatrRoot, { recursive: true, force: true });
-  rmSync(externalWidgetRoot, { recursive: true, force: true });
+  await proxy.stop().catch(() => {});
+  try {
+    if (dashboardd) await stopRecordedProcess(dashboardd);
+  } finally {
+    try {
+      if (log !== undefined) closeSync(log);
+    } finally {
+      rmSync(runtimeRoot, { recursive: true, force: true });
+    }
+  }
+}
+
+function isPathWithin(parent, candidate) {
+  const relative = path.relative(parent, candidate);
+  return (
+    relative === "" ||
+    (!path.isAbsolute(relative) &&
+      relative !== ".." &&
+      !relative.startsWith(`..${path.sep}`))
+  );
 }
 
 async function exerciseUsageCommands(page, widgetId) {
